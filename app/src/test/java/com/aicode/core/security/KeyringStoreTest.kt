@@ -147,10 +147,27 @@ class KeyringStoreTest {
 
     @Test
     fun `ensureActiveKey 幂等 已有密钥时不生成新密钥`() {
+        // 自己先清一遍：密钥环是进程级单例，而上一用例的 apply() 可能晚于本用例的
+        // clear() 落盘，残留会让首次 ensureActiveKey 多生成一把（旧用例曾因此在 CI 闪挂）。
+        clearKeyring(ApplicationProvider.getApplicationContext<android.content.Context>())
+
         val first = KeyringStore.ensureActiveKey()
+        val snapshotAfterFirst = KeyringStore.entries().map { it.id to it.state }
+
         val second = KeyringStore.ensureActiveKey()
-        assertEquals(first.id, second.id)
-        assertEquals(1, KeyringStore.entries().size)
+        val afterSecond = KeyringStore.entries()
+
+        assertEquals("两次调用应返回同一把钥匙", first.id, second.id)
+        // 真正的契约：第二次调用不得新增、退休或改写任何登记。
+        assertEquals(
+            "第二次调用不应改动密钥环",
+            snapshotAfterFirst,
+            afterSecond.map { it.id to it.state }
+        )
+        // id 必须唯一：密文里嵌了 keyId，重复 id 会让「用哪把钥匙」变成不确定。
+        assertEquals("keyId 不允许重复", afterSecond.size, afterSecond.map { it.id }.toSet().size)
+        // 任何时刻只能有一把 active。
+        assertEquals("只能有一把 active 密钥", 1, afterSecond.count { it.isActive })
     }
 
     @Test
