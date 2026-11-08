@@ -736,7 +736,7 @@
     <string name="backup_net_delete_target_confirm">删除备份目标 %1$s？</string>
 
     <!-- Chat Drawer -->
-    <string name="chat_no_sessions_hint">话筒静默</string>
+    <string name="chat_no_sessions_hint">旧话尚未开场</string>
     <string name="chat_search_hint">搜索聊天记录</string>
     <string name="chat_search_no_result">未找到匹配的聊天记录</string>
     <string name="chat_search_clear">清除</string>
@@ -981,7 +981,7 @@
     <string name="container_builtin_badge">内置</string>
     <string name="container_custom_badge">自定义</string>
     <string name="container_ssh_badge">SSH</string>
-    <string name="container_empty">舱室空着</string>
+    <string name="container_empty">容器尚未起航</string>
     <string name="container_empty_desc">添加一个自定义镜像，或恢复内置 Alpine。</string>
     <string name="container_restore_builtin">恢复内置 Alpine</string>
     <string name="container_set_as_default">设为默认容器</string>
@@ -1053,7 +1053,7 @@
 
     <!-- Credential List -->
     <string name="credential_empty_hint">尚未添加凭据，点右上角 + 添加</string>
-    <string name="credential_empty_title">尚未持有凭证</string>
+    <string name="credential_empty_title">钥匙尚未配齐</string>
     <string name="credential_empty_desc">点击右上角 + 添加：GitHub 快捷登录或手动配置访问令牌。配置后推送、拉取代码时会自动完成身份认证</string>
 
     <!-- Credential Add / Quick Login -->
@@ -1337,7 +1337,7 @@
     <string name="mcp_add_header">添加请求头</string>
 
     <!-- MCP Settings -->
-    <string name="mcp_empty">港湾尚无来客</string>
+    <string name="mcp_empty">工具尚未登门</string>
     <string name="mcp_empty_hint">点右上角「+」接入远程 HTTP 或本地 stdio 服务器</string>
     <string name="mcp_disabled">已禁用</string>
     <string name="mcp_not_connected">未连接</string>
@@ -1480,7 +1480,7 @@
     <!-- Custom Prompts -->
     <string name="prompts_title">提示词</string>
     <string name="prompts_sort_long_press">长按可调整顺序</string>
-    <string name="prompts_empty">纸上尚无字句</string>
+    <string name="prompts_empty">规矩尚未立起</string>
     <string name="prompts_source_project">项目</string>
     <string name="prompts_source_global">全局</string>
     <string name="prompts_source_local">本地</string>
@@ -1504,7 +1504,7 @@
     <string name="prompts_disable_builtin_hint">只保留你的片段；需要自己补全全部规则，谨慎开启</string>
 
     <!-- Skills Settings -->
-    <string name="skills_empty">工具架仍空</string>
+    <string name="skills_empty">身手还未施展</string>
     <string name="skills_empty_hint">点右上角「+」新建或导入</string>
     <string name="skills_search_hint">搜索技能名称、描述或正文…</string>
     <string name="skills_search_empty">未找到匹配的技能</string>

@@ -532,19 +532,38 @@ private fun MemoryCard(
     onEdit: () -> Unit,
     onDeleteRequest: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(Radius.xl)
-    val innerShape = RoundedCornerShape(Radius.sm)
-    val iconShape = RoundedCornerShape(Radius.sm)
+    // 卡片几何与渐变一律缓存：展开动画期间列表项逐帧重组，
+    // 每次新建 Brush 都会重建底层 shader（并多叠一层圆角裁剪），肉眼可见地卡。
+    val cardShape = remember { RoundedCornerShape(Radius.xl) }
+    val innerShape = remember { RoundedCornerShape(Radius.sm) }
+    val iconShape = remember { RoundedCornerShape(Radius.sm) }
     // 置顶项的强调色：品牌主色 + 一点透明度当背景用。
     // 浅色模式用 12%（与设计稿 --brand-soft 一致），深色模式用 18%——深色底本来就暗，
     // 同样透明度看不出来。
     val isLight = settingsLightMode()
     val brandSoft = MaterialTheme.colorScheme.primary.copy(alpha = if (isLight) 0.12f else 0.18f)
+    val cardSurface = MaterialTheme.semanticColors.cardSurface
     // 置顶与展开都用品牌色实描边（设计稿 --border-focus），普通条目是中性细边。
     val borderColor = if (expanded || memory.pinned) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.semanticColors.subtleBorder
+    }
+    // 置顶项从左侧品牌淡色渐变到卡片底色（设计稿的 linear-gradient(to right, brand-soft, card-bg 35%)）：
+    // 横向一条淡色扫过卡片头部，一眼认出这条被钉住，又不像整块铺色那样抢眼。
+    // 不给 shape：外层 SwipeToDeleteRow 已按 cardShape 裁剪，再裁一层只是白花开销。
+    val pinnedBackground = remember(memory.pinned, brandSoft, cardSurface) {
+        if (!memory.pinned) {
+            Modifier
+        } else {
+            Modifier.background(
+                Brush.horizontalGradient(
+                    0f to brandSoft,
+                    0.35f to cardSurface,
+                    1f to cardSurface
+                )
+            )
+        }
     }
 
     SwipeToDeleteRow(
@@ -555,22 +574,7 @@ private fun MemoryCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // 置顶项从左侧品牌淡色渐变到卡片底色（设计稿的 linear-gradient(to right, brand-soft, card-bg 35%)）：
-                // 横向一条淡色扫过卡片头部，一眼认出这条被钉住，又不像整块铺色那样抢眼。
-                .then(
-                    if (memory.pinned) {
-                        Modifier.background(
-                            Brush.horizontalGradient(
-                                0f to brandSoft,
-                                0.35f to MaterialTheme.semanticColors.cardSurface,
-                                1f to MaterialTheme.semanticColors.cardSurface
-                            ),
-                            cardShape
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
+                .then(pinnedBackground)
                 .border(1.dp, borderColor, cardShape)
                 .padding(horizontal = Spacing.md, vertical = Spacing.md)
         ) {

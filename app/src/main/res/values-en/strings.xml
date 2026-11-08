@@ -736,7 +736,7 @@
     <string name="backup_net_delete_target_confirm">Delete backup target %1$s?</string>
 
     <!-- Chat Drawer -->
-    <string name="chat_no_sessions_hint">The mic is silent</string>
+    <string name="chat_no_sessions_hint">No old tale begun</string>
     <string name="chat_search_hint">Search chats</string>
     <string name="chat_search_no_result">No matching messages</string>
     <string name="chat_search_clear">Clear</string>
@@ -981,7 +981,7 @@
     <string name="container_builtin_badge">Built-in</string>
     <string name="container_custom_badge">Custom</string>
     <string name="container_ssh_badge">SSH</string>
-    <string name="container_empty">The cabin stands empty</string>
+    <string name="container_empty">The container has not sailed</string>
     <string name="container_empty_desc">Add a custom image, or restore the built-in Alpine.</string>
     <string name="container_restore_builtin">Restore Built-in Alpine</string>
     <string name="container_set_as_default">Set as default container</string>
@@ -1053,7 +1053,7 @@
 
     <!-- Credential List -->
     <string name="credential_empty_hint">No credentials yet, tap + to add</string>
-    <string name="credential_empty_title">No credentials in hand</string>
+    <string name="credential_empty_title">Keys not yet in hand</string>
     <string name="credential_empty_desc">Tap + in the top right to sign in with GitHub or add an access token. AiCode then authenticates pushes and pulls automatically</string>
 
     <!-- Credential Add / Quick Login -->
@@ -1337,7 +1337,7 @@
     <string name="mcp_add_header">Add Header</string>
 
     <!-- MCP Settings -->
-    <string name="mcp_empty">No callers at the harbor yet</string>
+    <string name="mcp_empty">No tools have come aboard</string>
     <string name="mcp_empty_hint">Tap + in the top right to add a remote HTTP or local stdio server</string>
     <string name="mcp_disabled">Disabled</string>
     <string name="mcp_not_connected">Not connected</string>
@@ -1480,7 +1480,7 @@
     <!-- Custom Prompts -->
     <string name="prompts_title">Prompts</string>
     <string name="prompts_sort_long_press">Long-press to reorder</string>
-    <string name="prompts_empty">The page is still blank</string>
+    <string name="prompts_empty">No rules set in stone</string>
     <string name="prompts_source_project">Project</string>
     <string name="prompts_source_global">Global</string>
     <string name="prompts_source_local">Local</string>
@@ -1504,7 +1504,7 @@
     <string name="prompts_disable_builtin_hint">Keep only your own fragments; you must supply every rule yourself</string>
 
     <!-- Skills Settings -->
-    <string name="skills_empty">The tool rack is bare</string>
+    <string name="skills_empty">No craft yet put to use</string>
     <string name="skills_empty_hint">Tap + in the top bar to create or import one.</string>
     <string name="skills_search_hint">Search skill names, descriptions, or content…</string>
     <string name="skills_search_empty">No matching skills found</string>
