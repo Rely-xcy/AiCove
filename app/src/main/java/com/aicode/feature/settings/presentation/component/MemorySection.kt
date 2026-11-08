@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -477,13 +478,15 @@ private fun MemoryQuietTag(text: String) {
     )
 }
 
-/** 「置顶」小标签：品牌色系，与条目标题同色，一眼能看出这条被钉住了。 */
+/** 「置顶」小标签：品牌色系，一眼能看出这条被钉住了。 */
 @Composable
 private fun MemoryPinnedTag() {
+    val isLight = settingsLightMode()
     MemoryMicroTag(
         text = stringResource(R.string.memory_pinned),
         textColor = MaterialTheme.colorScheme.primary,
-        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        // 与设计稿 --brand-soft 一致：浅色 12%、深色 18%。
+        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isLight) 0.12f else 0.18f)
     )
 }
 
@@ -532,11 +535,16 @@ private fun MemoryCard(
     val cardShape = RoundedCornerShape(Radius.xl)
     val innerShape = RoundedCornerShape(Radius.sm)
     val iconShape = RoundedCornerShape(Radius.sm)
-    val borderColor = when {
-        expanded -> MaterialTheme.colorScheme.primary
-        // 置顶只加一层品牌色描边：整卡铺色会把「可点区域」和「选中态」混在一起。
-        memory.pinned -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-        else -> MaterialTheme.semanticColors.subtleBorder
+    // 置顶项的强调色：品牌主色 + 一点透明度当背景用。
+    // 浅色模式用 12%（与设计稿 --brand-soft 一致），深色模式用 18%——深色底本来就暗，
+    // 同样透明度看不出来。
+    val isLight = settingsLightMode()
+    val brandSoft = MaterialTheme.colorScheme.primary.copy(alpha = if (isLight) 0.12f else 0.18f)
+    // 置顶与展开都用品牌色实描边（设计稿 --border-focus），普通条目是中性细边。
+    val borderColor = if (expanded || memory.pinned) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.semanticColors.subtleBorder
     }
 
     SwipeToDeleteRow(
@@ -547,6 +555,22 @@ private fun MemoryCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // 置顶项从左侧品牌淡色渐变到卡片底色（设计稿的 linear-gradient(to right, brand-soft, card-bg 35%)）：
+                // 横向一条淡色扫过卡片头部，一眼认出这条被钉住，又不像整块铺色那样抢眼。
+                .then(
+                    if (memory.pinned) {
+                        Modifier.background(
+                            Brush.horizontalGradient(
+                                0f to brandSoft,
+                                0.35f to MaterialTheme.semanticColors.cardSurface,
+                                1f to MaterialTheme.semanticColors.cardSurface
+                            ),
+                            cardShape
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
                 .border(1.dp, borderColor, cardShape)
                 .padding(horizontal = Spacing.md, vertical = Spacing.md)
         ) {
@@ -554,7 +578,12 @@ private fun MemoryCard(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, iconShape),
+                        // 置顶头像用品牌淡色底 + 品牌色图标（设计稿 .memory-item.pinned .item-type-avatar），
+                        // 跟卡片那道横向渐变呼应。
+                        .background(
+                            if (memory.pinned) brandSoft else MaterialTheme.colorScheme.surfaceVariant,
+                            iconShape
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -584,7 +613,9 @@ private fun MemoryCard(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Medium
                             ),
-                            color = MaterialTheme.colorScheme.primary,
+                            // 标题是正文墨色，不跟主题强调色走：记忆名是内容，不是按钮。
+                            // 强调色留给「置顶」标签与图标。
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
