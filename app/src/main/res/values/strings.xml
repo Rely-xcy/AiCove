@@ -726,7 +726,7 @@
     <string name="backup_net_region">区域</string>
     <string name="backup_net_path_style">路径风格寻址</string>
     <string name="backup_net_remote_list_title">云端备份</string>
-    <string name="backup_net_remote_empty">云端暂无备份</string>
+    <string name="backup_net_remote_empty">云端无信</string>
     <string name="backup_net_remote_restore">恢复</string>
     <string name="backup_net_remote_delete">删除</string>
     <string name="backup_net_remote_delete_confirm">删除云端备份 %1$s？该操作不可撤销。</string>
@@ -736,7 +736,7 @@
     <string name="backup_net_delete_target_confirm">删除备份目标 %1$s？</string>
 
     <!-- Chat Drawer -->
-    <string name="chat_no_sessions_hint">暂无会话</string>
+    <string name="chat_no_sessions_hint">话筒静默</string>
     <string name="chat_search_hint">搜索聊天记录</string>
     <string name="chat_search_no_result">未找到匹配的聊天记录</string>
     <string name="chat_search_clear">清除</string>
@@ -981,7 +981,7 @@
     <string name="container_builtin_badge">内置</string>
     <string name="container_custom_badge">自定义</string>
     <string name="container_ssh_badge">SSH</string>
-    <string name="container_empty">暂无容器与镜像</string>
+    <string name="container_empty">舱室空着</string>
     <string name="container_empty_desc">添加一个自定义镜像，或恢复内置 Alpine。</string>
     <string name="container_restore_builtin">恢复内置 Alpine</string>
     <string name="container_set_as_default">设为默认容器</string>
@@ -1053,7 +1053,7 @@
 
     <!-- Credential List -->
     <string name="credential_empty_hint">尚未添加凭据，点右上角 + 添加</string>
-    <string name="credential_empty_title">暂无 Git 凭据</string>
+    <string name="credential_empty_title">尚未持有凭证</string>
     <string name="credential_empty_desc">点击右上角 + 添加：GitHub 快捷登录或手动配置访问令牌。配置后推送、拉取代码时会自动完成身份认证</string>
 
     <!-- Credential Add / Quick Login -->
@@ -1142,7 +1142,7 @@
     <string name="git_pull">拉取</string>
     <string name="git_push">推送</string>
     <string name="git_loading_branches">正在加载分支列表…</string>
-    <string name="git_no_branches">暂无分支</string>
+    <string name="git_no_branches">枝杈未展</string>
     <string name="git_no_checked_out_branch">未检出分支</string>
     <string name="git_switch_branch">切换分支</string>
     <string name="git_detached_head_warning">切换到标签 %1$s 将进入 detached HEAD 状态——不处于任何分支上，新提交不属于任何分支。确定继续？</string>
@@ -1167,7 +1167,7 @@
     <string name="git_remote">远程</string>
     <string name="git_tags">标签</string>
     <string name="git_new">新增</string>
-    <string name="git_no_commits">暂无提交记录</string>
+    <string name="git_no_commits">落笔未始</string>
     <string name="git_commit_count">提交记录 (%1$s)</string>
     <string name="git_credentials_count">凭据 (%1$d)</string>
     <string name="git_load_more_commits">上拉加载更早提交</string>
@@ -1259,7 +1259,7 @@
     <string name="git_action_stash">储藏改动</string>
     <string name="git_stash_message_hint">储藏说明（可选）</string>
     <string name="git_stash_include_untracked">包含未跟踪文件（-u）</string>
-    <string name="git_stash_empty">暂无储藏记录</string>
+    <string name="git_stash_empty">抽屉空着</string>
     <string name="git_stash_pop">弹出 (Pop)</string>
     <string name="git_stash_apply">应用 (Apply)</string>
     <string name="git_stash_drop">丢弃 (Drop)</string>
@@ -1337,8 +1337,8 @@
     <string name="mcp_add_header">添加请求头</string>
 
     <!-- MCP Settings -->
-    <string name="mcp_empty">还没有配置 MCP 服务器</string>
-    <string name="mcp_empty_hint">点击右上角 + 可以添加远程 HTTP 或本地 stdio 服务器</string>
+    <string name="mcp_empty">港湾尚无来客</string>
+    <string name="mcp_empty_hint">点右上角「+」接入远程 HTTP 或本地 stdio 服务器</string>
     <string name="mcp_disabled">已禁用</string>
     <string name="mcp_not_connected">未连接</string>
     <string name="mcp_connected">已连接</string>
@@ -1480,7 +1480,7 @@
     <!-- Custom Prompts -->
     <string name="prompts_title">提示词</string>
     <string name="prompts_sort_long_press">长按可调整顺序</string>
-    <string name="prompts_empty">暂无可用片段</string>
+    <string name="prompts_empty">纸上尚无字句</string>
     <string name="prompts_source_project">项目</string>
     <string name="prompts_source_global">全局</string>
     <string name="prompts_source_local">本地</string>
@@ -1504,7 +1504,7 @@
     <string name="prompts_disable_builtin_hint">只保留你的片段；需要自己补全全部规则，谨慎开启</string>
 
     <!-- Skills Settings -->
-    <string name="skills_empty">还没有安装技能</string>
+    <string name="skills_empty">工具架仍空</string>
     <string name="skills_empty_hint">点右上角「+」新建或导入</string>
     <string name="skills_search_hint">搜索技能名称、描述或正文…</string>
     <string name="skills_search_empty">未找到匹配的技能</string>
@@ -1557,7 +1557,7 @@
 
     <!-- Subagent Settings -->
     <string name="settings_subagents">子代理</string>
-    <string name="subagents_empty">还没有自定义子代理</string>
+    <string name="subagents_empty">助手尚未到岗</string>
     <string name="subagents_empty_hint">点右上角「+」新建一个，或把 agent 的 .md 定义放进 ~/.aicode/agents/</string>
     <string name="subagents_no_project">当前项目暂无子代理</string>
     <string name="subagents_no_global">暂无全局子代理</string>
@@ -1843,7 +1843,7 @@
     <string name="ssh_host_key_tab_keys">密钥</string>
     <string name="ssh_host_key_tab_fingerprints">指纹</string>
     <string name="ssh_login_key_add">添加密钥</string>
-    <string name="ssh_login_key_empty">暂无已保存的登录密钥</string>
+    <string name="ssh_login_key_empty">门锁未配</string>
     <string name="ssh_login_key_fingerprint_label">公钥指纹</string>
     <string name="ssh_login_key_encrypted">加密密钥（需口令）</string>
     <string name="ssh_login_key_add_method_title">添加登录密钥</string>
@@ -1865,7 +1865,7 @@
     <string name="ssh_host_key_changed_title">SSH 主机密钥已变化</string>
     <string name="ssh_host_key_trust">信任并连接</string>
     <string name="ssh_host_key_reject">拒绝</string>
-    <string name="ssh_host_key_empty">暂无已保存的主机指纹</string>
+    <string name="ssh_host_key_empty">未曾谋面</string>
     <string name="ssh_host_key_fingerprint_value">SHA256 指纹：%1$s</string>
     <string name="ssh_host_key_detail">已保存的服务器主机 SHA256 指纹：\n%1$s</string>
 

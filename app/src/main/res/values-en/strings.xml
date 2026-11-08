@@ -726,7 +726,7 @@
     <string name="backup_net_region">Region</string>
     <string name="backup_net_path_style">Path-style addressing</string>
     <string name="backup_net_remote_list_title">Cloud backups</string>
-    <string name="backup_net_remote_empty">No backups in the cloud</string>
+    <string name="backup_net_remote_empty">No letters in the cloud</string>
     <string name="backup_net_remote_restore">Restore</string>
     <string name="backup_net_remote_delete">Delete</string>
     <string name="backup_net_remote_delete_confirm">Delete cloud backup %1$s? This cannot be undone.</string>
@@ -736,7 +736,7 @@
     <string name="backup_net_delete_target_confirm">Delete backup target %1$s?</string>
 
     <!-- Chat Drawer -->
-    <string name="chat_no_sessions_hint">No sessions yet</string>
+    <string name="chat_no_sessions_hint">The mic is silent</string>
     <string name="chat_search_hint">Search chats</string>
     <string name="chat_search_no_result">No matching messages</string>
     <string name="chat_search_clear">Clear</string>
@@ -981,7 +981,7 @@
     <string name="container_builtin_badge">Built-in</string>
     <string name="container_custom_badge">Custom</string>
     <string name="container_ssh_badge">SSH</string>
-    <string name="container_empty">No containers or images</string>
+    <string name="container_empty">The cabin stands empty</string>
     <string name="container_empty_desc">Add a custom image, or restore the built-in Alpine.</string>
     <string name="container_restore_builtin">Restore Built-in Alpine</string>
     <string name="container_set_as_default">Set as default container</string>
@@ -1053,7 +1053,7 @@
 
     <!-- Credential List -->
     <string name="credential_empty_hint">No credentials yet, tap + to add</string>
-    <string name="credential_empty_title">No Git Credentials</string>
+    <string name="credential_empty_title">No credentials in hand</string>
     <string name="credential_empty_desc">Tap + in the top right to sign in with GitHub or add an access token. AiCode then authenticates pushes and pulls automatically</string>
 
     <!-- Credential Add / Quick Login -->
@@ -1142,7 +1142,7 @@
     <string name="git_pull">Pull</string>
     <string name="git_push">Push</string>
     <string name="git_loading_branches">Loading branch list…</string>
-    <string name="git_no_branches">No branches</string>
+    <string name="git_no_branches">No branches unfurled</string>
     <string name="git_no_checked_out_branch">No branch checked out</string>
     <string name="git_switch_branch">Switch Branch</string>
     <string name="git_detached_head_warning">Switching to tag %1$s will enter detached HEAD state — not on any branch, new commits won\'t belong to any branch. Continue?</string>
@@ -1167,7 +1167,7 @@
     <string name="git_remote">Remote</string>
     <string name="git_tags">Tags</string>
     <string name="git_new">New</string>
-    <string name="git_no_commits">No commits yet</string>
+    <string name="git_no_commits">Not a stroke yet</string>
     <string name="git_commit_count">Commits (%1$s)</string>
     <string name="git_credentials_count">Credentials (%1$d)</string>
     <string name="git_load_more_commits">Pull up to load more commits</string>
@@ -1259,7 +1259,7 @@
     <string name="git_action_stash">Stash Changes</string>
     <string name="git_stash_message_hint">Stash message (optional)</string>
     <string name="git_stash_include_untracked">Include untracked files (-u)</string>
-    <string name="git_stash_empty">No stashes found</string>
+    <string name="git_stash_empty">The drawer is empty</string>
     <string name="git_stash_pop">Pop</string>
     <string name="git_stash_apply">Apply</string>
     <string name="git_stash_drop">Drop</string>
@@ -1337,7 +1337,7 @@
     <string name="mcp_add_header">Add Header</string>
 
     <!-- MCP Settings -->
-    <string name="mcp_empty">No MCP servers configured</string>
+    <string name="mcp_empty">No callers at the harbor yet</string>
     <string name="mcp_empty_hint">Tap + in the top right to add a remote HTTP or local stdio server</string>
     <string name="mcp_disabled">Disabled</string>
     <string name="mcp_not_connected">Not connected</string>
@@ -1480,7 +1480,7 @@
     <!-- Custom Prompts -->
     <string name="prompts_title">Prompts</string>
     <string name="prompts_sort_long_press">Long-press to reorder</string>
-    <string name="prompts_empty">No fragments available</string>
+    <string name="prompts_empty">The page is still blank</string>
     <string name="prompts_source_project">Project</string>
     <string name="prompts_source_global">Global</string>
     <string name="prompts_source_local">Local</string>
@@ -1504,7 +1504,7 @@
     <string name="prompts_disable_builtin_hint">Keep only your own fragments; you must supply every rule yourself</string>
 
     <!-- Skills Settings -->
-    <string name="skills_empty">No skills installed</string>
+    <string name="skills_empty">The tool rack is bare</string>
     <string name="skills_empty_hint">Tap + in the top bar to create or import one.</string>
     <string name="skills_search_hint">Search skill names, descriptions, or content…</string>
     <string name="skills_search_empty">No matching skills found</string>
@@ -1557,7 +1557,7 @@
 
     <!-- Subagent Settings -->
     <string name="settings_subagents">Subagents</string>
-    <string name="subagents_empty">No custom subagents yet</string>
+    <string name="subagents_empty">No assistant has clocked in</string>
     <string name="subagents_empty_hint">Tap + in the top bar to create one, or drop an agent\'s .md definition into ~/.aicode/agents/</string>
     <string name="subagents_no_project">No subagents in this project</string>
     <string name="subagents_no_global">No global subagents</string>
@@ -1843,7 +1843,7 @@
     <string name="ssh_host_key_tab_keys">Keys</string>
     <string name="ssh_host_key_tab_fingerprints">Fingerprints</string>
     <string name="ssh_login_key_add">Add key</string>
-    <string name="ssh_login_key_empty">No saved login keys</string>
+    <string name="ssh_login_key_empty">No key turned</string>
     <string name="ssh_login_key_fingerprint_label">Public key fingerprint</string>
     <string name="ssh_login_key_encrypted">Encrypted (passphrase required)</string>
     <string name="ssh_login_key_add_method_title">Add login key</string>
@@ -1865,7 +1865,7 @@
     <string name="ssh_host_key_changed_title">SSH Host Key Changed</string>
     <string name="ssh_host_key_trust">Trust and connect</string>
     <string name="ssh_host_key_reject">Reject</string>
-    <string name="ssh_host_key_empty">No saved host fingerprints</string>
+    <string name="ssh_host_key_empty">Never met</string>
     <string name="ssh_host_key_fingerprint_value">SHA256 fingerprint: %1$s</string>
     <string name="ssh_host_key_detail">Saved server host SHA256 fingerprint:\n%1$s</string>
 
