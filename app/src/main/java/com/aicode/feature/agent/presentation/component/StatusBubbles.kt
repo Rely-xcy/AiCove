@@ -2,10 +2,8 @@ package com.aicode.feature.agent.presentation.component
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
@@ -789,8 +787,10 @@ internal fun ReasoningBubble(
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+            // 只做绘制期动画（仅 alpha）：思考折叠区在 LazyColumn 的 item 里，
+            // 高度动画会逐帧改 item 高度 → 下方内容整体位移 → 滑动时看到内容被推着走。
+            enter = fadeIn(),
+            exit = fadeOut(),
         ) {
             Column {
                 Spacer(Modifier.height(Spacing.sm))

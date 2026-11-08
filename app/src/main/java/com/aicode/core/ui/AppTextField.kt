@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.aicode.core.theme.Radius
@@ -32,12 +33,18 @@ fun appTextFieldColors(
     isLight: Boolean = MaterialTheme.colorScheme.background.luminance() > 0.5f,
     unfocusedContainerColor: Color = MaterialTheme.semanticColors.cardSurface,
     focusedContainerColor: Color = if (isLight) MaterialTheme.semanticColors.cardSurface
-    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+    /** 无边框：底色与边框都透明，只留文字（用于整屏编辑区这类「无框输入」的场合）。 */
+    borderless: Boolean = false
 ): TextFieldColors {
+    val transparentBorder = Color.Transparent
     return OutlinedTextFieldDefaults.colors(
-        unfocusedBorderColor = if (isLight) MaterialTheme.colorScheme.outlineVariant
-        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = when {
+            borderless -> transparentBorder
+            isLight -> MaterialTheme.colorScheme.outlineVariant
+            else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        },
+        focusedBorderColor = if (borderless) transparentBorder else MaterialTheme.colorScheme.primary,
         unfocusedContainerColor = unfocusedContainerColor,
         focusedContainerColor = focusedContainerColor,
         focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -50,8 +57,11 @@ fun appTextFieldColors(
         // 禁用态沿用未聚焦时的底色：M3 默认把 disabled 容器色置为透明，enabled 一变背景就在有色与透明之间跳一下，
         // 看着就是输入框在闪。禁用语义交给较浅的边框与文字表达。
         disabledContainerColor = unfocusedContainerColor,
-        disabledBorderColor = if (isLight) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        disabledBorderColor = when {
+            borderless -> transparentBorder
+            isLight -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        }
     )
 }
 
@@ -65,6 +75,67 @@ fun dialogTextFieldColors(): TextFieldColors = appTextFieldColors(
     unfocusedContainerColor = Color.Transparent,
     focusedContainerColor = Color.Transparent
 )
+
+/**
+ * 全局统一的基础输入框组件（TextFieldValue 版）：需要自己掌控 selection / 组合区时用它。
+ *
+ * 为何需要这个重载：String 重载在文本被外部改写时只重置 selection，IME 的组合区仍指向旧文本；
+ * 之后长按选词，Compose 会拿越界 offset 去构造 TextSelection.Request，Android 直接抛
+ * IllegalArgumentException。需要外部回写文本的输入框都应走这个重载。
+ */
+@Composable
+fun AppTextField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    label: String? = null,
+    placeholder: String? = null,
+    labelComposable: (@Composable () -> Unit)? = null,
+    placeholderComposable: (@Composable () -> Unit)? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    supportingText: (@Composable () -> Unit)? = null,
+    isError: Boolean = false,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    singleLine: Boolean = true,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    minLines: Int = 1,
+    readOnly: Boolean = false,
+    enabled: Boolean = true,
+    textStyle: TextStyle = MaterialTheme.typography.bodyMedium,
+    shape: Shape = RoundedCornerShape(Radius.mdLarge),
+    colors: TextFieldColors = appTextFieldColors(),
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
+) {
+    val actualLabel: (@Composable () -> Unit)? = labelComposable ?: label?.let { { Text(it) } }
+    val actualPlaceholder: (@Composable () -> Unit)? = placeholderComposable ?: placeholder?.let { { Text(it) } }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = enabled,
+        readOnly = readOnly,
+        textStyle = textStyle,
+        label = actualLabel,
+        placeholder = actualPlaceholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        supportingText = supportingText,
+        isError = isError,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        singleLine = singleLine,
+        maxLines = maxLines,
+        minLines = minLines,
+        interactionSource = interactionSource,
+        shape = shape,
+        colors = colors
+    )
+}
 
 /**
  * 全局统一的基础输入框组件：

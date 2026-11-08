@@ -3,10 +3,8 @@ package com.aicode.feature.agent.presentation.component
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -319,8 +317,10 @@ internal fun ToolMessageBody(
             // 折叠态只保留标题行。「还在跑」由标题行行尾的涟漪场景文案表达，不在这里重复一遍。
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                // 只做绘制期动画（仅 alpha）：这个展开区在 LazyColumn 的 item 里，
+                // 高度动画会逐帧改 item 高度 → 下方内容整体位移 → 滑动时看到内容被推着走。
+                enter = fadeIn(),
+                exit = fadeOut(),
             ) {
                 val preparedArgs by key(message.id, message.toolArgs, running) {
                     produceState<String?>(initialValue = null) {
@@ -343,8 +343,9 @@ internal fun ToolMessageBody(
         } else {
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                // 同上：只淡入淡出，不改高度。
+                enter = fadeIn(),
+                exit = fadeOut(),
             ) {
                 // 详情任务跟随 AnimatedVisibility 的内容生命周期，收起时保留至退出动画结束。
                 val details by key(

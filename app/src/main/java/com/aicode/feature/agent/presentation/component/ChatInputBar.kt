@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,7 +46,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,8 +54,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -69,7 +65,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -82,10 +77,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 import com.aicode.R
 import com.aicode.core.theme.Brand
 import com.aicode.core.theme.Radius
@@ -261,14 +252,9 @@ internal fun ChatInputBar(
     val canSend = hasContent
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showFullScreenInput by remember { mutableStateOf(false) }
-    // TextField 的 String 重载在整串替换时会保留旧 selection 下标（点快捷命令补全时光标会停在中间），
-    // 这里自持 TextFieldValue：外部改值时把光标移到末尾。
-    var inputFieldValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-    LaunchedEffect(value) {
-        if (inputFieldValue.text != value) {
-            inputFieldValue = TextFieldValue(value, TextRange(value.length))
-        }
-    }
+    // 用 TextFieldValue 而非 String 重载：外部改值时只重置 selection，IME 组合区仍指向旧文本，
+    // 长按选词会拿越界 offset 构造 TextSelection.Request 而崩溃（见 rememberSafeTextFieldValueState）。
+    val inputFieldValue = rememberSafeTextFieldValueState(value)
     val showSlashMenu = !isBusy && slashCommands.isNotEmpty() &&
         value.startsWith("/") && !value.contains("\n")
     val filteredCommands = if (showSlashMenu) {
@@ -293,7 +279,7 @@ internal fun ChatInputBar(
         val at = value.lastIndexOf('@')
         if (at >= 0) {
             val newText = value.substring(0, at) + "@" + path + " "
-            inputFieldValue = TextFieldValue(newText, TextRange(newText.length))
+            inputFieldValue.value = TextFieldValue(newText, TextRange(newText.length))
             onValueChange(newText)
         }
     }
@@ -586,9 +572,9 @@ internal fun ChatInputBar(
                     verticalAlignment = Alignment.Top
                 ) {
                     TextField(
-                        value = inputFieldValue,
+                        value = inputFieldValue.value,
                         onValueChange = { new ->
-                            inputFieldValue = new
+                            inputFieldValue.value = new
                             onValueChange(new.text)
                         },
                         modifier = Modifier
@@ -765,101 +751,6 @@ internal fun ChatInputBar(
             placeholder = stringResource(if (isBusy) R.string.chat_queue_hint else R.string.chat_input_placeholder),
             onDismiss = { showFullScreenInput = false }
         )
-    }
-}
-
-/**
- * 全屏输入框：底部输入框被高度上限截断、框内滚动时，点右上角「展开」进入这里，
- * 用整屏编辑同一份草稿（内容实时回写，收起后输入框里就是最新文本）。
- */
-@Composable
-private fun FullScreenInputDialog(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            // 不设则 dialog window 是 WRAP_CONTENT，内容铺不满屏
-            usePlatformDefaultWidth = false,
-            // 不设则内容被系统栏 inset 挤进安全区，底色在状态栏处断开、露出后面的聊天界面
-            decorFitsSystemWindows = false
-        )
-    ) {
-        // dialog 有自己的 window：系统栏图标色要单独按当前主题设置，否则浅色主题下状态栏图标压在浅底上看不见。
-        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
-        val lightBackground = MaterialTheme.colorScheme.background.luminance() > 0.5f
-        SideEffect {
-            dialogWindow?.let { window ->
-                WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = lightBackground
-                    isAppearanceLightNavigationBars = lightBackground
-                }
-            }
-        }
-
-        val imeInset = rememberImeBottomInset()
-        val focusRequester = remember { FocusRequester() }
-        // 打开即聚焦，键盘不停，可以接着往下写。
-        LaunchedEffect(Unit) { focusRequester.requestFocus() }
-
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .padding(bottom = imeInset)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.chat_input_fullscreen_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            FeatherIcons.Minimize,
-                            contentDescription = stringResource(R.string.common_collapse_action),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                TextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .focusRequester(focusRequester),
-                    placeholder = {
-                        Text(
-                            placeholder,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent
-                    )
-                )
-            }
-        }
     }
 }
 
