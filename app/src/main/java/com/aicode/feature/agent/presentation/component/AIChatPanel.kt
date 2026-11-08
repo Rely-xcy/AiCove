@@ -1038,7 +1038,7 @@ fun AIChatPanel(
     val inputBarReservePx = FloatingLayerReserve.rememberReservePx(
         measuredHeightPx = measuredFloatingLayerHeightPx,
         fallbackPx = with(LocalDensity.current) { inputBarBottomReserveDp.toPx().toInt() },
-        gapPx = with(LocalDensity.current) { FLOATING_LAYER_GAP_DP.toPx() }
+        gapPx = with(LocalDensity.current) { FLOATING_LAYER_GAP_DP.toPx().toInt() }
     )
     val markdownCache = remember { MarkdownRenderCache() }
     // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
