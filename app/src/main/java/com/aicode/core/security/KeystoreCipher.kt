@@ -54,11 +54,14 @@ object KeystoreCipher {
 
     // ---------- 字节 ----------
 
+    /**
+     * 加密：只会走密钥环（AICOVEENC2）。
+     *
+     * 不再回退旧 Keystore 路径。那个回退会在「密钥环不可用」时写出只能用设备密钥解的新密文，
+     * 而设备密钥同样会丢，等于批量制造解不开的数据。写不进去宁可直接报错。
+     */
     fun encryptBytes(plain: ByteArray): ByteArray {
-        val (entry, key) = runCatching { KeyringStore.activeKey() }.getOrElse { failure ->
-            FileLogger.w(TAG, "密钥环不可用，退回旧 Keystore 加密", failure)
-            return legacyEncryptBytes(plain)
-        }
+        val (entry, key) = KeyringStore.activeKey()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val iv = cipher.iv
@@ -99,7 +102,11 @@ object KeystoreCipher {
         if (hasMagic(encrypted, LEGACY_MAGIC)) {
             val iv = encrypted.copyOfRange(LEGACY_MAGIC.size, LEGACY_MAGIC.size + IV_LEN)
             val ciphertext = encrypted.copyOfRange(LEGACY_MAGIC.size + IV_LEN, encrypted.size)
-            return gcmDecrypt(legacyKey(), iv, ciphertext)
+            val key = legacyKeyOrNull()
+                ?: throw GeneralSecurityException(
+                    "旧格式密文需要设备密钥 $LEGACY_ALIAS，但 Keystore 里已不存在（被清过或换了设备）"
+                )
+            return gcmDecrypt(key, iv, ciphertext)
         }
         throw GeneralSecurityException("不是加密数据")
     }
@@ -123,11 +130,9 @@ object KeystoreCipher {
     /** 加密字符串；空串原样返回，避免把「未填写」变成非空密文。 */
     fun encryptString(plain: String): String {
         if (plain.isEmpty()) return plain
-        val (entry, key) = runCatching { KeyringStore.activeKey() }.getOrElse { failure ->
-            FileLogger.w(TAG, "密钥环不可用，退回旧 Keystore 加密", failure)
-            return LEGACY_PREFIX + Base64.getEncoder()
-                .encodeToString(legacyEncryptBytes(plain.toByteArray(Charsets.UTF_8)))
-        }
+        // 不再回退 AICODEENC1：那个格式的密钥在设备密钥被清后永久不可恢复，
+        // 继续写它只会给未来制造更多解不开的数据。密钥环不可用就让它失败。
+        val (entry, key) = KeyringStore.activeKey()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val payload = cipher.iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
@@ -173,9 +178,24 @@ object KeystoreCipher {
 
     // ---------- 旧 Keystore 路径 ----------
 
-    private fun legacyKey(): SecretKey = synchronized(legacyLock) {
-        val keyStore = KeyStore.getInstance(LEGACY_PROVIDER).apply { load(null) }
-        (keyStore.getEntry(LEGACY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey ?: run {
+    /**
+     * 只读取旧 Keystore 密钥，**绝不生成**。
+     *
+     * 旧版 `aicode_secret_v1` 是设备绑定密钥，一旦 Keystore 被清，这把钥匙就永久没了。
+     * 之前这里用「取不到就 generateKey()」的写法，于是解密时也会凭空造一把新钥匙，
+     * 拿它去解旧密文必然 AEADBadTagException——用户看到的是「密文损坏」，
+     * 而真正原因是「密钥丢了」，永远查不出原因。现在只读不建。
+     */
+    private fun legacyKeyOrNull(): SecretKey? = synchronized(legacyLock) {
+        runCatching {
+            val keyStore = KeyStore.getInstance(LEGACY_PROVIDER).apply { load(null) }
+            (keyStore.getEntry(LEGACY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+        }.getOrNull()
+    }
+
+    /** 仅为 encryptBytes 使用，decrypt 路径只走 legacyKeyOrNull。 */
+    private fun legacyKeyForEncrypt(): SecretKey = synchronized(legacyLock) {
+        legacyKeyOrNull() ?: run {
             val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, LEGACY_PROVIDER)
             generator.init(
                 KeyGenParameterSpec.Builder(
@@ -193,7 +213,7 @@ object KeystoreCipher {
 
     private fun legacyEncryptBytes(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, legacyKey())
+        cipher.init(Cipher.ENCRYPT_MODE, legacyKeyForEncrypt())
         return LEGACY_MAGIC + cipher.iv + cipher.doFinal(plain)
     }
 }

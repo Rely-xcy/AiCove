@@ -259,7 +259,7 @@ internal object KeyringStore {
 
     private fun wrapWithKeystore(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())
+        cipher.init(Cipher.ENCRYPT_MODE, keystoreKeyOrCreate())
         return cipher.iv + cipher.doFinal(plain)
     }
 
@@ -268,13 +268,21 @@ internal object KeyringStore {
         val iv = payload.copyOfRange(0, IV_LEN)
         val body = payload.copyOfRange(IV_LEN, payload.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, keystoreKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        val key = keystoreKeyOrNull()
+            ?: throw GeneralSecurityException("设备密钥 $KEYSTORE_ALIAS 不存在，无法解开包裹副本")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
         return cipher.doFinal(body)
     }
 
-    private fun keystoreKey(): SecretKey {
+    /** 只读取设备密钥，不创建。解密与状态探测走这条。 */
+    private fun keystoreKeyOrNull(): SecretKey? = runCatching {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        (keyStore.getEntry(KEYSTORE_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+        (keyStore.getEntry(KEYSTORE_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+    }.getOrNull()
+
+    /** 包裹自备密钥：确实需要一把设备密钥时才能建。加密路径才调用。 */
+    private fun keystoreKeyOrCreate(): SecretKey {
+        keystoreKeyOrNull()?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
         generator.init(
             KeyGenParameterSpec.Builder(

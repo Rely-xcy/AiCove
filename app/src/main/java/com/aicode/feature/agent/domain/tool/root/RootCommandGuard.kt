@@ -169,7 +169,12 @@ object RootCommandGuard {
         "/data/local/tmp",
         "/sdcard/download",
         "/storage/emulated/0/download",
-        "/storage/self/primary/download"
+        "/storage/self/primary/download",
+        // 应用自身数据目录：日志、数据库、凭据等，AI 调试需要访问
+        "/data/data/com.aicode",
+        "/data/data/Rely.aicode",
+        "/storage/emulated/0/Android/data/com.aicode",
+        "/storage/emulated/0/Android/data/Rely.aicode"
     )
 
     /** find 里会写文件或执行命令的谓词，一律拒绝。 */
