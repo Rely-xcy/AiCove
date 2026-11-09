@@ -647,7 +647,16 @@ object RootCommandGuard {
     fun check(command: String): Rejection? {
         val normalized = command.replace(Regex("\\s+"), " ").trim()
         if (normalized.isEmpty()) return null
+        // IRIDIS 借鉴：命令过长可能藏恶意 payload，2000 字符是合理上限
+        if (normalized.length > 2000) {
+            return Rejection("拒绝执行：命令过长（${normalized.length} 字符），上限 2000 字符。拆分多步执行。")
+        }
         val lower = normalized.lowercase()
+
+        // IRIDIS 借鉴：`~` 展开会指向用户主目录，可能绕过路径限制
+        if (Regex("(^|[\\s;&|])[^;|&\\s]*~[^;|&\\s]*").containsMatchIn(normalized)) {
+            return Rejection("拒绝执行：命令包含 `~` 用户目录展开，无法静态判定实际路径，已拦截。请用绝对路径。")
+        }
 
         // 1) 递归删除根目录或受保护路径
         if (Regex("(^|[\\s;&|])rm\\s+(-[a-z]*[rf][a-z]*\\s+)+").containsMatchIn(lower)) {
