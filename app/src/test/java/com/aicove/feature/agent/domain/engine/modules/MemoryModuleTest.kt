@@ -6,6 +6,7 @@ import com.aicove.feature.agent.domain.memory.MemoryExtractor
 import com.aicove.feature.agent.domain.memory.MemoryKind
 import com.aicove.feature.agent.domain.memory.MemoryRepository
 import com.aicove.feature.agent.domain.memory.MemoryScope
+import com.aicove.feature.agent.domain.memory.MemoryVerifier
 import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.settings.data.repository.MemorySettingsRepository
 import io.mockk.coEvery
@@ -41,6 +42,8 @@ class MemoryModuleTest {
     ): Harness {
         val repository = mockk<MemoryRepository>(relaxed = true)
         val curator = mockk<MemoryCurator>(relaxed = true)
+        // 校验器（对照当前事实判定记忆是否还成立）：relaxed mock，不 stub 具体行为。
+        val verifier = mockk<MemoryVerifier>(relaxed = true)
         val settings = mockk<MemorySettingsRepository>()
         // 刻意不 stub activeMemoryEnabled()：治理不该读它，真读了这里会报没答案
         coEvery { settings.curationIntervalHours() } returns intervalHours
@@ -51,7 +54,7 @@ class MemoryModuleTest {
         every { repository.listMemories(any()) } returns emptyList()
         // changes 的类型是 SharedFlow，不能用 emptyFlow（那是 Flow）
         every { repository.changes } returns MutableSharedFlow()
-        return Harness(MemoryModule(repository, curator, settings), curator, settings)
+        return Harness(MemoryModule(repository, curator, verifier, settings), curator, settings)
     }
 
     private fun ctx(oneShot: (suspend (String, String) -> String?)?) = EngineContext(

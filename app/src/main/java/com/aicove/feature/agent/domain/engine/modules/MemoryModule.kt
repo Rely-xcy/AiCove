@@ -11,6 +11,7 @@ import com.aicove.feature.agent.domain.memory.MemoryKind
 import com.aicove.feature.agent.domain.memory.MemoryRanker
 import com.aicove.feature.agent.domain.memory.MemoryRepository
 import com.aicove.feature.agent.domain.memory.MemoryScope
+import com.aicove.feature.agent.domain.memory.MemoryVerifier
 import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.settings.data.repository.MemorySettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ import javax.inject.Singleton
 class MemoryModule @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val memoryCurator: MemoryCurator,
+    private val memoryVerifier: MemoryVerifier,
     private val memorySettings: MemorySettingsRepository
 ) : EngineModule {
 
@@ -267,9 +269,20 @@ class MemoryModule @Inject constructor(
                     { userPrompt -> oneShot(CURATOR_PROMPT_FILE, userPrompt) }
                 }
             )
+            // 校验：对照当前项目文件看存量记忆是否还成立。
+            // 治理只能「按使用频率」判死，不能判「内容对不对」——一条从一开始就写错的记忆
+            // 命中再多次也会一直注入到后续会话里。校验补上这个缺口。
+            val verified = memoryVerifier.verify(
+                projectRoot = ctx.projectRoot,
+                candidates = result.survivors,
+                complete = complete?.let { oneShot ->
+                    { userPrompt -> oneShot(VERIFY_PROMPT_FILE, userPrompt) }
+                }
+            )
+            val rewrites = memoryVerifier.applyRewrites(verified, ctx.projectRoot)
             // 无论有没有改动都记时间戳：没改动也说明这轮看过了，不该每轮重看
             memorySettings.setLastCuratedAt(System.currentTimeMillis())
-            if (result.changed || recovered > 0) {
+            if (result.changed || recovered > 0 || rewrites > 0) {
                 listSnapshotByKey.keys
                     .filter { it.sessionId == ctx.sessionId && it.projectRoot == ctx.projectRoot }
                     .forEach { listSnapshotByKey.remove(it) }
@@ -305,6 +318,9 @@ class MemoryModule @Inject constructor(
 
         /** 治理提示词：只发名称+描述，不发正文（省钱）。 */
         const val CURATOR_PROMPT_FILE = "agent/memory-curator.md"
+
+        /** 校验用的系统提示词：判定一条记忆是否还成立。 */
+        const val VERIFY_PROMPT_FILE = "agent/memory-verify.md"
 
         /**
          * 主动记忆规则（A 路）：「主动记忆」开关打开时注入，让主模型在对话中自己把稳定结论存下来。

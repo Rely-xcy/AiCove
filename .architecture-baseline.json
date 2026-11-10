@@ -35,7 +35,7 @@
     "feature/agent -> feature/credentials": 1,
     "feature/agent -> feature/settings": 131,
     "feature/agent -> feature/terminal": 8,
-    "feature/agent -> feature/workspace": 82,
+    "feature/agent -> feature/workspace": 83,
     "feature/backup -> feature/agent": 23,
     "feature/backup -> feature/settings": 25,
     "feature/credentials -> feature/agent": 3,
