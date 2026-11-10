@@ -274,7 +274,7 @@ class MemoryModule @Inject constructor(
             // 命中再多次也会一直注入到后续会话里。校验补上这个缺口。
             val verified = memoryVerifier.verify(
                 projectRoot = ctx.projectRoot,
-                candidates = result.survivors,
+                candidates = result.remaining,
                 complete = complete?.let { oneShot ->
                     { userPrompt -> oneShot(VERIFY_PROMPT_FILE, userPrompt) }
                 }

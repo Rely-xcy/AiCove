@@ -30,7 +30,7 @@ class MemoryCurator @Inject constructor(
          * 校验环节要用：它需要知道「哪些记忆还活着」才能逐条对照当前事实。
          * 治理没跑（条目太少）时为空列表。
          */
-        val survivors: List<Memory> = emptyList()
+        val remaining: List<Memory> = emptyList()
     ) {
         val changed: Boolean get() = archived > 0 || merged > 0
     }
@@ -118,10 +118,11 @@ class MemoryCurator @Inject constructor(
             FileLogger.i(TAG, "记忆治理完成：合并 $merged 组、归档 $archived 条")
         }
         // 幸存的条目 = 治理后既没归档也没被合并掉的：校验环节要逐条对照当前事实。
-        val survivors = memories.filter { memory ->
+        // 与上面第二层的 survivors 不同名：那个是「进了模型判定的那批」，这个是「治理后的全部幸存者」。
+        val remaining = memories.filter { memory ->
             memory.name !in toArchive && mergeGroups.keys.none { it == memory.name }
         }
-        return Result(archived, merged, survivors)
+        return Result(archived, merged, remaining)
     }
 
     /** 合并：把其它条目的正文并进保留项（本地读内容，不上传），再把它们归档。 */
