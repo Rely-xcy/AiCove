@@ -98,6 +98,17 @@ jobs:
       - name: Build universal debug (smoke)
         run: ./gradlew :app:assembleUniversalDebug --stacktrace
 
+      # 编译失败时把 Kotlin 编译器报的错误直接打进日志。
+      # 构建日志只进 artifact，而 artifact 下载需要仓库权限，排障时往往拿不到；
+      # 这里把 "e: file://..." 形式的错误行原样打印，不做解析与过滤。
+      - name: Summarize compile errors
+        if: failure()
+        run: |
+          echo "=== Kotlin compile errors ==="
+          grep -rE "^e: |error: |Unresolved reference|Cannot access" app/build/ 2>/dev/null \
+            | grep -v "^Binary" | head -60 || true
+          echo "=== end ==="
+
       # 单元测试（app/src/test 下的 Kotlin 单测）。
       # 只跑 universal debug 变体：单测逻辑与 flavor 无关（flavor 仅影响 abiFilters/assets），
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。
