@@ -13,6 +13,7 @@ import com.aicove.feature.agent.domain.memory.MemoryCurator
 import com.aicove.feature.agent.domain.memory.MemoryRanker
 import com.aicove.feature.agent.domain.memory.MemoryRepository
 import com.aicove.feature.agent.domain.memory.MemoryScope
+import com.aicove.feature.agent.domain.memory.MemoryVerifier
 import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.settings.data.repository.MemorySettingsRepository
 import io.mockk.coEvery
@@ -83,7 +84,13 @@ class TurnReminderStabilityTest {
         every { repository.changes } returns MutableSharedFlow()
         val settings = mockk<MemorySettingsRepository>(relaxed = true)
         every { settings.activeMemoryEnabledSync() } returns true
-        return MemoryModule(repository, mockk<MemoryCurator>(relaxed = true), settings)
+        return MemoryModule(
+            repository,
+            mockk<MemoryCurator>(relaxed = true),
+            // 校验器：本用例只关心提醒文本稳定，治理/校验不参与，relaxed mock 即可。
+            mockk<MemoryVerifier>(relaxed = true),
+            settings
+        )
     }
 
     private fun todoRow() = TodoItemEntity(
