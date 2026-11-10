@@ -1032,14 +1032,17 @@ fun AIChatPanel(
     }
     // 贴底滚动留白：首帧测量前用兜底值（约输入框 + 间距），实测悬浮层高度后改为动态值，
     // 横幅/面板/输入框任何形态下最后一条消息都停在悬浮层上方不被遮挡。
+    //
+    // 直接跟随实测高度，**不做「只增不减」**：底栏能展开也能收起，留白只涨不降的话，
+    // 用户展开过一次面板，收起来后最后一条消息下方就永久留一大块空白。
+    // 当初担心「留白变小会把内容往上拽」，但那个跳动的真正来源是列表 item 内的
+    // expandVertically 高度动画（已改为 alpha 淡入淡出），与 contentPadding 无关。
     val inputBarBottomReserveDp = 156.dp
     var floatingLayerHeightPx by remember { mutableStateOf(0) }
-    var measuredFloatingLayerHeightPx by remember { mutableStateOf(0) }
-    val inputBarReservePx = FloatingLayerReserve.rememberReservePx(
-        measuredHeightPx = measuredFloatingLayerHeightPx,
-        fallbackPx = with(LocalDensity.current) { inputBarBottomReserveDp.toPx().toInt() },
-        gapPx = with(LocalDensity.current) { FLOATING_LAYER_GAP_DP.toPx().toInt() }
-    )
+    val inputBarReservePx = with(LocalDensity.current) {
+        (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
+        else inputBarBottomReserveDp.toPx()).toInt()
+    }
     val markdownCache = remember { MarkdownRenderCache() }
     // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
     // key = 分组 key（`toolgroup:<组内首条消息 id>`）或单条消息 id。
@@ -2172,11 +2175,10 @@ fun AIChatPanel(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    // 实测悬浮层高度 → 写入 measuredFloatingLayerHeightPx；留白由
-                    // FloatingLayerReserve 延后一拍、只增不减地更新，不在此处直接改留白。
-                    .onGloballyPositioned {
-                        if (it.size.height > 0) measuredFloatingLayerHeightPx = it.size.height
-                    }
+                .onGloballyPositioned {
+                    // 实测即用：留白跟着实际高度走，收起时同步降回去。
+                    if (it.size.height > 0) floatingLayerHeightPx = it.size.height
+                }
             ) {
             Box(modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = floatingPanelAlpha }) {
                 StatusBanner(state = agentState)
