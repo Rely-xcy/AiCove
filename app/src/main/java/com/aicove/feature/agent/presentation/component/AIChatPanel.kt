@@ -1039,6 +1039,8 @@ fun AIChatPanel(
     // expandVertically 高度动画（已改为 alpha 淡入淡出），与 contentPadding 无关。
     val inputBarBottomReserveDp = 156.dp
     var floatingLayerHeightPx by remember { mutableStateOf(0) }
+    // 输入框自身高度：授权面板的定位锚点（面板要紧贴输入框上沿，而不是屏幕底边）。
+    var inputBarHeightPx by remember { mutableStateOf(0) }
     val inputBarReservePx = with(LocalDensity.current) {
         (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
         else inputBarBottomReserveDp.toPx()).toInt()
@@ -2294,6 +2296,14 @@ fun AIChatPanel(
             }
 
             ChatInputBar(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned {
+                        // 授权面板要以输入框顶部为锚点，故单独记输入框高度。
+                        // 用它而不是悬浮层总高：悬浮层里还有状态横幅与展开的面板，
+                        // 拿总高会把授权面板顶到过高位置，看上去像“飘在半空”。
+                        if (it.size.height > 0) inputBarHeightPx = it.size.height
+                    },
                 value = inputText,
                 onValueChange = viewModel::updateInputDraft,
                 onSend = sendMessage,
@@ -2394,8 +2404,13 @@ fun AIChatPanel(
             )
             } // 悬浮层结束
 
-            // 悬浮授权弹窗：独立于底栏排版流，悬浮于输入框上方，避免撑大底栏高度导致消息列表被顶上去。
+            // 悬浮授权弹窗：独立于底栏排版流，悬浮于**输入框上沿**，避免撑大底栏高度导致消息列表被顶上去。
             // 用户上下滑动消息列表时跟随透明弱化，不遮挡阅读视线。
+            //
+            // 锚点是输入框高度（inputBarHeightPx）而不是悬浮层总高：
+            // 悬浮层里还有状态横幅与展开的队列/待办面板，拿总高会把授权面板顶得过高，
+            // 看上去像“飘在半空”；而且总高在面板出现那一帧还是旧值（onGloballyPositioned
+            // 只在尺寸变化时回调），位置会时对时错。
             val permissionForPanel = rememberLastNonNull(pendingPermission)
             var permissionPanelHeightPx by remember { mutableStateOf(0) }
             AnimatedVisibility(
@@ -2403,7 +2418,11 @@ fun AIChatPanel(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() } + Spacing.xs)
+                    .padding(
+                        bottom = with(LocalDensity.current) {
+                            (if (inputBarHeightPx > 0) inputBarHeightPx else floatingLayerHeightPx).toDp()
+                        } + Spacing.xs
+                    )
                     .onGloballyPositioned { permissionPanelHeightPx = if (pendingPermission != null) it.size.height else 0 },
                 enter = fadeIn(tween(220)) +
                         slideInVertically(tween(220)) { it / 3 } +
@@ -2433,7 +2452,12 @@ fun AIChatPanel(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = Spacing.lg)
-                    .padding(bottom = with(LocalDensity.current) { (floatingLayerHeightPx + permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp() })
+                    // 与授权面板同一个锚点（输入框高度）：两者都用悬浮层总高会让它们
+                    // 在底栏展开时飘到半空、收起时贴到屏幕边，位置不一致。
+                    .padding(bottom = with(LocalDensity.current) {
+                        ((if (inputBarHeightPx > 0) inputBarHeightPx else floatingLayerHeightPx) +
+                            permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp()
+                    })
                     .graphicsLayer { alpha = if (listState.isScrollInProgress) 0.4f else 1f },
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut()
