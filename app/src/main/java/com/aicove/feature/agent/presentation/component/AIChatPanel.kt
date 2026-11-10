@@ -2296,14 +2296,6 @@ fun AIChatPanel(
             }
 
             ChatInputBar(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onGloballyPositioned {
-                        // 授权面板要以输入框顶部为锚点，故单独记输入框高度。
-                        // 用它而不是悬浮层总高：悬浮层里还有状态横幅与展开的面板，
-                        // 拿总高会把授权面板顶到过高位置，看上去像“飘在半空”。
-                        if (it.size.height > 0) inputBarHeightPx = it.size.height
-                    },
                 value = inputText,
                 onValueChange = viewModel::updateInputDraft,
                 onSend = sendMessage,
@@ -2401,6 +2393,12 @@ fun AIChatPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .onboardingTarget(OnboardingStep.SEND_MESSAGE)
+                    .onGloballyPositioned {
+                        // 授权面板要以输入框顶部为锚点，故单独记输入框高度。
+                        // 用它而不是悬浮层总高：悬浮层里还有状态横幅与展开的面板，
+                        // 拿总高会把授权面板顶到过高位置，看上去像“飘在半空”。
+                        if (it.size.height > 0) inputBarHeightPx = it.size.height
+                    }
             )
             } // 悬浮层结束
 
