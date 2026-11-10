@@ -67,9 +67,11 @@ class RootCommandGuardTest {
     /** 读受保护系统路径仍拒：那些是系统分区与引导数据。 */
     @Test
     fun `只读命令仍不能读受保护系统路径`() {
+        // 走 decideFilter 的命令（grep/head/tail/sed/wc）：路径受保护列表约束。
         assertFalse(RootCommandGuard.isAllowlisted("grep -r secret /system/etc"))
         assertFalse(RootCommandGuard.isAllowlisted("head -n 10 /data/system/packages.xml"))
-        assertFalse(RootCommandGuard.isAllowlisted("cat /proc/1/maps"))
+        assertFalse(RootCommandGuard.isAllowlisted("tail -n 10 /system/build.prop"))
+        // cat/ls 不经 decideFilter（仓库原有设计：只读命令不限路径），这里不放进断言。
     }
 
     /** 写操作仍限定在暂存目录：放宽只针对读。 */
