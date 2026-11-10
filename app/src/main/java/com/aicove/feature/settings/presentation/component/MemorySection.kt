@@ -115,6 +115,13 @@ private fun memoryItemKey(memory: Memory): String =
 @Composable
 internal fun MemorySection(
     memories: List<Memory>,
+    /**
+     * 预分组的记忆（全局 / 项目两组）。
+     *
+     * 由 ViewModel 算好传入，而不是组件里再 filter：组件每次重组都 filter 一遍会白白
+     * 产生两份新 List，上百条时尤其明显。
+     */
+    groups: com.aicove.feature.settings.presentation.MemoryGroups,
     loading: Boolean,
     shortTerm: SessionShortTermState?,
     activeMemoryEnabled: Boolean,
@@ -140,9 +147,9 @@ internal fun MemorySection(
     LaunchedEffect(searchQuery) {
         if (searchQuery.isNotEmpty()) listState.scrollToItem(0)
     }
-    // 只在数据变化时分组，避免每次重组都产生两份新 List。
-    val globalMemories = remember(memories) { memories.filter { it.scope == MemoryScope.GLOBAL } }
-    val projectMemories = remember(memories) { memories.filter { it.scope == MemoryScope.PROJECT } }
+    // 分组直接用调用方算好的：不再在组件里 filter。
+    val globalMemories = groups.global
+    val projectMemories = groups.project
     val searching = searchQuery.isNotBlank()
 
     Column(modifier = Modifier.fillMaxSize()) {

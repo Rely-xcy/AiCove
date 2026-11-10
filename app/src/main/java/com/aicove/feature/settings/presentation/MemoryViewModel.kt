@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +39,19 @@ data class SessionShortTermState(
     /** 上一次请求的输入 token 数（provider 回传的真实值，不是本地估算）；没跑过请求时为 0。 */
     val lastInputTokens: Int
 )
+
+/**
+ * 记忆按作用域分好的两组。
+ *
+ * 用具名类而不是 `Map<String, List<Memory>>`：调用方直接拿 `.global` / `.project`，
+ * 不用记 key 字串，也不会因为 key 写错而静默拿到空列表。
+ */
+data class MemoryGroups(
+    val global: List<Memory>,
+    val project: List<Memory>
+) {
+    val isEmpty: Boolean get() = global.isEmpty() && project.isEmpty()
+}
 
 /**
  * 记忆页状态：列出当前生效的记忆（全局与项目由 Repository 合并去重，界面不再分栏），
@@ -87,6 +101,21 @@ class MemoryViewModel @Inject constructor(
                 }
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 按作用域预分组：全局一组、项目一组。
+     *
+     * 放在 ViewModel 而不是组件里，是因为组件每次重组都 filter 一遍会白白产生两份新 List；
+     * 而分组只依赖 [visibleMemories]，搜索词一变才需要重算，频率低得多。
+     * 分组结果里**不含空组**：调用方据此决定要不要画分组标题。
+     */
+    val groupedVisibleMemories: StateFlow<MemoryGroups> =
+        visibleMemories.map { memories ->
+            MemoryGroups(
+                global = memories.filter { it.scope == MemoryScope.GLOBAL },
+                project = memories.filter { it.scope == MemoryScope.PROJECT }
+            )
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, MemoryGroups(emptyList(), emptyList()))
 
     /**
      * 首次读盘尚未完成：列表此时必然为空，界面据此渲染「正在读取」而不是「没有记忆」。

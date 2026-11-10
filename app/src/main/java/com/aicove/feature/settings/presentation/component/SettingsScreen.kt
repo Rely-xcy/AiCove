@@ -1211,6 +1211,8 @@ fun SettingsScreen(
                     // 列表拿 visibleMemories：页内搜索框就在列表上方，筛选必须实时作用到同一份列表。
                     // 过滤在 VM 里做（只对已读进内存的条目做字符串匹配），敲字不触发读盘。
                     val memories by memoryViewModel.visibleMemories.collectAsStateWithLifecycle()
+                    // 预分组：组件不必每次重组都 filter 两遍。
+                    val memoryGroups by memoryViewModel.groupedVisibleMemories.collectAsStateWithLifecycle()
                     val memoryQuery by memoryViewModel.searchQuery.collectAsStateWithLifecycle()
                     val memoryLoading by memoryViewModel.loading.collectAsStateWithLifecycle()
                     val shortTerm by memoryViewModel.shortTermSession.collectAsStateWithLifecycle()
@@ -1239,6 +1241,7 @@ fun SettingsScreen(
                     LaunchedEffect(Unit) { memoryViewModel.refresh() }
                     MemorySection(
                         memories = memories,
+                        groups = memoryGroups,
                         loading = memoryLoading,
                         shortTerm = shortTerm,
                         activeMemoryEnabled = activeMemory,
