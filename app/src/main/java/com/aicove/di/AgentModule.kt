@@ -96,6 +96,7 @@ import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.agent.domain.tool.mcp.ManageMcpTool
 import com.aicove.feature.agent.domain.tool.memory.MemoryTool
+import com.aicove.feature.agent.domain.tool.config.ConfigTool
 import com.aicove.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicove.feature.agent.domain.tool.mode.PlanModeTool
 import com.aicove.feature.agent.domain.tool.goal.GoalStatusTool
@@ -391,6 +392,7 @@ object AgentModule {
         goalStatusTool: GoalStatusTool,
         todoTool: TodoTool,
         memoryTool: MemoryTool,
+        configTool: ConfigTool,
         taskTool: TaskTool,
         messageParentTool: MessageParentTool,
         browserTool: BrowserTool,
@@ -423,6 +425,7 @@ object AgentModule {
             register("goalStatus", goalStatusTool)
             register("todo", todoTool)
             register("memory", memoryTool)
+            register("config", configTool)
             register("task", taskTool)
             register("messageParent", messageParentTool)
             register("browser", browserTool)
