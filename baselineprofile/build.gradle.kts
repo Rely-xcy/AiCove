@@ -9,7 +9,7 @@ plugins {
 // 为什么不把这段测试放进 app 的 androidTest：macrobenchmark 必须从独立进程启动目标 app 并反复
 // 冷启，与目标 app 同进程的 instrumentation 做不到这一点。
 android {
-    namespace = "com.aicode.baselineprofile"
+    namespace = "com.aicove.baselineprofile"
     compileSdk = 36
 
     defaultConfig {

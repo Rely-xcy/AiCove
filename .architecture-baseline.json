@@ -1,16 +1,16 @@
 {
   "bannedComponents": {
     "hardcoded-color": {
-      "app/src/main/java/com/aicode/core/ui/FloatingTabBar.kt": 4,
-      "app/src/main/java/com/aicode/core/ui/SwipeToDeleteRow.kt": 4,
-      "app/src/main/java/com/aicode/feature/agent/presentation/component/ChatDrawer.kt": 1,
-      "app/src/main/java/com/aicode/feature/agent/presentation/component/ChatInputBar.kt": 1,
-      "app/src/main/java/com/aicode/feature/git/presentation/component/GitScreen.kt": 1,
-      "app/src/main/java/com/aicode/feature/settings/presentation/component/LogSettingsSection.kt": 2,
-      "app/src/main/java/com/aicode/feature/settings/presentation/component/TokenStatsSection.kt": 2
+      "app/src/main/java/com/aicove/core/ui/FloatingTabBar.kt": 4,
+      "app/src/main/java/com/aicove/core/ui/SwipeToDeleteRow.kt": 4,
+      "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatDrawer.kt": 1,
+      "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatInputBar.kt": 1,
+      "app/src/main/java/com/aicove/feature/git/presentation/component/GitScreen.kt": 1,
+      "app/src/main/java/com/aicove/feature/settings/presentation/component/LogSettingsSection.kt": 2,
+      "app/src/main/java/com/aicove/feature/settings/presentation/component/TokenStatsSection.kt": 2
     },
     "raw-textfield": {
-      "app/src/main/java/com/aicode/feature/agent/presentation/component/ChatInputBar.kt": 1
+      "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatInputBar.kt": 1
     }
   },
   "comment": [
@@ -19,16 +19,16 @@
     "i18n（中英文案对齐）不允许登记豁免，永远要求全绿。"
   ],
   "fileLines": {
-    "app/src/main/java/com/aicode/feature/agent/domain/tool/browser/BrowserManager.kt": 2017,
-    "app/src/main/java/com/aicode/feature/agent/domain/workflow/ContextCompactor.kt": 1954,
-    "app/src/main/java/com/aicode/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 2141,
-    "app/src/main/java/com/aicode/feature/agent/presentation/AIAgentViewModel.kt": 3807,
-    "app/src/main/java/com/aicode/feature/agent/presentation/component/AIChatPanel.kt": 2607,
-    "app/src/main/java/com/aicode/feature/agent/presentation/component/ChatDrawer.kt": 1548,
-    "app/src/main/java/com/aicode/feature/backup/data/BackupManagerImpl.kt": 1908,
-    "app/src/main/java/com/aicode/feature/settings/presentation/SettingsViewModel.kt": 3410,
-    "app/src/main/java/com/aicode/feature/settings/presentation/component/ProviderEditorScreen.kt": 3244,
-    "app/src/main/java/com/aicode/feature/settings/presentation/component/SettingsScreen.kt": 2111
+    "app/src/main/java/com/aicove/feature/agent/domain/tool/browser/BrowserManager.kt": 2017,
+    "app/src/main/java/com/aicove/feature/agent/domain/workflow/ContextCompactor.kt": 1954,
+    "app/src/main/java/com/aicove/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 2141,
+    "app/src/main/java/com/aicove/feature/agent/presentation/AIAgentViewModel.kt": 3807,
+    "app/src/main/java/com/aicove/feature/agent/presentation/component/AIChatPanel.kt": 2607,
+    "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatDrawer.kt": 1548,
+    "app/src/main/java/com/aicove/feature/backup/data/BackupManagerImpl.kt": 1908,
+    "app/src/main/java/com/aicove/feature/settings/presentation/SettingsViewModel.kt": 3413,
+    "app/src/main/java/com/aicove/feature/settings/presentation/component/ProviderEditorScreen.kt": 3244,
+    "app/src/main/java/com/aicove/feature/settings/presentation/component/SettingsScreen.kt": 2111
   },
   "layering": {
     "feature/agent -> feature/backup": 3,

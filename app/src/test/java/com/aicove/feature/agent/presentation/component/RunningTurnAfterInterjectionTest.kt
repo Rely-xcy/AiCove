@@ -1,0 +1,240 @@
+package com.aicove.feature.agent.presentation.component
+
+import com.aicove.feature.agent.presentation.AgentUIMessage
+import com.aicove.feature.agent.presentation.MessageRole
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * 插话不再终结当前轮。
+ *
+ * 场景：AI 正在跑一轮（有工具调用链路），用户点队列面板的「立即插入给 AI」。插话落库时会作为一条
+ * **普通用户消息**排在本批工具结果之后（见 StatefulAgentWorkflow 的 interjections），而界面「哪一轮
+ * 还在跑」原先按「列表里最后一条用户消息」判定（AIChatPanel.activeTurnKey）——插话一落库就把正在跑的
+ * 那一轮顶掉：折叠头当场从「执行中」翻成「已完成」、进行中的正文被当成最终回答、还提前挂上操作行。
+ *
+ * 现在改由运行时真值定位：本轮轮首用户行 id（AIAgentViewModel.currentSessionRunningTurnAnchorId，
+ * 与交给 workflow 的 AgentContext.userMessageId 同源）。本用例钉住由此产生的三条判据：
+ * 折叠头（[buildChatItems]）、操作行（[actionableResultIds]）、耗时/用量（[computeTaskDurations] /
+ * [computeTurnUsage]）——它们都是纯函数，直接给输入断言输出。
+ *
+ * 消息形状照抄真实落库顺序：助手行（带工具调用）→ 同批工具结果 → 插话行 → 下一批工具结果 → 进行中的助手行。
+ */
+class RunningTurnAfterInterjectionTest {
+
+    private fun user(id: String, ts: Long) = AgentUIMessage(
+        id = id,
+        role = MessageRole.USER,
+        content = "用户说的话",
+        timestamp = ts
+    )
+
+    /** 运行中插话：落库时 isInterjection = true，UI 不渲染、不进时间线。 */
+    private fun interjection(id: String, ts: Long) =
+        user(id, ts).copy(isInterjection = true)
+
+    private fun assistant(id: String, ts: Long) = AgentUIMessage(
+        id = id,
+        role = MessageRole.ASSISTANT,
+        content = "助手的正文",
+        timestamp = ts
+    )
+
+    private fun tool(id: String, ts: Long) = AgentUIMessage(
+        id = id,
+        role = MessageRole.TOOL,
+        content = "工具结果",
+        timestamp = ts,
+        toolName = "Bash"
+    )
+
+    /** 本轮轮首用户行 id（运行时真值，界面拿它算 activeTurnKey）。 */
+    private val anchorId = "u0"
+
+    /** 插话行的 id（它是一条普通用户消息，不是轮首）。 */
+    private val interjectionId = "i1"
+
+    /**
+     * 一轮进行中、中途插过话的消息列表：
+     * u0 本轮开始 → a1 助手（发起工具调用）→ t1 同批工具结果 → i1 插话落库 → t2 下一批工具结果 → a2 进行中。
+     *
+     * 注意 i1 的落库位置在工具行之后（workflow 先发 ToolCallFinished 再发 UserMessageAdded），
+     * 这是真实顺序，不是构造出来的方便形状。
+     * 插话不渲染为气泡、不进时间线（buildChatItems 在 splitChatTurns 里剔除它），但会保留在
+     * 传入列表里——正是真实库里读出来的形状，用来钉「残留插话行不污染轮次」。
+     */
+    private fun messagesWithInterjection() = listOf(
+        user(anchorId, 1_000),
+        assistant("a1", 2_000),
+        tool("t1", 2_500),
+        interjection(interjectionId, 3_000),
+        tool("t2", 3_500),
+        assistant("a2", 4_000)
+    )
+
+    /**
+     * 插话紧跟助手行的形状（LLM 流式结束后的检查点送达时正是这个形状）。
+     * 用于耗时/用量那两条用例。
+     */
+    private fun messagesWithInterjectionRightAfterAssistant() = listOf(
+        user(anchorId, 1_000),
+        assistant("a1", 2_000),
+        interjection(interjectionId, 3_000),
+        assistant("a2", 4_000)
+    )
+
+    // ---- 折叠头：正在跑的那一轮不翻「已完成」 ----
+
+    /**
+     * 插话落库但 UI 不渲染：插话行不出现在任何 item 里，且不切断/顶掉当前轮——
+     * 整个运行仍然只有 turn:u0 一轮（旧行为会把插话画成时间线上的普通用户气泡）。
+     */
+    @Test
+    fun `插话不渲染为气泡，仍归入当前轮`() {
+        val items = buildChatItems(
+            messages = messagesWithInterjection(),
+            groupOverrides = emptyMap(),
+            turnOverrides = emptyMap(),
+            activeTurnKey = turnKeyOf(anchorId)
+        )
+        val headers = items.mapNotNull { it.turnHeader }
+        assertTrue(
+            "插话不开新轮：所有轮头都属于 turn:u0",
+            headers.isNotEmpty() && headers.all { it.key == "turn:u0" }
+        )
+        assertTrue("本轮必须是进行中", headers.all { it.running })
+        assertFalse(
+            "插话行不渲染为独立气泡",
+            items.any { it.message.id == interjectionId }
+        )
+    }
+
+    /** 普通用户消息（isInterjection = false）仍开新轮：这是插话豁免的对照组。 */
+    @Test
+    fun `普通用户消息仍开新轮`() {
+        val items = buildChatItems(
+            messages = listOf(
+                user(anchorId, 1_000),
+                assistant("a1", 2_000),
+                user("u2", 3_000)
+            ),
+            groupOverrides = emptyMap(),
+            turnOverrides = emptyMap(),
+            activeTurnKey = turnKeyOf(anchorId)
+        )
+        assertEquals("普通用户消息开新轮", listOf("turn:u0", "turn:u2"), items.mapNotNull { it.turnHeader?.key })
+    }
+
+    /**
+     * 旧实现下必红：旧的 running 判据是「turn.key == activeTurnKey」，只认相等。把它用在
+     * turn:i1（插话开的那一轮）上，running 恒为 false，折叠头渲染成「已完成 Xs」（MessageBubbles 的
+     * TurnCollapseHeader），断言即红。
+     *
+     * 另一条同样必红的路：旧调用方传进来的 activeTurnKey 是「最后一条用户消息」的 key（turn:i1），
+     * 那么本轮轮首那一轮（turn:u0）反而是 false——第一条断言在旧调用链下就红。两条合起来说明：
+     * 只要插话在中途落库，旧实现必然把正在跑的这一轮判成已完成。
+     *
+     * 插话不再开新轮后，本用例主要钉「唯一那轮的 running 判定」。
+     */
+    @Test
+    fun `插话落库后正在跑的那一轮仍显示执行中`() {
+        val items = buildChatItems(
+            messages = messagesWithInterjection(),
+            groupOverrides = emptyMap(),
+            turnOverrides = emptyMap(),
+            activeTurnKey = turnKeyOf(anchorId)
+        )
+        val headers = items.mapNotNull { it.turnHeader }.associateBy { it.key }
+        assertTrue("本轮轮首那一轮必须是进行中", headers.getValue("turn:u0").running)
+    }
+
+    // ---- 操作行：进行中的正文不挂「复制 / 更多」 ----
+
+    /**
+     * 旧实现下必红：这条判据当时内联在组合里、拿不到 activeTurnKey，只按「末轮 + isBusy」算
+     * （turnFinished = !isLastTurn || !isBusy）。同一份 messages、同样的忙碌状态下，turn:u0 不是末轮，
+     * 于是被判为已收尾 → 它最后一条可挂消息 a1（进行中的正文）拿到操作行，集合非空，断言即红。
+     */
+    @Test
+    fun `插话落库后进行中的正文不挂操作行`() {
+        val ids = actionableResultIds(messagesWithInterjection(), activeTurnKey = turnKeyOf(anchorId), busy = true)
+        assertTrue("本轮还没收工，任何一条都不该挂复制 / 更多", ids.isEmpty())
+    }
+
+    /** 收工后（空闲、无锚点）历史照旧：每轮的末条正文能挂操作行。插话不开新轮，只剩 turn:u0 一轮，故只有末条 a2。 */
+    @Test
+    fun `收工后历史上每轮的末条正文照常能挂操作行`() {
+        val ids = actionableResultIds(messagesWithInterjection(), activeTurnKey = null, busy = false)
+        assertEquals(setOf("a2"), ids)
+    }
+
+    // ---- 耗时 / 用量：正在跑的轮不结算 ----
+
+    /**
+     * 旧实现下必红：splitTurns 只在「助手行的下一条用户消息」处结一轮。u0 那一轮在 a1 处被 i1（插话）
+     * 判定为轮末 → 结算出耗时 durations = {a1 -> 1000}（且 lastTurnFinished=false 也救不了它：它只
+     * 管列表末条），断言即红。
+     */
+    @Test
+    fun `插话紧跟助手行时也不给正在跑的轮结算耗时`() {
+        val durations = computeTaskDurations(
+            messagesWithInterjectionRightAfterAssistant(),
+            lastTurnFinished = false,
+            runningTurnStartId = anchorId
+        )
+        assertTrue("正在跑的轮不该出现「本轮总耗时」", durations.isEmpty())
+    }
+
+    /** 同上：旧实现下必红（a1 会拿到这一轮的 token 合计），新实现不给正在跑的轮结算用量。 */
+    @Test
+    fun `插话紧跟助手行时也不给正在跑的轮结算 token 合计`() {
+        val usage = computeTurnUsage(
+            messagesWithInterjectionRightAfterAssistant(),
+            lastTurnFinished = false,
+            runningTurnStartId = anchorId
+        )
+        assertTrue("正在跑的轮不该出现 token 合计行", usage.isEmpty())
+    }
+
+    /** 收工后耗时口径不变：整轮从轮首用户消息算到轮末助手行。此为「没退回」钉子，两版实现都绿。 */
+    @Test
+    fun `收工后耗时口径不变`() {
+        val durations = computeTaskDurations(
+            messagesWithInterjectionRightAfterAssistant(),
+            lastTurnFinished = true,
+            runningTurnStartId = null
+        )
+        // 插话不再断轮：整轮从 u0 算到 a2（4000-1000），只有 a2 一条轮末助手行。
+        assertEquals(3_000L, durations["a2"])
+    }
+
+    // ---- 插话本身：落库但 UI 不渲染 ----
+
+    /** 旧行为钉子反转为新行为钉子：插话行不再作为任何 item（包括普通用户气泡）出现在时间线上。 */
+    @Test
+    fun `插话不渲染为普通用户消息气泡`() {
+        val items = buildChatItems(
+            messages = messagesWithInterjection(),
+            groupOverrides = emptyMap(),
+            turnOverrides = emptyMap(),
+            activeTurnKey = turnKeyOf(anchorId)
+        )
+        assertFalse(
+            "插话行不出现在时间线上",
+            items.any { it.message.id == interjectionId }
+        )
+    }
+
+    /** 收工后（空闲）带插话的历史：本轮从 u0 到 a2 只结一次，插话不产生第二次结算。 */
+    @Test
+    fun `收工后用量不因插话多结算一轮`() {
+        val usage = computeTurnUsage(
+            messagesWithInterjectionRightAfterAssistant(),
+            lastTurnFinished = true,
+            runningTurnStartId = null
+        )
+        assertEquals("插话不开新轮，只有 a2 一条轮末助手行", setOf("a2"), usage.keys)
+    }
+}

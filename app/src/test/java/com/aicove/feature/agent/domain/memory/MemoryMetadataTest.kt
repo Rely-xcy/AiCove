@@ -1,0 +1,115 @@
+package com.aicove.feature.agent.domain.memory
+
+import java.io.File
+import java.nio.file.Files
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class MemoryMetadataTest {
+
+    private fun tempRoot(): File = Files.createTempDirectory("memory-test").toFile()
+
+    @Test
+    fun `新元数据能落盘并回读`() {
+        val root = tempRoot()
+        val file = MemorySource.resolveMemoryFile(root, "build-env")
+        file.writeText(
+            MemoryParser.format(
+                name = "build-env",
+                description = "构建环境",
+                content = "正文",
+                kind = MemoryKind.PROFILE,
+                source = "auto-distill",
+                createdAt = 1_700_000_000_000L
+            )
+        )
+
+        val parsed = MemoryParser.parse(file, MemoryScope.GLOBAL)
+        assertNotNull(parsed)
+        assertEquals(MemoryKind.PROFILE, parsed.kind)
+        assertEquals("auto-distill", parsed.source)
+        assertEquals(1_700_000_000_000L, parsed.createdAt)
+        assertEquals("正文", parsed.content)
+    }
+
+    @Test
+    fun `命中统计能落盘并回读`() {
+        val root = tempRoot()
+        val file = MemorySource.resolveMemoryFile(root, "used")
+        file.writeText(
+            MemoryParser.format(
+                name = "used",
+                description = "d",
+                content = "body",
+                kind = MemoryKind.PROFILE,
+                source = "auto-distill",
+                createdAt = 1_700_000_000_000L,
+                hitCount = 3,
+                lastHitAt = 1_700_000_500_000L
+            )
+        )
+
+        val parsed = MemoryParser.parse(file, MemoryScope.GLOBAL)
+        assertNotNull(parsed)
+        assertEquals(3, parsed.hitCount)
+        assertEquals(1_700_000_500_000L, parsed.lastHitAt)
+    }
+
+    @Test
+    fun `旧文件缺新字段时按默认值回读`() {
+        val root = tempRoot()
+        val file = File(root, "legacy.md")
+        file.writeText("---\nname: legacy\ndescription: 老格式\n---\n老正文")
+
+        val parsed = MemoryParser.parse(file, MemoryScope.GLOBAL)
+        assertNotNull(parsed)
+        assertEquals(MemoryKind.NOTE, parsed.kind)
+        assertEquals("", parsed.source)
+        assertEquals(0L, parsed.createdAt)
+        assertEquals(0, parsed.hitCount)
+        assertEquals(0L, parsed.lastHitAt)
+    }
+
+    @Test
+    fun `NOTE 且无元数据时不写多余行`() {
+        // 历史记忆文件必须保持字节不变，不能因为新增元数据把所有旧文件重写一遍
+        assertEquals(
+            "---\nname: n\ndescription: d\n---\nbody",
+            MemoryParser.format("n", "d", "body", MemoryKind.NOTE)
+        )
+    }
+
+    @Test
+    fun `覆盖前把旧版本归档到 superseded`() {
+        val root = tempRoot()
+        val file = MemorySource.resolveMemoryFile(root, "note")
+        file.writeText(MemoryParser.format("note", "旧描述", "旧正文"))
+
+        val archived = MemorySource.archiveBeforeOverwrite(root, file)
+
+        assertNotNull(archived)
+        assertTrue(archived.isFile)
+        assertEquals(file.readText(), archived.readText())
+        assertTrue(File(root, MemorySource.SUPERSEDED_DIR).isDirectory)
+    }
+
+    @Test
+    fun `没有旧文件时不做归档`() {
+        val root = tempRoot()
+        assertNull(MemorySource.archiveBeforeOverwrite(root, MemorySource.resolveMemoryFile(root, "missing")))
+    }
+
+    @Test
+    fun `记忆名里的点号与分隔符不会越出记忆目录`() {
+        // sanitizeName 是白名单（字母/数字/-/_）：点号与分隔符都被替换掉，`..` 构造不出来，
+        // 拼出的永远是 root 下的单个文件名元素。若将来放宽白名单，这条断言会先红。
+        val root = tempRoot()
+        val file = MemorySource.resolveMemoryFile(root, "../../etc/passwd")
+
+        assertEquals("etc-passwd.md", file.name)
+        assertEquals(root.canonicalPath, file.parentFile?.canonicalPath)
+    }
+}

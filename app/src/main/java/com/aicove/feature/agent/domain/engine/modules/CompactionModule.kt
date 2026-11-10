@@ -1,0 +1,610 @@
+package com.aicove.feature.agent.domain.engine.modules
+
+import com.aicove.core.util.FileLogger
+import com.aicove.di.CompactionWork
+import com.aicove.feature.agent.domain.engine.EngineContext
+import com.aicove.feature.agent.domain.engine.EngineModule
+import com.aicove.feature.agent.domain.engine.LlmCall
+import com.aicove.feature.agent.domain.brief.SessionBriefExtractor
+import com.aicove.feature.agent.domain.memory.MemoryExtractor
+import com.aicove.feature.agent.domain.model.AgentMessage
+import com.aicove.feature.agent.domain.prompt.SystemPromptProvider
+import com.aicove.feature.agent.domain.provider.AIProvider
+import com.aicove.feature.agent.domain.workflow.AgentEvent
+import com.aicove.feature.agent.domain.workflow.ContextCompactor
+import com.aicove.feature.agent.domain.workflow.ContextUsage
+import com.aicove.feature.agent.domain.workflow.ContextUsageHolder
+import com.aicove.feature.agent.domain.workflow.TokenEstimator
+import com.aicove.feature.settings.data.remote.ModelMetadataService
+import com.aicove.feature.settings.data.repository.GeneralSettingsRepository
+import com.aicove.feature.settings.domain.model.ModelContextPolicy
+import com.aicove.feature.settings.domain.model.ProviderType
+import dagger.Lazy
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * 压缩模块：把「上下文预算」接进引擎。
+ *
+ * 只做策略——什么时候压、压到哪一档、用哪个模型摘要；具体怎么改消息交给
+ * [ContextCompactor]（硬压缩 / 发送前兜底两个纯变换）。
+ *
+ * 两级预算（都由用户设置的百分比 × 模型窗口算出，再受窗口档位约束；
+ * 实际生效值统一由 [ModelContextPolicy.thresholds] 算，界面显示也取同一份，见 [ContextUsageHolder]）：
+ * 1. 硬线（用户设置，默认 85%，档位上限收在 ~90%）：调摘要模型把早期对话折叠成结构化接手摘要；
+ * 2. 兜底线（92%）：折叠后仍逼近窗口时，对超长消息本身做硬截断。
+ *
+ * 旧软精简（40% 线，改写历史工具输出/参数）已随「上下文压缩重设计」阶段 1 移除；
+ * 参数投影（ArgumentProjectionModule）也已删除：它每轮改写历史，与前缀缓存互斥。
+ * 现在请求链路不做任何历史改写，缩短上下文只有折叠与兜底硬截断两条路。
+ */
+@Singleton
+class CompactionModule @Inject constructor(
+    /**
+     * 用 [Lazy] 注入断开 DI 环：ContextCompactor → SystemPromptProvider → AgentEngine →
+     * Set<EngineModule> → 本模块。模块只在真正要压缩时才取实例。
+     */
+    private val compactor: Lazy<ContextCompactor>,
+    private val memoryExtractor: MemoryExtractor,
+    /** 折叠历史前更新「会话工作状态」：任务理解不能随原文一起被压掉。 */
+    private val sessionBriefExtractor: SessionBriefExtractor,
+    /** 同样用 [Lazy]：解析抽取提示词要经 SystemPromptProvider，它又依赖引擎。 */
+    private val systemPromptProvider: Lazy<SystemPromptProvider>,
+    private val modelMetadataService: ModelMetadataService,
+    private val generalSettingsRepository: GeneralSettingsRepository,
+    /** 判定结果发布给界面：显示百分比与触发阈值必须同源。 */
+    private val contextUsageHolder: ContextUsageHolder,
+    /**
+     * 判定与整个压缩体所在的调度器（见 [CompactionWork]）。
+     *
+     * 做成可注入项而不是在本类里直接写 `Dispatchers.Default`：单测要能换成自定义调度器，
+     * 把「压缩没跑在调用者线程上」变成可断言的事实。
+     */
+    @param:CompactionWork private val workDispatcher: CoroutineDispatcher
+) : EngineModule {
+
+    override val id = MODULE_ID
+
+    // 最先跑：先把上下文瘦下来，后续模块与提示词注入看到的才是最终形态。
+    override val order = 10
+
+    /**
+     * 「折叠后仍超线」的位点：会话 id → 那次折叠后的估算 token。
+     *
+     * 存在的理由：折叠腾出的是 head，而保留区（最近原文）与固定开销有可能把它填满，
+     * 此时下一轮再折只会产出一份同样的摘要（同一段 head 早就不在上下文里了），白花一次模型调用、
+     * 界面还会反复闪「压缩中」。记下位点就能等上下文真的又长起来再折。
+     */
+    private val foldedStillOverTokens = ConcurrentHashMap<String, Int>()
+
+    /**
+     * 上次硬折叠失败的位点：会话 id → 当时的判定 token。
+     *
+     * 失败（摘要模型报错、锚点定位不到、裁完 head 为空）不能每轮重试：一次失败就能白花一次模型调用。
+     * 但也不能因此把整个模块停掉——这里只抑制「再折一次」，判定、阈值发布与发送前兜底照跑。
+     */
+    private val foldFailedTokens = ConcurrentHashMap<String, Int>()
+
+    /**
+     * 上一次请求发出去的上下文量（**原始估算**，未校准）：会话 id → token。
+     *
+     * 与 `call.lastInputTokens`（那一次请求 provider 回传的真实输入 token）配对，才能算出本地估算
+     * 偏了多少并校准本轮判定。只用于校准：缺了这一条就是不校准（与没这功能时完全一致），
+     * 不影响任何安全网。存原始值不存校准值——拿校准值当基线，下一轮的差额会被自己抵掉。
+     */
+    private val lastRawEstimates = ConcurrentHashMap<String, Int>()
+
+    /**
+     * 上一次链合并失败的位点：会话 id → 合并失败时的总估算 token。
+     *
+     * 语义同 [foldFailedTokens]：失败不能每轮重试，但也不能关掉链合并本身——
+     * 上下文相对位点再长出 [MERGE_RETRY_GROWTH_PERCENT]% 后允许再试。
+     */
+    private val mergeFailedTokens = ConcurrentHashMap<String, Int>()
+
+    /**
+     * 调模型前的上下文处理入口：只负责把整段判定与压缩体搬到主线程之外。
+     *
+     * 为什么必须搬：本模块与 [ContextCompactor] 全程没有线程切换，调用链是
+     * ViewModel 的 Main 协程 → AgentEngine → 本模块 → ContextCompactor，于是全量 token 估算
+     * （逐字符过整段历史）、摘要模型往返、归档写盘与落库全压在主线程上，
+     * 长会话一次折叠实测把主线程占住近一分钟。
+     *
+     * 这里只换线程：阈值、判定式、日志字段、摘要内容一字未改，返回的消息与之前逐字节相同。
+     */
+    override suspend fun beforeLlmCall(ctx: EngineContext, call: LlmCall): LlmCall? {
+        // 事件是发给调用者的（界面侧在 Main 上收集并直接改状态）：压缩挪到后台线程后，
+        // 回调用当前 context 发就会把收集者一起换到后台线程上。所以先在调用者线程上记下它的
+        // context，回调时切回去。minusKey(Job) 只借它的调度器与其它元素，父 Job 仍取当前协程的——
+        // 带着外层 Job 进 withContext 会把结构化并发（取消传播）拆掉，取消就不再沿本协程链走。
+        val eventContext = currentCoroutineContext().minusKey(Job)
+        val backgroundCall = call.copy(
+            onEvent = { event -> withContext(eventContext) { call.onEvent(event) } }
+        )
+        val compacted = withContext(workDispatcher) { beforeLlmCallOnBackground(ctx, backgroundCall) }
+        // 包过 context 的那份 onEvent 只给压缩内部用：回传对象换回调用者自己那份，不外泄。
+        return compacted?.copy(onEvent = call.onEvent)
+    }
+
+    /**
+     * [beforeLlmCall] 的实体：判定、估算、硬折叠与发送前兜底全部在 [workDispatcher] 上执行。
+     */
+    private suspend fun beforeLlmCallOnBackground(ctx: EngineContext, call: LlmCall): LlmCall? {
+        val messages = call.messages
+        if (messages.isEmpty()) return null
+        // 窗口来源：优先主聊天模型（决定「谁快撑满」），退到摘要模型。
+        val windowProvider = call.windowProvider ?: call.summaryProvider ?: return null
+
+        val contextLimit = resolveContextTokens(windowProvider)
+        // 阈值一律走 ModelContextPolicy.thresholds：它同时被界面百分比取用（见下方 publish），
+        // 两处各算一遍就会出现「显示的值没到线、压缩却已经触发」。
+        val thresholds = ModelContextPolicy.thresholds(
+            contextLimit = contextLimit,
+            softPercent = generalSettingsRepository.softCompactionThresholdPercent(),
+            hardPercent = generalSettingsRepository.compactionThresholdPercent()
+        )
+        val hardAllowed = thresholds.hardEnabled
+        val hardThreshold = thresholds.hard
+
+        // 真实 usage 与本地估算取较大值：lastInputTokens 是上一次请求的值，
+        // 本轮新塞入的大内容（文件/工具输出/图片）在旧值里看不到，只信它会把超限请求发出去。
+        val rawEstimate = estimateCache.estimate(ctx.sessionId, messages) + call.overheadTokens
+        // 增量校准：上一轮的真实 usage 与那一轮的原始估算配对，减掉已确认的高估量（只减不上加，
+        // 低估那一头由下面的 max(lastInputTokens, …) 自己兜住）。基线缺一条（该会话首轮、
+        // provider 不回传 usage、刚被 onSessionDeleted 清掉）就不校准，判定式与加这功能之前一字不差
+        // （见 [TokenEstimator.calibrated] 的退化分支）。
+        val baselineEstimate = ctx.sessionId?.let { lastRawEstimates[it] }
+        val estimated = if (baselineEstimate != null) {
+            TokenEstimator.calibrated(rawEstimate, baselineEstimate, call.lastInputTokens)
+        } else {
+            rawEstimate
+        }
+        val currentTokens = maxOf(call.lastInputTokens.takeIf { it > 0 } ?: 0, estimated)
+        // 判定算完立即发布给界面：同一个数既决定显示百分比也决定是否触发压缩。
+        // 快照按会话分开存，并行跑的子代理各存各的，不会再把前台会话的数顶掉。
+        contextUsageHolder.publish(
+            ContextUsage.of(
+                sessionId = ctx.sessionId,
+                realTokens = call.lastInputTokens,
+                estimatedTokens = estimated,
+                thresholds = thresholds
+            )
+        )
+        // 链合并（阶段 4，设计 §4/§7）：独立于折叠的动作，放在硬折叠判定**之前**——
+        // 链超限本身占着窗口预算，合并可能直接让请求回到硬线以下，省一次折叠。
+        // 成功后替换 messages 与判定量，后续折叠判定与发送前兜底都拿合并后的视图走；
+        // 失败只记日志、记位点、下轮再试：不影响折叠判定，更不影响本轮请求。
+        // call.force 不触发链合并：用户手动点的是「折叠」，不是另一次低频维护动作。
+        var effectiveMessages = messages
+        var effectiveCurrentTokens = currentTokens
+        if (call.summaryProvider != null && ctx.sessionId != null && !call.force) {
+            val merged = tryChainMerge(ctx, call, messages, contextLimit, currentTokens)
+            if (merged != null) {
+                effectiveMessages = merged
+                effectiveCurrentTokens =
+                    maxOf(call.lastInputTokens.takeIf { it > 0 } ?: 0,
+                        estimateCache.estimate(ctx.sessionId, merged) + call.overheadTokens)
+            }
+        }
+
+        // 折叠被跳过有两种来由，都只针对「再折一次」：上一轮折完仍超线（可折的 head 已经折掉了），
+        // 或上一轮硬折叠直接失败。两者都等上下文相对位点又长出 [REFOLD_GROWTH_PERCENT]% 才再试；
+        // call.force 不受抑制（用户手动点了就该干活）。判据只决定折不折，模块其余职责照跑——
+        // 真撞窗仍由 92% 兜底线与发送前硬截断负责，这里不碰它们。
+        val foldedPoint = ctx.sessionId?.let { foldedStillOverTokens[it] }
+        val failedPoint = ctx.sessionId?.let { foldFailedTokens[it] }
+        val foldDeferred = foldedPoint != null &&
+            effectiveCurrentTokens < foldedPoint + foldedPoint * REFOLD_GROWTH_PERCENT / 100
+        val retryDeferred = failedPoint != null &&
+            effectiveCurrentTokens < failedPoint + failedPoint * REFOLD_GROWTH_PERCENT / 100
+        val reachedHard = hardAllowed &&
+            (call.force || (effectiveCurrentTokens >= hardThreshold && !foldDeferred && !retryDeferred))
+        if (hardAllowed && !call.force && effectiveCurrentTokens >= hardThreshold && (foldDeferred || retryDeferred)) {
+            FileLogger.i(
+                TAG,
+                "会话 ${ctx.sessionId ?: "-"} ${if (retryDeferred) "上次硬折叠失败" else "折叠后仍超线"}" +
+                    "（位点 ${if (retryDeferred) failedPoint else foldedPoint} tokens，当前 $effectiveCurrentTokens " +
+                    "未再长出 $REFOLD_GROWTH_PERCENT%），本轮跳过重复折叠，只做发送前兜底"
+            )
+        }
+        // 判定输入与发布结果必须能对上账：环显示偏小时，靠这条日志分清是「估算顶上来的」
+        // 还是「界面取错了会话」。只在线以上打，否则每次工具调用都写一条，日志会被判定刷屏。
+        // 同时打估算的构成（cjk/alnum/other/图片/消息数）：只有「原始」一个总数时，估算偏高或偏低
+        // 看不出是哪类内容贡献的，归因只能猜。构成走 TokenEstimator.breakdown，只读数、不参与判定。
+        if (reachedHard) {
+            val composition = TokenEstimator.breakdown(messages)
+            val messageTokens = composition.cjk + composition.alnum + composition.other + composition.image
+            FileLogger.i(
+                TAG,
+                "上下文判定 会话=${ctx.sessionId ?: "-"} 子代理=${ctx.isSubAgent} " +
+                    "真实=${call.lastInputTokens} 估算=$estimated（原始 $rawEstimate，含 system+工具开销 ${call.overheadTokens}" +
+                    "${if (baselineEstimate != null) "，校准基线 $baselineEstimate" else "，未校准"}）" +
+                    "判定=$effectiveCurrentTokens 窗口=$contextLimit " +
+                    "硬线=${if (hardAllowed) hardThreshold.toString() else "未启用"}" +
+                    "；消息构成 cjk=${composition.cjk} alnum=${composition.alnum} " +
+                    "other=${composition.other} 图片=${composition.image} 消息数=${composition.messages}" +
+                    "（消息合计 $messageTokens + 开销 ${call.overheadTokens}）"
+            )
+        }
+
+        // 兜底：system prompt 与工具定义也占窗口，预算里先扣掉。
+        val guardBudget = contextLimit * ModelContextPolicy.GUARD_BUDGET_PERCENT / 100 - call.overheadTokens
+
+        // 单条消息也可能本身就超窗：只有估算还没逼近窗口时才允许按条数早退。
+        if (!call.force && effectiveMessages.size <= 2 && effectiveCurrentTokens < contextLimit) {
+            // 这一轮不改编排，发出去的就是 messages：记下它的量供下一轮校准配对。
+            rememberRawEstimate(ctx, rawEstimate)
+            // 这一批消息即将发出去：从这一刻起它们属于「已发出」，本轮后续调用不再重截。
+            freezeTurnSnapshot(ctx, guardBudget, messages)
+            return null
+        }
+
+        var result = effectiveMessages
+        var compacted = false
+
+        if (reachedHard) {
+            val summaryProvider = call.summaryProvider
+            if (summaryProvider == null) {
+                // 没配压缩专用模型：本轮只剩兜底，不硬发摘要请求。
+                FileLogger.w(TAG, "达到硬压缩线但无可用的摘要模型，本轮只做发送前兜底")
+            } else {
+                FileLogger.i(
+                    TAG,
+                    "会话 ${ctx.sessionId ?: "-"} 上下文约 $effectiveCurrentTokens tokens（窗口 $contextLimit，" +
+                        "${ModelContextPolicy.tierFor(contextLimit).tier}），" +
+                        "${if (call.force) "手动强制压缩" else "达到硬压缩线 $hardThreshold"}，开始折叠早期对话"
+                )
+                call.onEvent(AgentEvent.CompactionStarted(effectiveCurrentTokens))
+                val compactedMessages = compactor.get().compact(
+                    messages = result,
+                    summaryProvider = summaryProvider,
+                    sessionId = ctx.sessionId,
+                    preserveRecentTokens = ModelContextPolicy.tierFor(contextLimit).preserveRecentTokens,
+                    summaryWindowTokens = resolveContextTokens(summaryProvider),
+                    hardThreshold = hardThreshold,
+                    contextLimit = contextLimit,
+                    // 触发判定用的那个数（含 system/工具开销）。带下去只为了记账日志能自洽：
+                    // 单看折叠记账的「折叠前消息估算」会比硬线低几千 token，看着像不该折却折了。
+                    decisionTokens = effectiveCurrentTokens,
+                    // 固定开销（system + 工具定义）：压缩内部用它判断「保留区是不是已经压不下去」，
+                    // 避免小窗口模型白跑一轮摘要后立刻又触发。
+                    overheadTokens = call.overheadTokens,
+                    // 折叠前先捞长期价值：这段历史马上离开上下文，里面的决策/纠正/约定
+                    // 应该进记忆库而不是只被摘要吞掉。抽取失败不影响压缩本身。
+                    // 注意：这一步**不受**「长期记忆自动沉淀」开关控制（用户 2026-09-30 明确要求保持独立）——
+                    // 那个开关管的是「对话中主动记 + 定期治理」，压缩抽取属于上下文管理的一环。
+                    onBeforeFold = { folded ->
+                        val written = memoryExtractor.extract(
+                            projectRoot = ctx.projectRoot,
+                            history = folded,
+                            source = MemoryExtractor.SOURCE_PRE_FOLD,
+                            complete = { userPrompt ->
+                                summaryProvider.complete(
+                                    systemPrompt = systemPromptProvider.get().resolvePrompt(MemoryExtractor.PROMPT_FILE),
+                                    messages = listOf(AgentMessage.UserMessage(content = userPrompt)),
+                                    tools = emptyList(),
+                                    // 同压缩：一次性调用，尾部断点写进去的缓存不会被复用。
+                                    // system 上的断点保留（memory-distiller.md 这类提示词够长，能真命中）。
+                                    cacheTail = false
+                                ).content
+                            }
+                        )
+                        if (written > 0) {
+                            FileLogger.i(TAG, "折叠前从被压缩历史里捞出 $written 条长期记忆")
+                        }
+                        // 同步更新会话工作状态：长期记忆只存「用户是谁」，任务理解（目标/决策/进展）
+                        // 是另一类信息——它不随压缩丢失，才能治住「越聊越傻」。
+                        // 与记忆抽取各自吞自己的失败，任何一个挂了都不影响压缩本身。
+                        ctx.sessionId?.let { sid ->
+                            runCatching {
+                                sessionBriefExtractor.extract(
+                                    sessionId = sid,
+                                    history = folded,
+                                    complete = { userPrompt ->
+                                        summaryProvider.complete(
+                                            systemPrompt = systemPromptProvider.get()
+                                                .resolvePrompt(SessionBriefExtractor.PROMPT_FILE),
+                                            messages = listOf(AgentMessage.UserMessage(content = userPrompt)),
+                                            tools = emptyList(),
+                                            cacheTail = false
+                                        ).content
+                                    }
+                                )
+                            }.onFailure { e ->
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                FileLogger.w(TAG, "折叠前更新会话工作状态失败，继续压缩", e)
+                            }
+                        }
+                    },
+                    onEvent = call.onEvent
+                )
+                if (compactedMessages != null) {
+                    result = compactedMessages
+                    compacted = true
+                    // 只有真的产出结果才报完成：失败时 compact() 已发过 CompactionFailed
+                    call.onEvent(AgentEvent.CompactionFinished)
+                    // 折叠成功 → 清掉「上次失败」的位点，下次真需要时还能再折
+                    ctx.sessionId?.let { foldFailedTokens.remove(it) }
+                    // 折叠腾出的空间可能当场被保留区与固定开销吃完（最近原文本身就占满窗口）。
+                    // 这里如实记一笔并把位点记住：本轮不再折，接下来几轮也不在原地反复折。
+                    val afterFold = estimateCache.estimate(ctx.sessionId, result) + call.overheadTokens
+                    if (afterFold >= hardThreshold) {
+                        FileLogger.w(
+                            TAG,
+                            "会话 ${ctx.sessionId ?: "-"} 折叠后仍超线：折叠后约 $afterFold tokens" +
+                                "（折叠前判定 $effectiveCurrentTokens，硬线 $hardThreshold，窗口 $contextLimit），" +
+                                "保留区与固定开销已占满可回收空间，不再重复折叠"
+                        )
+                        ctx.sessionId?.let { foldedStillOverTokens[it] = afterFold }
+                        // 给界面的信号：复用已有的工具卡片通道（无配对的工具行会在回放时被丢掉，
+                        // 不进模型上下文，也不会像 CompactionFailed 那样关掉本轮后续所有压缩）。
+                        call.onEvent(
+                            AgentEvent.ToolCallFinished(
+                                id = "compaction-over-line-${UUID.randomUUID()}",
+                                toolName = OVER_LINE_TOOL_NAME,
+                                result = "折叠后仍超硬线：折叠后约 $afterFold tokens（硬线 $hardThreshold，窗口 $contextLimit）。" +
+                                    "最近原文保留区与固定开销已占满可回收空间，不再重复折叠；" +
+                                    "继续增长时到达 92% 兜底线会按条硬截断，保证请求不超窗。",
+                                isError = false
+                            )
+                        )
+                    } else {
+                        ctx.sessionId?.let { foldedStillOverTokens.remove(it) }
+                    }
+                } else {
+                    // 硬压缩没产出结果（摘要模型报错、锚点定位不到、裁剪后 head 为空）时记下失败位点：
+                    // 本轮与随后几轮不再原地重试硬折叠（否则每次 LLM 调用都白试一次），
+                    // 上下文安全由 92% 兜底线与发送前硬截断负责。
+                    FileLogger.w(TAG, "硬压缩未产出结果")
+                    ctx.sessionId?.let { foldFailedTokens[it] = effectiveCurrentTokens }
+                }
+            }
+        }
+
+        // 兜底：system prompt 与工具定义也占窗口，预算里先扣掉。
+        val guarded = enforceTurnGuard(ctx, call.force, result, guardBudget)
+
+        if (!compacted && guarded === messages) {
+            rememberRawEstimate(ctx, rawEstimate)
+            return null
+        }
+        rememberRawEstimate(ctx, estimateCache.estimate(ctx.sessionId, guarded) + call.overheadTokens)
+        return call.copy(messages = guarded)
+    }
+
+    /**
+     * 一轮内冻结的兜底投影：已发出的那一段消息（连同当时截出来的字节）+ 当时的预算。
+     *
+     * 相邻两次模型调用之间，估算会因为新消息与真实 usage 抖动；若每次都按当前估值重截，
+     * 同一条旧消息可能这次截 4000 字、下次截 3500 字，已经发出去的前缀跟着变形。
+     * 冻结后只对「冻结之后新长出来的尾部」用剩余预算兜底，旧消息一律沿用第一次的结果。
+     */
+    private class TurnGuardProjection(
+        val turnId: String,
+        val budgetTokens: Int,
+        val snapshot: List<AgentMessage>
+    )
+
+    private val turnGuardProjections = ConcurrentHashMap<String, TurnGuardProjection>()
+
+    /**
+     * 整段消息估算缓存：判定、折叠前后与发送前兜底会反复估算同一段历史，见 [MessageEstimateCache]。
+     *
+     * 只省重复计算，不改判定用的数：命中条件保证列表逐元素同一，缓存值与重算值相等。
+     */
+    private val estimateCache = MessageEstimateCache()
+
+    /**
+     * 发送前兜底：同一轮（[EngineContext.turnId] 相同）里已发出的消息不再重截。
+     *
+     * 边界是一轮 = 一次 `executeEvents`（一次用户请求及其全部工具循环）；刷新一轮就是新的 turnId。
+     * `force` 调用（手动压缩、超窗自愈）不受冻结约束，且会丢弃旧投影——它们本来就是要改写编排的。
+     * 消息列表被硬折叠或自愈换掉时，旧快照对不上前缀，同样重新冻结。
+     */
+    private fun enforceTurnGuard(
+        ctx: EngineContext,
+        force: Boolean,
+        messages: List<AgentMessage>,
+        guardBudget: Int
+    ): List<AgentMessage> {
+        val sessionId = ctx.sessionId
+        val turnId = ctx.turnId
+        if (force || sessionId == null || turnId == null) {
+            if (sessionId != null) turnGuardProjections.remove(sessionId)
+            return compactor.get().enforceWindowLimit(messages, budgetTokens = guardBudget)
+        }
+        var projection = turnGuardProjections[sessionId]
+        if (projection != null && (projection.turnId != turnId || !samePrefix(messages, projection.snapshot))) {
+            projection = null
+        }
+        val frozen = projection?.snapshot
+        if (frozen == null) {
+            val guarded = compactor.get().enforceWindowLimit(messages, budgetTokens = guardBudget)
+            // 这一批即将发出：连未截断的原样也一并冻住，保证本轮后续调用不会再动它们。
+            turnGuardProjections[sessionId] = TurnGuardProjection(turnId, guardBudget, guarded)
+            return guarded
+        }
+        if (messages.size == frozen.size) {
+            // 本轮没有新消息：直接复用上一次的结果，不再算一遍。
+            return if (messages === frozen) messages else frozen
+        }
+        // 保存区（已发出的前缀）占用的预算先从兜底预算里扣掉，只对新增尾部做剩余额度内的截断。
+        val remaining = guardBudget - estimateCache.estimate(ctx.sessionId, frozen)
+        val tail = messages.subList(frozen.size, messages.size)
+        val guardedTail = compactor.get().enforceWindowLimit(tail, budgetTokens = remaining)
+        if (guardedTail === tail) {
+            // 新消息也没被截：同样冻进快照，下一次调用时它们就是「已发出」的前缀。
+            if (messages !== frozen) {
+                turnGuardProjections[sessionId] = TurnGuardProjection(turnId, guardBudget, messages)
+            }
+            return messages
+        }
+        val guarded = frozen + guardedTail
+        turnGuardProjections[sessionId] = TurnGuardProjection(turnId, guardBudget, guarded)
+        return guarded
+    }
+
+    /** 把即将发出去的消息冻成本轮快照（不重截），没有轮次边界时什么也不做。 */
+    private fun freezeTurnSnapshot(ctx: EngineContext, guardBudget: Int, messages: List<AgentMessage>) {
+        val sessionId = ctx.sessionId ?: return
+        val turnId = ctx.turnId ?: return
+        turnGuardProjections[sessionId] = TurnGuardProjection(turnId, guardBudget, messages)
+    }
+
+    /** 当前列表是否以冻结快照为前缀：硬折叠会改掉开头，对不上就只能重新冻结。 */
+    private fun samePrefix(messages: List<AgentMessage>, frozen: List<AgentMessage>): Boolean {
+        if (messages.size < frozen.size) return false
+        for (index in frozen.indices) {
+            val current = messages[index]
+            val expected = frozen[index]
+            if (current !== expected && current != expected) return false
+        }
+        return true
+    }
+
+    /**
+     * 记下本轮真正发出去的上下文量（原始估算），供下一轮用真实 usage 校准。
+     *
+     * 每个出口都要记：出口不止一个（按条数早退、无改动返回、返回缩过的消息），漏一处就会让下一轮
+     * 拿着过期的基线去算差额——那比不校准更糟（会把别人的偏差算到本轮头上）。
+     */
+    /**
+     * 链合并尝试（阶段 4，设计 §4/§7）：链块数 > [MAX_CHAIN_BLOCKS] 或摘要区估算 > 窗口
+     * [CHAIN_SUMMARY_PERCENT]% 时，把最旧一半块合并成一块。放在硬折叠判定之前调用：
+     * 链超限本身占着窗口预算，合并可能直接让请求回到硬线以下，省一次折叠。
+     *
+     * 失败处理：任何失败（读库、摘要调用、闸门拒绝、落库）都返回 null 且不影响主折叠——
+     * 折叠照常成功，只记一条日志；同时记下失败位点（[mergeFailedTokens]），
+     * 避免链超限的会话每次 LLM 调用都白花一次合并调用。
+     *
+     * @return 合并后的消息视图；未触发或失败返回 null（调用方沿用原消息）。
+     */
+    private suspend fun tryChainMerge(
+        ctx: EngineContext,
+        call: LlmCall,
+        messages: List<AgentMessage>,
+        contextLimit: Int,
+        currentTokens: Int
+    ): List<AgentMessage>? {
+        val sessionId = ctx.sessionId ?: return null
+        val summaryProvider = call.summaryProvider ?: return null
+        val failedPoint = mergeFailedTokens[sessionId]
+        if (failedPoint != null &&
+            currentTokens < failedPoint + failedPoint * MERGE_RETRY_GROWTH_PERCENT / 100
+        ) {
+            return null
+        }
+        val chain = compactor.get().summaryChainStatus(sessionId) ?: return null
+        val overBlocks = chain.blockCount > MAX_CHAIN_BLOCKS
+        val overSummary = chain.summaryTokens > contextLimit * CHAIN_SUMMARY_PERCENT / 100
+        if (!overBlocks && !overSummary) return null
+        // 合并批大小（设计 §8）：每次合并最旧的 maxBlocks / 2 个块。「摘要区超占比」但块数
+        // 不足一半时全并到剩一块——单块链没有合并收益，不把链清空。
+        val mergeCount = (MAX_CHAIN_BLOCKS / 2).coerceAtMost(chain.blockCount - 1)
+        if (mergeCount <= 0) return null
+        val startedAt = System.currentTimeMillis()
+        FileLogger.i(
+            TAG,
+            "链合并触发 会话=$sessionId 块数=${chain.blockCount}（上限 $MAX_CHAIN_BLOCKS）" +
+                "摘要区估算=${chain.summaryTokens}tokens（窗口 $contextLimit 的 $CHAIN_SUMMARY_PERCENT%=" +
+                "${contextLimit * CHAIN_SUMMARY_PERCENT / 100}）合并批=$mergeCount"
+        )
+        val merged = try {
+            compactor.get().mergeOldestChainBlocks(
+                messages = messages,
+                chain = chain,
+                summaryProvider = summaryProvider,
+                sessionId = sessionId,
+                blockCount = mergeCount
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "链合并异常，不影响主折叠，下轮再试", e)
+            null
+        }
+        if (merged == null) {
+            FileLogger.w(TAG, "链合并未产出结果（不影响主折叠），记失败位点等下轮重试")
+            mergeFailedTokens[sessionId] = currentTokens
+            return null
+        }
+        mergeFailedTokens.remove(sessionId)
+        FileLogger.i(TAG, "链合并完成 会话=$sessionId 总耗时=${System.currentTimeMillis() - startedAt}ms")
+        return merged
+    }
+
+    private fun rememberRawEstimate(ctx: EngineContext, rawTokens: Int) {
+        ctx.sessionId?.let { lastRawEstimates[it] = rawTokens }
+    }
+
+    private suspend fun resolveContextTokens(provider: AIProvider): Int =
+        modelMetadataService
+            .resolve(provider.providerId, inferProviderType(provider), provider.model)
+            .contextTokens
+            .takeIf { it > 0 }
+            ?: ModelContextPolicy.DEFAULT_CONTEXT_TOKENS
+
+    /** 会话删除后丢掉它的占用快照，避免表里留着已不存在会话的数。 */
+    override suspend fun onSessionDeleted(ctx: EngineContext) {
+        contextUsageHolder.remove(ctx.sessionId)
+        ctx.sessionId?.let { foldedStillOverTokens.remove(it) }
+        ctx.sessionId?.let { foldFailedTokens.remove(it) }
+        ctx.sessionId?.let { lastRawEstimates.remove(it) }
+        ctx.sessionId?.let { mergeFailedTokens.remove(it) }
+        ctx.sessionId?.let { turnGuardProjections.remove(it) }
+        ctx.sessionId?.let { estimateCache.remove(it) }
+    }
+
+    private fun inferProviderType(provider: AIProvider): ProviderType {
+        val className = provider::class.simpleName.orEmpty()
+        return when {
+            "Anthropic" in className -> ProviderType.ANTHROPIC
+            "Gemini" in className -> ProviderType.GEMINI
+            else -> ProviderType.OPENAI
+        }
+    }
+
+    private companion object {
+        const val MODULE_ID = "compaction"
+        const val TAG = "CompactionModule"
+
+        /**
+         * 折叠没换来空间后，上下文要比那次折叠后的位点再长出这么多百分比才值得再折一次。
+         * 按比例而不是固定值：小窗口与大窗口的「一折」量级差很远，比例跟得上。
+         */
+        const val REFOLD_GROWTH_PERCENT = 5
+
+        /**
+         * 「折叠后仍超线」在界面上的卡片名。
+         *
+         * 不能与 COMPACTION_FAILURE_TOOL_NAME 同值——那是红色失败卡片的识别依据，而这次折叠
+         * 本身是成功的（只是没把上下文压到线下）。
+         */
+        const val OVER_LINE_TOOL_NAME = "上下文压缩提示"
+
+        /**
+         * 摘要链块数上限（设计 §8）：超过即触发链合并，把最旧一半合并成一块。
+         * 频率极低（每 maxBlocks 次折叠一次），不进设置 UI。
+         */
+        const val MAX_CHAIN_BLOCKS = 12
+
+        /**
+         * 摘要区窗口占比触发线（设计 §8，~15%）：摘要块链的估算 token 超过窗口的这个比例
+         * 时也触发链合并（块数不多但单块摘要写得长的场景）。
+         */
+        const val CHAIN_SUMMARY_PERCENT = 15
+
+        /**
+         * 链合并失败后的重试抑制：比照折叠失败（[foldFailedTokens]）的思路，失败位点记下来，
+         * 上下文比位点再长出 [REFOLD_GROWTH_PERCENT]% 才重试——否则链超限的会话每次 LLM 调用
+         * 都白花一次合并模型调用。
+         */
+        const val MERGE_RETRY_GROWTH_PERCENT = REFOLD_GROWTH_PERCENT
+    }
+}

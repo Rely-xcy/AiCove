@@ -9,7 +9,7 @@ architecture-policy.json，改口径请改那里，不要在本文件里另写�
     python3 scripts/check_layering.py --root <repo>
 
 判据（与 architecture-policy.json 的 layering 段一致）：
-1. core/** 不许 import com.aicode.feature.*。
+1. core/** 不许 import com.aicove.feature.*。
 2. feature/A 与 feature/B 同时存在 A→B 与 B→A 的依赖 → 循环依赖。
 单向的 feature→feature 不报：拆分它需要先定谁在上层，属重构决策。
 """

@@ -22,7 +22,7 @@ TEST_POLICY = {
     "version": 1,
     "layering": {
         "sourceRoots": ["app/src/main/java"],
-        "packagePrefix": "com.aicode",
+        "packagePrefix": "com.aicove",
         "extensions": [".kt"],
         "forbidden": [{"from": ["core"], "to": ["feature/*"], "reason": "core 是底座"}],
         "featureCycles": {"enabled": True, "reason": "两个 feature 互相依赖说明有一边放错层"},
@@ -32,7 +32,7 @@ TEST_POLICY = {
             "id": "raw-textfield",
             "symbol": "androidx.compose.material3.TextField",
             "scope": ["app/src/main/java/**/*.kt"],
-            "allow": ["app/src/main/java/com/aicode/core/ui/AppTextField.kt"],
+            "allow": ["app/src/main/java/com/aicove/core/ui/AppTextField.kt"],
             "reason": "统一走 AppTextField",
         },
         {
@@ -40,7 +40,7 @@ TEST_POLICY = {
             "type": "regex",
             "pattern": "(?<![\\w.])Color\\s*\\(\\s*(?:0x[0-9A-Fa-f]{6,8}|\\d)",
             "scope": ["app/src/main/java/**/*.kt"],
-            "allow": ["app/src/main/java/com/aicode/core/theme/**"],
+            "allow": ["app/src/main/java/com/aicove/core/theme/**"],
             "reason": "色值用主题令牌",
         },
     ],
@@ -60,7 +60,7 @@ TEST_POLICY = {
     },
 }
 
-SRC = "app/src/main/java/com/aicode/"
+SRC = "app/src/main/java/com/aicove/"
 ZH = "app/src/main/res/values/strings.xml"
 EN = "app/src/main/res/values-en/strings.xml"
 
@@ -70,7 +70,7 @@ def kt(*lines):
 
 
 def kotlin(package_tail, *body):
-    return kt("package com.aicode." + package_tail, "", *body)
+    return kt("package com.aicove." + package_tail, "", *body)
 
 
 def strings_xml(*keys):
@@ -117,30 +117,30 @@ class GateTest(unittest.TestCase):
     def test_core_import_feature_fails(self):
         self.write(
             SRC + "core/ui/Leaky.kt",
-            kotlin("core.ui", "import com.aicode.feature.agent.Foo"),
+            kotlin("core.ui", "import com.aicove.feature.agent.Foo"),
         )
         result = self.run_gate()
         self.assert_fail(result, "core -> feature/agent", "core/ui/Leaky.kt:3")
 
     def test_core_wildcard_import_fails(self):
-        self.write(SRC + "core/ui/Leaky.kt", kotlin("core.ui", "import com.aicode.feature.*"))
+        self.write(SRC + "core/ui/Leaky.kt", kotlin("core.ui", "import com.aicove.feature.*"))
         self.assert_fail(self.run_gate(), "core -> feature")
 
     def test_core_body_fully_qualified_fails(self):
         self.write(
             SRC + "core/ui/Leaky.kt",
-            kotlin("core.ui", "val x = com.aicode.feature.agent.Foo()"),
+            kotlin("core.ui", "val x = com.aicove.feature.agent.Foo()"),
         )
         self.assert_fail(self.run_gate(), "Leaky.kt:3", "全限定名")
 
     def test_feature_cycle_fails(self):
         self.write(
             SRC + "feature/a/A.kt",
-            kotlin("feature.a", "import com.aicode.feature.b.B"),
+            kotlin("feature.a", "import com.aicove.feature.b.B"),
         )
         self.write(
             SRC + "feature/b/B.kt",
-            kotlin("feature.b", "import com.aicode.feature.a.A"),
+            kotlin("feature.b", "import com.aicove.feature.a.A"),
         )
         result = self.run_gate()
         self.assert_fail(result, "feature/a 与 feature/b 互相依赖")
@@ -243,8 +243,8 @@ class GateTest(unittest.TestCase):
             SRC + "core/ui/Leaky.kt",
             kotlin(
                 "core.ui",
-                "import com.aicode.feature.agent.Foo",
-                "import com.aicode.feature.agent.Bar",
+                "import com.aicove.feature.agent.Foo",
+                "import com.aicove.feature.agent.Bar",
             ),
         )
         self.write(

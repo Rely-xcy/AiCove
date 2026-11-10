@@ -1,0 +1,134 @@
+package com.aicove.feature.agent.domain.model
+
+import kotlinx.serialization.Serializable
+import com.aicove.feature.agent.domain.subagent.AgentDefinition
+import com.aicove.feature.agent.domain.tool.ToolCall
+
+@Serializable
+sealed class AgentMessage {
+    /** 消息 id：子类各自持有（同名字段），基类抽象出来供跨形态列表统一取 id（残留气泡认 id、链合并视图过滤等场景）。 */
+    abstract val id: String
+
+    @Serializable
+    data class UserMessage(
+        override val id: String = "",
+        val content: String,
+        val images: List<AgentImage> = emptyList(),
+        /**
+         * 模式变化时注入的模式提醒。**不拼进 [content]**：界面渲染、落库、编辑都只认 content（用户原话），
+         * 提醒只在组装请求时由 [modelFacingContent] 拼回模型侧文本。null 表示这条消息没有提醒（绝大多数消息如此）。
+         */
+        val modelReminder: String? = null
+    ) : AgentMessage()
+
+    @Serializable
+    data class AssistantMessage(
+        override val id: String = "",
+        val content: String,
+        val toolCalls: List<ToolCall> = emptyList(),
+        /** 本轮模型的思考过程（对应 OpenAI/DeepSeek 的 reasoning_content）。回传上下文时需要原样发回，否则 DeepSeek 思考模式会报 400 错误。 */
+        val reasoning: String = "",
+        /** Anthropic extended thinking 的加密签名。与 [reasoning] 一起原样回传（工具循环必须），否则 400。其他 provider 为空串。 */
+        val signature: String = "",
+        /** Anthropic thinking / redacted_thinking 内容块的原样快照（JSON 数组文本），回传时需保持原样与原序。其他 provider 为空串。 */
+        val thinkingBlocksJson: String = "",
+        /**
+         * 本轮模型直接生成的图片（Gemini 图像模型）。内存态下 base64Data 可为空、path 指向容器文件，
+         * 回放时按 path 重建 base64 喂模型；落库只存附件路径不存 base64（见 [MessagePersistenceUseCase]）。
+         */
+        val images: List<AgentImage> = emptyList()
+    ) : AgentMessage()
+
+    @Serializable
+    data class ToolResultMessage(
+        override val id: String = "",
+        val toolName: String,
+        val result: String,
+        val images: List<AgentImage> = emptyList()
+    ) : AgentMessage()
+}
+
+@Serializable
+data class AgentImage(
+    val mimeType: String,
+    val base64Data: String,
+    val path: String = ""
+)
+
+const val CONTEXT_COMPACTION_MARKER = "What did we do so far?"
+const val CONTEXT_SUMMARY_LEGACY_PREFIX = "【系统提示：早期的对话已被压缩，以下是之前的核心状态摘要】"
+
+val AgentMessage.id: String
+    get() = when (this) {
+        is AgentMessage.UserMessage -> id
+        is AgentMessage.AssistantMessage -> id
+        is AgentMessage.ToolResultMessage -> id
+    }
+
+/**
+ * 喂模型的用户消息文本：提醒（[AgentMessage.UserMessage.modelReminder]）在末尾拼回。
+ * 所有 provider 的请求组装与 [com.aicove.feature.agent.domain.workflow.TokenEstimator] 都必须走本入口，
+ * 否则界面干净了、模型却收不到提醒（估算也会与实际请求不一致）。
+ */
+val AgentMessage.UserMessage.modelFacingContent: String
+    get() {
+        val reminder = modelReminder
+        if (reminder.isNullOrBlank()) return content
+        return if (content.isBlank()) reminder else "$content\n\n$reminder"
+    }
+
+data class AgentContext(
+    val currentFile: String?,
+    val selectedCode: String?,
+    val projectRoot: String,
+    val language: String?,
+    val history: List<AgentMessage> = emptyList(),
+    val inputImages: List<AgentImage> = emptyList(),
+    /** 当前会话 id：用于把本轮所有 AI 请求/响应落到该会话的日志文件（[com.aicove.core.util.AILogger]）。 */
+    val sessionId: String? = null,
+    /**
+     * 本轮用户消息在库里的行 id。workflow 把模式提醒写回这一行的 modelReminder 列，
+     * content 仍只存用户原话。null 表示本轮没有对应的用户行（自动触发的 /init、/skill 轮次），
+     * 此时提醒只在本轮请求里生效。
+     */
+    val userMessageId: String? = null,
+    /**
+     * 技能关键词命中后要注入的正文。由 workflow 与模式/任务清单等提醒拼成同一条 modelReminder
+     * 写进用户行，再随请求发出；不拼进 content——正文一变，这行及其后的前缀缓存全部作废。
+     */
+    val skillInjection: String? = null,
+    val mode: AgentMode = AgentMode.BUILD,
+    /** 进入 PLAN 前的模式（如 AUTO）：退出 PLAN 时恢复到它，null 视为 BUILD。 */
+    val modeBeforePlan: AgentMode? = null,
+    /** 当前会话的持续目标文本；null 表示未设定目标。 */
+    val goal: String? = null,
+    /** 当前会话的 goal 生命周期状态；ACTIVE 表示自主循环进行中。 */
+    val goalStatus: GoalStatus? = null,
+    /** 思考强度（"low"/"medium"/"high"），随每次 LLM 请求传给支持的 provider。 */
+    val reasoningEffort: String? = null,
+    /**
+     * 本会话是不是子代理会话：会话行里有 `parentId` 才算，这是结构性事实。
+     *
+     * 与 [agentDefinition] 必须分开：那一个是「本轮按某个自定义定义运行」，是配置性事实。
+     * 默认子代理（`task` 没写 `agent` 参数派发的）有 parentId 但没有定义；反过来主对话也能挂定义。
+     * 由 ViewModel 从会话行算一次往下传，下层只读它，不再各自推导。
+     */
+    val isSubAgent: Boolean = false,
+    /**
+     * 本轮（一次用户请求 = 一次 agent 循环）的标识：同一轮工具循环里的多次模型调用共用它。
+     * 发送前兜底截断按它冻结，避免相邻两次调用因为估算抖动截出不同字节。
+     */
+    val turnId: String? = null,
+    /**
+     * 本会话绑定的自定义子代理定义；非空表示本轮按定义组装提示词与工具集，
+     * 与「是不是子代理会话」无关（见 [isSubAgent]）。
+     */
+    val agentDefinition: AgentDefinition? = null
+) {
+    /**
+     * 工具授权判定用的有效模式：goal 自主循环激活期间按 AUTO 放行（保留灾难性安全防护），
+     * 与用户可见的 [mode] 解耦——goal 不改变会话显示的模式，只改变授权强度。
+     */
+    val permissionMode: AgentMode
+        get() = if (goalStatus == GoalStatus.ACTIVE) AgentMode.AUTO else mode
+}

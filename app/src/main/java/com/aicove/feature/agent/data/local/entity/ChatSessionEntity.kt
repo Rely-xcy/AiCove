@@ -1,0 +1,100 @@
+package com.aicove.feature.agent.data.local.entity
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+import com.aicove.feature.agent.domain.model.AgentMode
+import com.aicove.feature.agent.domain.model.ChatSession
+import com.aicove.feature.agent.domain.model.GoalStatus
+import com.aicove.feature.agent.domain.model.ReasoningEffort
+
+@Entity(
+    tableName = "chat_sessions",
+    indices = [Index(value = ["workspacePath"])]
+)
+data class ChatSessionEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val workspacePath: String = "",
+    val mode: String = AgentMode.BUILD.name,
+    /** 进入 PLAN 前的模式（如 AUTO）；退出 PLAN 时恢复，null 视为 BUILD。 */
+    val modeBeforePlan: String? = null,
+    /** 会话级持续目标文本；null 表示未设定目标。 */
+    val goal: String? = null,
+    /** goal 生命周期状态；[goal] 为 null 时无意义。 */
+    val goalStatus: String? = null,
+    // 与迁移 68 的 `NOT NULL DEFAULT 0` 逐字对上。注意这条约定**只适用于新增列**：
+    // 历史列千万别回头补注解——Room 只在实体声明了 defaultValue 时才比对库里的 dflt_value，
+    // 而老库经 ALTER 升级后的默认值与全新安装并不一致（参考 62→68 的 remote_connections.sort_order
+    // 为 '0'、而 65→68 与全新安装为 null），补上就会让其中一半存量报「Migration didn't properly handle」。
+    @ColumnInfo(defaultValue = "0")
+    val goalTurnCount: Int = 0,
+    @ColumnInfo(defaultValue = "0")
+    val goalStartInputTokens: Int = 0,
+    @ColumnInfo(defaultValue = "0")
+    val goalStartOutputTokens: Int = 0,
+    val reasoningEffort: String = ReasoningEffort.MEDIUM.name,
+    val providerId: String? = null,
+    val model: String? = null,
+    val totalInputTokens: Int = 0,
+    val totalOutputTokens: Int = 0,
+    val lastInputTokens: Int = 0,
+    val isPinned: Boolean = false,
+    /** 子代理会话：父会话 id；null 表示普通根会话。 */
+    val parentId: String? = null,
+    /** 子代理会话：派生子代理的类型（如 coder / researcher）；null 表示普通根会话。 */
+    val subagentType: String? = null
+) {
+    fun toDomain(): ChatSession = ChatSession(
+        id = id,
+        title = title,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        workspacePath = workspacePath,
+        mode = runCatching { AgentMode.valueOf(mode) }.getOrDefault(AgentMode.BUILD),
+        modeBeforePlan = modeBeforePlan?.let { runCatching { AgentMode.valueOf(it) }.getOrNull() },
+        goal = goal,
+        goalStatus = goalStatus?.let { runCatching { GoalStatus.valueOf(it) }.getOrNull() },
+        goalTurnCount = goalTurnCount,
+        goalStartInputTokens = goalStartInputTokens,
+        goalStartOutputTokens = goalStartOutputTokens,
+        reasoningEffort = runCatching { ReasoningEffort.valueOf(reasoningEffort) }.getOrDefault(ReasoningEffort.MEDIUM),
+        providerId = providerId,
+        model = model,
+        totalInputTokens = totalInputTokens,
+        totalOutputTokens = totalOutputTokens,
+        lastInputTokens = lastInputTokens,
+        isPinned = isPinned,
+        parentId = parentId,
+        subagentType = subagentType
+    )
+
+    companion object {
+        fun fromDomain(session: ChatSession): ChatSessionEntity = ChatSessionEntity(
+            id = session.id,
+            title = session.title,
+            createdAt = session.createdAt,
+            updatedAt = session.updatedAt,
+            workspacePath = session.workspacePath,
+            mode = session.mode.name,
+            modeBeforePlan = session.modeBeforePlan?.name,
+            goal = session.goal,
+            goalStatus = session.goalStatus?.name,
+            goalTurnCount = session.goalTurnCount,
+            goalStartInputTokens = session.goalStartInputTokens,
+            goalStartOutputTokens = session.goalStartOutputTokens,
+            reasoningEffort = session.reasoningEffort.name,
+            providerId = session.providerId,
+            model = session.model,
+            totalInputTokens = session.totalInputTokens,
+            totalOutputTokens = session.totalOutputTokens,
+            lastInputTokens = session.lastInputTokens,
+            isPinned = session.isPinned,
+            parentId = session.parentId,
+            subagentType = session.subagentType
+        )
+    }
+}

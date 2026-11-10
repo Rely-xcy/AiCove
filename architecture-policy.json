@@ -8,9 +8,9 @@
 
   "layering": {
     "sourceRoots": ["app/src/main/java"],
-    "packagePrefix": "com.aicode",
+    "packagePrefix": "com.aicove",
     "extensions": [".kt", ".java"],
-    "comment": "模块 = 包路径 com.aicode.<模块>；feature 下的子包按 com.aicode.feature.<名字> 归并，与旧 check_layering.py 口径一致。",
+    "comment": "模块 = 包路径 com.aicove.<模块>；feature 下的子包按 com.aicove.feature.<名字> 归并，与旧 check_layering.py 口径一致。",
     "forbidden": [
       {
         "from": ["core"],
@@ -36,35 +36,35 @@
       "id": "raw-outlined-textfield",
       "symbol": "androidx.compose.material3.OutlinedTextField",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/ui/AppTextField.kt"],
+      "allow": ["app/src/main/java/com/aicove/core/ui/AppTextField.kt"],
       "reason": "禁止各模块私自重复包装 OutlinedTextField：配色、下划线、弹窗专用色都已在 AppTextField 收敛，多包一层就会长出第二套视觉"
     },
     {
       "id": "raw-switch",
       "symbol": "androidx.compose.material3.Switch",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/ui/AppSwitch.kt"],
+      "allow": ["app/src/main/java/com/aicove/core/ui/AppSwitch.kt"],
       "reason": "开关一律用 core/ui/AppSwitch.kt：原生 Switch 的轨道/滑块颜色不跟随语义色板，暗色与换肤下会突兀"
     },
     {
       "id": "raw-modal-bottom-sheet",
       "symbol": "androidx.compose.material3.ModalBottomSheet",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/ui/AdaptiveModalBottomSheet.kt"],
+      "allow": ["app/src/main/java/com/aicove/core/ui/AdaptiveModalBottomSheet.kt"],
       "reason": "模态一律用 core/ui/AdaptiveModalBottomSheet.kt：里面带了平板自适应宽度与拖拽 fling 修正，直接调原生会丢掉这两项，平板上会拉满全屏"
     },
     {
       "id": "raw-swipe-to-dismiss",
       "symbol": "androidx.compose.material3.SwipeToDismiss",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/ui/SwipeToDeleteRow.kt"],
+      "allow": ["app/src/main/java/com/aicove/core/ui/SwipeToDeleteRow.kt"],
       "reason": "左滑删除一律用 core/ui/SwipeToDeleteRow.kt：删除背景、阈值与无障碍提示已统一，原生组件各页面各调一套"
     },
     {
       "id": "raw-swipe-to-dismiss-box",
       "symbol": "androidx.compose.material3.SwipeToDismissBox",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/ui/SwipeToDeleteRow.kt"],
+      "allow": ["app/src/main/java/com/aicove/core/ui/SwipeToDeleteRow.kt"],
       "reason": "左滑删除一律用 core/ui/SwipeToDeleteRow.kt：删除背景、阈值与无障碍提示已统一，原生组件各页面各调一套"
     },
     {
@@ -72,7 +72,7 @@
       "type": "regex",
       "pattern": "(?<![\\w.])Color\\s*\\(\\s*(?:0x[0-9A-Fa-f]{6,8}|\\d)",
       "scope": ["app/src/main/java/**/*.kt"],
-      "allow": ["app/src/main/java/com/aicode/core/theme/**"],
+      "allow": ["app/src/main/java/com/aicove/core/theme/**"],
       "reason": "色值只能来自 core/theme（AIEditorTheme 的语义色、AppThemePreset 预设、MaterialTheme 令牌）；页面里写死 0xFF... 在暗色与换肤下不跟随，改一次颜色要全仓搜"
     }
   ],

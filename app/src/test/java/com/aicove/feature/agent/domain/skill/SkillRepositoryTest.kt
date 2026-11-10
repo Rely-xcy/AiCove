@@ -1,0 +1,366 @@
+package com.aicove.feature.agent.domain.skill
+
+import com.aicove.core.datastore.ListOrderStore
+import com.aicove.testutil.TestFileAccessProvider
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
+import io.mockk.verify
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SkillRepositoryTest {
+
+    private val provider = TestFileAccessProvider()
+    private val globalSource = spyk(GlobalDirectorySkillSource(provider)).apply {
+        every { listSkills() } returns emptyList()
+    }
+    private val projectSource = spyk(ProjectDirectorySkillSource(provider)).apply {
+        every { listSkills() } returns emptyList()
+    }
+    private val config = mockk<SkillConfigRepository>().apply {
+        every { disabledNames() } returns emptySet()
+    }
+
+    /** 顺序表只影响展示顺序：单测里桩成恒等（返回原列表），否则空返回会把列表清空。 */
+    private val listOrderStore = mockk<ListOrderStore> {
+        every { sort<SkillEntry>(any(), any(), any()) } answers { firstArg() }
+    }
+
+    private val repository = SkillRepository(globalSource, projectSource, config, provider, listOrderStore)
+
+    private fun skill(name: String) = Skill(
+        name = name,
+        description = "desc of $name",
+        instructions = "body of $name"
+    )
+
+    @Test
+    fun loadInstructions_projectOverridesSameNameWithDifferentBody() {
+        val global = skill("same").copy(instructions = "global instructions")
+        val project = skill("same").copy(instructions = "project instructions")
+        every { globalSource.listSkills() } returns listOf(global)
+        every { projectSource.listSkills() } returns listOf(project)
+
+        val listed = repository.listSkills().single()
+        assertEquals(project, listed)
+        assertEquals("project instructions", repository.loadInstructions(listed.name))
+        verify(exactly = 0) { globalSource.loadInstructions(any()) }
+    }
+
+    @Test
+    fun loadInstructions_projectOverridesCaseInsensitiveName() {
+        val global = skill("MixedCase").copy(instructions = "global instructions")
+        val project = skill("mixedcase").copy(instructions = "project instructions")
+        every { globalSource.listSkills() } returns listOf(global)
+        every { projectSource.listSkills() } returns listOf(project)
+
+        assertEquals(listOf(project), repository.listSkills())
+        assertEquals("project instructions", repository.loadInstructions("MIXEDCASE"))
+        verify(exactly = 0) { globalSource.loadInstructions(any()) }
+    }
+
+    @Test
+    fun loadInstructions_fallsBackToGlobalWhenProjectHasNoMatch() {
+        val global = skill("GlobalOnly").copy(instructions = "global instructions")
+        every { globalSource.listSkills() } returns listOf(global)
+        every { projectSource.listSkills() } returns listOf(skill("other"))
+
+        assertEquals("global instructions", repository.loadInstructions("GLOBALONLY"))
+        verify(exactly = 1) { projectSource.loadInstructions("GLOBALONLY") }
+        verify(exactly = 1) { globalSource.loadInstructions("GLOBALONLY") }
+    }
+
+    @Test
+    fun loadInstructions_returnsNullWhenNeitherSourceHasMatch() {
+        every { globalSource.listSkills() } returns listOf(skill("global"))
+        every { projectSource.listSkills() } returns listOf(skill("project"))
+
+        assertNull(repository.loadInstructions("missing"))
+        verify(exactly = 1) { projectSource.loadInstructions("missing") }
+        verify(exactly = 1) { globalSource.loadInstructions("missing") }
+    }
+
+    @Test
+    fun loadInstructions_disabledNameBlocksBothSourcesCaseInsensitively() {
+        every { globalSource.listSkills() } returns listOf(skill("MixedCase"))
+        every { projectSource.listSkills() } returns listOf(skill("mixedcase"))
+        every { config.disabledNames() } returns setOf("mixedcase")
+
+        assertTrue(repository.listSkills().isEmpty())
+        assertNull(repository.loadInstructions("MIXEDCASE"))
+        verify(exactly = 0) { projectSource.loadInstructions(any()) }
+        verify(exactly = 0) { globalSource.loadInstructions(any()) }
+    }
+
+    @Test
+    fun mergeAll_combinesGlobalAndProject() {
+        val merged = SkillRepository.mergeAll(
+            global = listOf(skill("a"), skill("b")),
+            project = listOf(skill("c"))
+        )
+
+        assertEquals(listOf("a", "b", "c"), merged.map { it.skill.name })
+        assertTrue(merged.all { it.scope == SkillScope.GLOBAL || it.scope == SkillScope.PROJECT })
+        assertEquals(
+            listOf(SkillScope.GLOBAL, SkillScope.GLOBAL, SkillScope.PROJECT),
+            merged.map { it.scope }
+        )
+    }
+
+    @Test
+    fun mergeAll_projectOverridesSameName() {
+        val merged = SkillRepository.mergeAll(
+            global = listOf(skill("same")),
+            project = listOf(skill("same"))
+        )
+
+        assertEquals(1, merged.size)
+        assertEquals("same", merged[0].skill.name)
+        assertEquals(SkillScope.PROJECT, merged[0].scope)
+    }
+
+    @Test
+    fun mergeAll_caseInsensitiveDedup() {
+        val merged = SkillRepository.mergeAll(
+            global = listOf(skill("MixedCase")),
+            project = listOf(skill("mixedcase"))
+        )
+
+        assertEquals(1, merged.size)
+        assertEquals(SkillScope.PROJECT, merged[0].scope)
+    }
+
+    @Test
+    fun mergeAll_sortedByName() {
+        val merged = SkillRepository.mergeAll(
+            global = listOf(skill("zeta"), skill("alpha")),
+            project = listOf(skill("middle"))
+        )
+
+        assertEquals(listOf("alpha", "middle", "zeta"), merged.map { it.skill.name })
+    }
+
+    @Test
+    fun filterDisabled_removesDisabledSkills() {
+        val entries = SkillRepository.mergeAll(
+            global = listOf(skill("keep"), skill("drop")),
+            project = emptyList()
+        )
+
+        val filtered = SkillRepository.filterDisabled(entries, setOf("drop"))
+
+        assertEquals(listOf("keep"), filtered.map { it.skill.name })
+    }
+
+    @Test
+    fun filterDisabled_caseInsensitive() {
+        val entries = SkillRepository.mergeAll(
+            global = listOf(skill("Keep")),
+            project = emptyList()
+        )
+
+        val filtered = SkillRepository.filterDisabled(entries, setOf("keep"))
+
+        assertTrue(filtered.isEmpty())
+    }
+
+    @Test
+    fun filterDisabled_unknownNamesIgnored() {
+        val entries = SkillRepository.mergeAll(
+            global = listOf(skill("keep")),
+            project = emptyList()
+        )
+
+        val filtered = SkillRepository.filterDisabled(entries, setOf("not-exists"))
+
+        assertEquals(listOf("keep"), filtered.map { it.skill.name })
+    }
+
+    @Test
+    fun safeDeleteSkillDir_deletesOnlySkillDirectories() {
+        val temp = java.nio.file.Files.createTempDirectory("skills-test").toFile()
+        try {
+            val skillDir = File(temp, "my-skill")
+            skillDir.mkdirs()
+            File(skillDir, "SKILL.md").writeText("---\nname: my-skill\n---\n正文")
+            File(skillDir, "run.py").writeText("print(1)")
+
+            // 含 SKILL.md 的目录可删
+            assertTrue(SkillRepository.safeDeleteSkillDir(provider, skillDir.absolutePath))
+            assertTrue(!skillDir.exists())
+
+            // 不含指令文件的目录拒绝删除
+            val plainDir = File(temp, "not-a-skill")
+            plainDir.mkdirs()
+            File(plainDir, "readme.txt").writeText("x")
+            assertTrue(!SkillRepository.safeDeleteSkillDir(provider, plainDir.absolutePath))
+            assertTrue(plainDir.exists())
+
+            // 不存在的目录返回 false
+            assertTrue(!SkillRepository.safeDeleteSkillDir(provider, File(temp, "ghost").absolutePath))
+        } finally {
+            temp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun isValidName_rejectsPathTraversalAndSeparators() {
+        assertTrue(SkillRepository.isValidName("pdf-report"))
+        assertTrue(SkillRepository.isValidName("中文技能名"))
+        assertTrue(!SkillRepository.isValidName(""))
+        assertTrue(!SkillRepository.isValidName("   "))
+        assertTrue(!SkillRepository.isValidName("."))
+        assertTrue(!SkillRepository.isValidName(".."))
+        assertTrue(!SkillRepository.isValidName("a/b"))
+        assertTrue(!SkillRepository.isValidName("a\\b"))
+        assertTrue(!SkillRepository.isValidName("a:b"))
+        assertTrue(!SkillRepository.isValidName("a\u0000b"))
+        assertTrue(!SkillRepository.isValidName("x".repeat(65)))
+    }
+
+    @Test
+    fun instructionFile_prefersSkillMdThenClaudeMd() {
+        val temp = java.nio.file.Files.createTempDirectory("skills-instruction-test").toFile()
+        try {
+            val both = File(temp, "both").apply { mkdirs() }
+            File(both, "CLAUDE.md").writeText("x")
+            File(both, "skill.md").writeText("x")
+            assertEquals("skill.md", SkillRepository.instructionFile(provider, both.absolutePath)?.substringAfterLast('/'))
+
+            val claudeOnly = File(temp, "claude-only").apply { mkdirs() }
+            File(claudeOnly, "CLAUDE.md").writeText("x")
+            assertEquals("CLAUDE.md", SkillRepository.instructionFile(provider, claudeOnly.absolutePath)?.substringAfterLast('/'))
+
+            val empty = File(temp, "empty").apply { mkdirs() }
+            assertEquals(null, SkillRepository.instructionFile(provider, empty.absolutePath))
+        } finally {
+            temp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun searchSkills_matchesNameAndDescriptionButNotInstructions() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("Pdf-Tools").copy(description = "拆分与合并", instructions = "用 qpdf 合并"),
+            skill("docx-tools").copy(description = "PDF 转 docx", instructions = "用 soffice 转换"),
+            skill("bitmap-export").copy(description = "位图导出", instructions = "用 pdftoppm 导出图片")
+        )
+
+        val result = repository.searchSkills("PDF", 20)
+
+        // 正文不再参与判定：bitmap-export 只在正文里提到 pdftoppm，不算相关。
+        // 正文动辄几千字，蹭到泛词就上榜是「一搜一大片」的主因。
+        assertEquals(
+            "名称命中排描述之前；只命中正文的不进结果",
+            listOf("Pdf-Tools", "docx-tools"),
+            result.matches.map { it.name }
+        )
+        assertEquals(2, result.hitCount)
+        assertEquals(3, result.skillCount)
+    }
+
+    @Test
+    fun searchSkills_dropsTwoLetterEnglishTokens() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("build-tools").copy(description = "构建工具"),
+            skill("ui-kit").copy(description = "界面组件")
+        )
+
+        // `ui` 两个字母，切词阶段就被丢掉：它能蹭到 build/guide/quick，留着就是噪声源
+        assertTrue(repository.searchSkills("ui", 20).matches.isEmpty())
+    }
+
+    @Test
+    fun searchSkills_ignoresStructuralTermsOnlyInMultiWordQuery() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("android-reverse").copy(description = "Android 逆向与脱壳"),
+            skill("pdf-tools").copy(description = "PDF 拆分合并")
+        )
+
+        // 单词查询不过滤：用户就是想知道 android 相关技能
+        assertEquals(1, repository.searchSkills("android", 20).matches.size)
+
+        // 多词里 android 是结构词，不提供任何区分度；只有 pdf 算真正命中
+        val mixed = repository.searchSkills("android kotlin pdf", 20)
+        assertEquals(listOf("pdf-tools"), mixed.matches.map { it.name })
+    }
+
+    @Test
+    fun searchSkills_limitsMatchesButKeepsFullHitCount() {
+        every { globalSource.listSkills() } returns (1..5).map { skill("pdf-$it") }
+
+        val result = repository.searchSkills("pdf", 2)
+
+        assertEquals(2, result.matches.size)
+        assertEquals(5, result.hitCount)
+        assertEquals(5, result.skillCount)
+    }
+
+    @Test
+    fun searchSkills_noMatchReportsSearchedCount() {
+        every { globalSource.listSkills() } returns listOf(skill("pdf-tools"))
+
+        val result = repository.searchSkills("excel", 20)
+
+        assertTrue(result.matches.isEmpty())
+        assertEquals(0, result.hitCount)
+        assertEquals(1, result.skillCount)
+        assertTrue(
+            "真没命中不能被当成预算截断",
+            !result.truncatedByBudget
+        )
+    }
+
+    @Test
+    fun searchSkills_splitsChinesePhraseAndRanksFullCoverageFirst() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("reverse-analysis").copy(description = "逆向分析 APK", instructions = "ida"),
+            skill("log-analyzer").copy(description = "日志分析", instructions = "grep"),
+            skill("translate").copy(description = "翻译", instructions = "translate")
+        )
+
+        val result = repository.searchSkills("逆向 分析", 20)
+
+        // 两个词全中的排在只蹭中「分析」的前面；完全无关的不进结果
+        assertEquals(listOf("reverse-analysis", "log-analyzer"), result.matches.map { it.name })
+        assertEquals(2, result.hitCount)
+    }
+
+    @Test
+    fun searchSkills_matchesEnglishQueryThroughAliasTable() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("apk-shelltools").copy(description = "APK 脱壳", instructions = "frida"),
+            skill("docx-tools").copy(description = "文档转换", instructions = "soffice")
+        )
+
+        // 名称里没有 unpack，靠问法表里「脱壳 ↔ unpack」才对上
+        val result = repository.searchSkills("unpack", 20)
+
+        assertEquals(listOf("apk-shelltools"), result.matches.map { it.name })
+    }
+
+    @Test
+    fun searchSkills_budgetExhaustedReturnsScannedPartAndFlagsTruncated() {
+        every { globalSource.listSkills() } returns (1..5).map { skill("pdf-$it") }
+
+        val result = repository.searchSkills("pdf", 20, budgetMillis = 0)
+
+        assertTrue("预算为 0 时不应有结果", result.matches.isEmpty())
+        assertTrue("必须能区分「时间不够」与「真没有」", result.truncatedByBudget)
+        assertEquals(5, result.skillCount)
+    }
+
+    @Test
+    fun searchSkills_defaultBudgetScansEverything() {
+        every { globalSource.listSkills() } returns listOf(skill("pdf-tools"))
+
+        val result = repository.searchSkills("pdf", 20)
+
+        assertEquals(listOf("pdf-tools"), result.matches.map { it.name })
+        assertTrue(!result.truncatedByBudget)
+    }
+}

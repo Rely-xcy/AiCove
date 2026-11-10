@@ -186,7 +186,7 @@ IMPORT_RX = re.compile(r"^\s*import\s+([A-Za-z_][\w.]*)(?:\s+as\s+([A-Za-z_]\w*)
 
 def scan_layering(root: str, policy: dict) -> list:
     config = policy["layering"]
-    prefix = config.get("packagePrefix", "com.aicode")
+    prefix = config.get("packagePrefix", "com.aicove")
     extensions = config.get("extensions") or [".kt"]
     patterns = []
     for source_root in config["sourceRoots"]:

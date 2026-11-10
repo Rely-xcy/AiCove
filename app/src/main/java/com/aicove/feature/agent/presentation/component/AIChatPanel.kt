@@ -1,0 +1,2607 @@
+package com.aicove.feature.agent.presentation.component
+
+import android.content.ClipData
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import com.aicove.core.ui.ShapeClickBox
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import com.aicove.core.theme.Radius
+import com.aicove.core.theme.semanticColors
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aicove.R
+import com.aicove.core.theme.Spacing
+import com.aicove.core.ui.ImageViewerHost
+import com.aicove.core.ui.LocalImageViewer
+import com.aicove.core.ui.readableContentMaxWidth
+import com.aicove.core.ui.rememberImageViewerState
+import com.aicove.core.ui.rememberViewerDecodeSpec
+import com.aicove.core.util.FileLogger
+import com.aicove.feature.agent.domain.tool.question.UserQuestionAnswer
+import com.aicove.feature.agent.presentation.AgentUIMessage
+import com.aicove.feature.agent.presentation.AgentUIState
+import com.aicove.feature.agent.presentation.AIAgentViewModel
+import com.aicove.feature.agent.presentation.MessageRole
+import com.aicove.feature.agent.presentation.QueuedRequest
+import com.aicove.feature.agent.presentation.hasVisibleContent
+import com.aicove.feature.onboarding.domain.OnboardingStep
+import com.aicove.feature.onboarding.presentation.onboardingTarget
+import com.aicove.feature.settings.presentation.SettingsViewModel
+import com.aicove.feature.settings.domain.model.DashboardContext
+import com.aicove.feature.settings.domain.model.ProviderDashboardState
+import com.aicove.feature.settings.domain.model.modelMetadataKey
+import com.aicove.feature.workspace.domain.WorkspacePathMapper
+import com.aicove.feature.workspace.presentation.WorkspaceViewModel
+import com.aicove.feature.workspace.presentation.remote.HostKeyConfirmDialog
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.ArrowDown
+import compose.icons.feathericons.Zap
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+
+/**
+ * 流式尾巴的三种状态，用于 [when] 分支分发。
+ *
+ * 早先用 [androidx.compose.animation.Crossfade] 做淡入，但 Crossfade 按 targetState
+ * 缓存 content 子组合——流式期间 targetState 一直不变，文本增长时不会重新调用 content，
+ * 导致 [StreamingBubble] 收不到后续文本、停在首句。故改用枚举 + 直接 [when] 分发。
+ */
+private enum class TailKind { THINKING, STREAMING, COMPACTING, RETRYING, KEY_SWITCHED, NONE }
+
+internal fun shouldShowToolPreparation(
+    preparingTool: String?,
+    isBusy: Boolean,
+    isCompacting: Boolean,
+    awaitingUserInput: Boolean,
+): Boolean = preparingTool != null && isBusy && !isCompacting && !awaitingUserInput
+
+/** [ChatPanelSlot] 的存档器：存名字而不是枚举实例，避免依赖 Bundle 对 Serializable 的支持。 */
+private val ChatPanelSlotSaver = Saver<ChatPanelSlot, String>(
+    save = { it.name },
+    restore = { name -> ChatPanelSlot.entries.firstOrNull { slot -> slot.name == name } ?: ChatPanelSlot.None }
+)
+
+/** 悬浮层（横幅/面板/输入框）与最后一条消息的间距。 */
+private val FLOATING_LAYER_GAP_DP = 8.dp
+
+/** 内容底部驱动校准的容差（px）：最后内容底部超出安全区超过该值才向下校准，避免亚像素抖动。 */
+private const val AUTO_SCROLL_TOLERANCE_PX = 2
+
+/** AI 收工后继续逐帧校准的时长（ms）：md 异步解析仍可能改高度，不能一停就收手。 */
+private const val CALIBRATE_TAIL_MS = 1_200L
+
+/** 滚动到底部按钮直径（dp）。 */
+private const val SCROLL_TO_BOTTOM_BTN_SIZE = 34
+
+/** 连续新消息的入场错开间隔（ms）与总上限：一次插入很多卡片时不能让最后一张等好几秒。 */
+private const val MESSAGE_ENTRY_STAGGER_MS = 90L
+private const val MESSAGE_ENTRY_MAX_STAGGER_MS = 360L
+
+/** 消息未就绪时延迟多久才显示加载提示（ms）：本地读库很快，立即显示反而闪。 */
+private const val MESSAGES_LOADING_HINT_DELAY_MS = 220L
+
+/** 「插话」即时确认条的存留时长（ms）：够看清是哪一条，又不长期占据输入框上方。 */
+private const val INTERJECTION_ACK_MS = 2_600L
+
+/**
+ * 长消息拆块渲染：
+ *
+ * 超长助手正文（长文档复述）如果塞成单条 LazyColumn item，撑到几屏深时手势命中区
+ * 会在列表可见区之外，深处表格的横滑/长按复制/点击全部失效（原版深处交互失效的根因）。
+ * 限高+内滚的单窗口方案又会让窗口与列表世界之间出现「接不上、独立一块」的断接。
+ *
+ * 拆块的思路是：分裂成多条「有界高度」的列表 item，每条都是普通气泡（思考只在首块、
+ * 操作行只在末块、相邻块零间距无缝衔接），列表单一滚动轴——世界上下完全接通、深处
+ * 交互（表 8+ 横滑/复制/点击）因每条 item 高度有界而全部恢复。
+ *
+ * 若正文长度不超过阈值，不拆块，与普通消息完全一致。
+ *
+ * internal（而非 private）是为了让 [buildChatItems] 的用例能断言渲染项，见 ToolGroupExpansionTest。
+ */
+internal data class ChatRenderItem(
+    val message: AgentUIMessage,
+    val key: String,
+    val contentType: String,
+    val slice: String? = null,
+    val isChunkHeader: Boolean = true,
+    val isChunkFooter: Boolean = true,
+    /**
+     * 非空表示这是一条「连续工具调用」分组头 item。成员各自仍是独立 item（仅在该组展开时生成），
+     * 因此无论展开与否，任何一条 item 的高度都有界——这是深处交互（表格横滑、长按复制）不失效的前提。
+     */
+    val toolGroup: List<AgentUIMessage>? = null,
+    /** 分组当前是否展开（已含用户手动覆盖的结果）。 */
+    val groupExpanded: Boolean = true,
+    /** 非空 = 整轮折叠头 item（「执行中 / 已完成 Xs」）。 */
+    val turnHeader: TurnHeaderState? = null,
+    /** 轮头携带的过程项（思考 / 工具分组 / 中间正文），随后转换为独立列表项。 */
+    val turnProcess: List<ChatRenderItem> = emptyList(),
+    /** 是否渲染消息自带的思考块；结果块把思考抽为过程项后传 false。 */
+    val reasoningVisible: Boolean = true,
+    val groupMember: Boolean = false,
+)
+
+/** 消息条数超过此值后，渲染项列表改在后台线程重建。 */
+private const val ASYNC_CHAT_ITEMS_THRESHOLD = 120
+
+private class AsyncChatItems(val sessionId: String?, val items: List<ChatRenderItem>)
+
+/** 工具调用分组头 item 的 contentType。 */
+private const val TOOL_GROUP_CONTENT_TYPE = "tool-group"
+
+/** 整轮折叠头 item 的 contentType。 */
+private const val TURN_HEADER_CONTENT_TYPE = "turn-header"
+
+/** 整轮展开时，被抽为独立过程项的「轮末助手思考」的 contentType。 */
+internal const val REASONING_CONTENT_TYPE = "reasoning"
+
+/** 轮首用户消息 id → 整轮折叠的持久化 key（与 ViewModel.turnExpansionOverrides 同口径）。 */
+internal fun turnKeyOf(firstMessageId: String): String = "turn:$firstMessageId"
+
+/**
+ * 整轮任务折叠头 item 的渲染状态。非空即表示这是一条「执行中 / 已完成」头行。
+ *
+ * [endMessageId] 是轮末助手消息 id，据此查本轮耗时（见 [computeTaskDurations]，口径一致）。
+ */
+internal data class TurnHeaderState(
+    val key: String,
+    val endMessageId: String?,
+    /** 该轮是否仍在执行（末轮且 agent 忙）。 */
+    val running: Boolean,
+    /** 展开态（已含用户手动覆盖的结果）。 */
+    val expanded: Boolean,
+    /** 本轮过程项数量（思考 + 工具分组 + 中间正文）：折叠行上显示「执行中 · N 步」。 */
+    val processCount: Int = 0,
+)
+
+/**
+ * 分组展开时成员行的左缩进：分组头与成员行行首元素原本左右完全对齐（同一格 16dp 图标 + 同一间距），
+ * 看不出从属关系；给成员整行缩进一级，分组头是父、成员行是子，层级一眼可辨。
+ * 固定取 16dp（不用 [Spacing.lg]：紧凑密度下它只有 14dp，缩进会随屏幕形态忽大忽小）。
+ */
+internal val ToolGroupMemberPadding = PaddingValues(start = 16.dp)
+
+/**
+ * 该消息是否参与「连续工具调用」分组。
+ *
+ * 上下文压缩失败/摘要、后台通知这些 TOOL 消息各有专用渲染分支（见 [AgentMessageItem] 的早退），
+ * 混进分组会被当成普通工具行，故一并排除；普通消息（用户/助手）天然打断分组。
+ *
+ * **带附件的工具（`sendFile` / `generateImage`）也不分组**：它们产出的文件行就是结果本身，
+ * 折进「N 次工具调用」后随分组默认收起，等于把发来的文件藏起来；留作顶层 item 才常显。
+ */
+private fun AgentUIMessage.isGroupableTool(): Boolean =
+    role == MessageRole.TOOL && !isCompactionFailure && !isContextSummary &&
+        !isCompactionMarker && !isBackgroundNotification && attachments.isEmpty()
+
+/** 分组标识：取组内首条消息 id，保证一批工具调用在追加过程中 item key 稳定（不会重建导致视口跳动）。 */
+private fun toolGroupKey(first: AgentUIMessage): String = "toolgroup:${first.id}"
+
+/**
+ * 该助手消息是否会渲染出「气泡下方的元信息行」——即能不能承接那排「复制 / 更多」按钮。
+ *
+ * 压缩标记、上下文摘要、压缩失败、后台通知条在 [AgentMessageItem] 里各有专用渲染分支并提前
+ * return，不产生这一行；纯思考无正文的助手消息同理（没有正文可复制）。把「最新一条」的按钮
+ * 挂到它们身上，整段会话就一个按钮都不剩。
+ */
+private fun AgentUIMessage.rendersActionRow(): Boolean =
+    role == MessageRole.ASSISTANT &&
+        !isCompactionMarker && !isContextSummary && !isCompactionFailure && !isBackgroundNotification &&
+        (content.hasVisibleContent() || attachments.isNotEmpty())
+
+/**
+ * 本轮助手消息是否已经在消息列表里正式就位渲染：底部残留的流式 / 思考气泡是否该退休，靠它判定。
+ *
+ * 认「显式交接的行 id」——ViewModel 在本轮「有可见正文或有 reasoning」的助手行落库前登记该行主键
+ * （[com.aicove.feature.agent.presentation.AIAgentViewModel.currentSessionPendingAssistantRowId]），
+ * 这里只判断这个 id 是否已出现在 [messages] 里。不再做前缀 / 双向包含猜同源，也不再有 4s 强制退休。
+ *
+ * [streamingText] / [streamingReasoning] 任一非空（流式仍在写）时一律不判就位：否则新一轮正文会被
+ * 上一轮登记的 id 误判就位、在流式途中整段隐去。
+ */
+internal fun isAssistantSettled(
+    streamingText: String?,
+    streamingReasoning: String?,
+    pendingRowId: String?,
+    messages: List<AgentUIMessage>
+): Boolean =
+    streamingText == null &&
+        streamingReasoning == null &&
+        pendingRowId != null &&
+        messages.any { it.id == pendingRowId }
+
+/**
+ * 单条消息（非工具分组）在一次渲染中占据的 item：
+ * 超长助手正文拆成多条有界 chunk，其余消息 1:1。
+ */
+private fun messageRenderItems(message: AgentUIMessage): List<ChatRenderItem> {
+    val canSplit = message.role == MessageRole.ASSISTANT &&
+        !message.isCompactionMarker &&
+        !message.isContextSummary &&
+        !message.isCompactionFailure &&
+        !message.isBackgroundNotification &&
+        message.content.length > CHUNK_SPLIT_THRESHOLD_CHARS
+    if (!canSplit) {
+        return listOf(
+            ChatRenderItem(message = message, key = message.id, contentType = message.role.name)
+        )
+    }
+    val slices = splitLongContent(message.content)
+    if (slices.size <= 1) {
+        // 只拆出一块（如无空行的超长单段）：等同普通消息。
+        return listOf(
+            ChatRenderItem(message = message, key = message.id, contentType = message.role.name)
+        )
+    }
+    return slices.mapIndexed { idx, slice ->
+        ChatRenderItem(
+            message = message,
+            key = "${message.id}#chunk$idx",
+            contentType = "assistant-chunk",
+            slice = slice,
+            isChunkHeader = idx == 0,
+            isChunkFooter = idx == slices.lastIndex,
+        )
+    }
+}
+
+internal fun findChatMessageIndex(items: List<ChatRenderItem>, messageId: String): Int =
+    items.indexOfFirst { it.key == messageId }.takeIf { it >= 0 }
+        ?: items.indexOfFirst { it.message.id == messageId && it.contentType != REASONING_CONTENT_TYPE }
+
+internal fun reconcileTurnKeys(
+    messages: List<AgentUIMessage>,
+    previousKeys: Map<String, String>,
+): Map<String, String> = buildMap {
+    val (leading, turns) = splitChatTurns(messages)
+    if (leading.isNotEmpty()) {
+        // 块内已有身份就沿用；整窗连一个轮首都没有的那一帧干脆不写。渲染侧那一帧按会话取常量兜底，
+        // 而常量跨轮共用：写进交接表后，后来的轮会从块内消息把它继承过去，两个轮撞同一个轮头 key。
+        val key = leading.asReversed().firstNotNullOfOrNull { previousKeys[it.id] }
+        if (key != null) {
+            leading.forEach { put(it.id, key) }
+        } else if (turns.isNotEmpty()) {
+            val blockKey = leadingHeadKey(leading.last())
+            leading.forEach { put(it.id, blockKey) }
+        }
+    }
+    for (turn in turns) {
+        // 分页补齐轮首时，沿用已显示的半轮标识，保留展开选择与列表锚点。
+        val key = previousKeys[turn.userMessage.id]
+            ?: turn.messages.firstNotNullOfOrNull { previousKeys[it.id] }
+            ?: turn.key
+        put(turn.userMessage.id, key)
+        turn.messages.forEach { put(it.id, key) }
+    }
+}
+
+/**
+ * 消息列表 → LazyColumn item 列表。
+ *
+ * 三件事：**整轮任务折叠**、长文拆块、**连续工具调用分组**。
+ *
+ * 先按「用户消息 → 下一个用户消息之前」切成轮（见 [splitChatTurns]）：每轮依次产出「用户消息」与
+ * 轮内按**消息顺序**切出的段与项——连续的过程项聚成一段轮头，遇到常显项（带附件的工具）或结果
+ * 消息就在该处切断：常显项与结果正文各自在时间线原位独立成 item，不再被推到该轮最末。
+ * 过程项挂在轮头 item 内，整轮展开时随折叠头一起平滑展开；常显项不参与折叠。
+ * 结果 = 轮内最后一条有可见正文的普通助手消息（其思考抽为过程项）。
+ *
+ * 轮头展开态：没手动记录时「末轮且 agent 忙」默认展开、其余默认收起（[activeTurnKey]）；
+ * 一旦用户在 [turnOverrides] 里点过，就以其选择为准，任务完成自动收起不会覆盖它。
+ *
+ * 工具调用分组仍**默认收起**，只认 [groupOverrides] 的手动选择。
+ */
+internal fun buildChatItems(
+    messages: List<AgentUIMessage>,
+    groupOverrides: Map<String, Boolean>,
+    turnOverrides: Map<String, Boolean> = emptyMap(),
+    /**
+     * 当前正在跑的那一轮的轮首用户行对应 key（空闲时为 null）。
+     *
+     * 判定是「等于它、或排在它之后」：运行期间若出现后续轮（本轮之后新起的轮），
+     * 同属这次运行、同样还没跑完，按进行中渲染（不显示「已完成」、不把进行中的正文当结果）。
+     * 运行中插话不开新轮（见 [splitChatTurns]），且不渲染（已在 splitChatTurns 剔除）。
+     */
+    activeTurnKey: String? = null,
+    sessionId: String? = null,
+    turnKeys: Map<String, String> = emptyMap(),
+): List<ChatRenderItem> {
+    val items = ArrayList<ChatRenderItem>(messages.size)
+    val (leading, turns) = splitChatTurns(messages)
+    // 窗口从某一轮中间切开时，最前面那一截缺轮首、不是完整的轮：它的过程项同样折进一个折叠头，
+    // 避免把一段半轮摊在历史最前面；块尾若是上一轮的最终回复则照旧常显，不跟着折起来。
+    if (leading.isNotEmpty()) {
+        // 没有轮首时，分页窗口两端都可能随工具输出移动，只能用所属会话保持展开标识稳定；
+        // 窗口里已有这一截的既有 key（reconcileTurnKeys 交接来的）时以它为准。
+        // 会话级常量只出现在这一帧的渲染里：交接表不写它，否则多个轮都会继承到同一个轮头 key。
+        val headKey = turnKeys[leading.last().id] ?: if (turns.isEmpty() && sessionId != null) {
+            "turn:head:session:$sessionId"
+        } else {
+            leadingHeadKey(leading.last())
+        }
+        // 这一截通常结尾就是上一轮的最终回复（窗口从某一轮中间切开）：它照旧常显，
+        // 只有它的思考与更早的过程步骤折进折叠头，与完整轮次的呈现一致。
+        val running = headKey == activeTurnKey
+        val resultId = if (running) null else leading.last().takeIf { it.isResultCandidate() }?.id
+        val process = buildTurnProcessItems(leading, resultId, groupOverrides)
+        if (process.isNotEmpty()) {
+            items += ChatRenderItem(
+                message = leading.last(),
+                key = "$headKey#header",
+                contentType = TURN_HEADER_CONTENT_TYPE,
+                turnHeader = TurnHeaderState(
+                    key = headKey,
+                    endMessageId = null,
+                    running = running,
+                    expanded = turnOverrides[headKey] ?: running,
+                    processCount = process.size,
+                ),
+                turnProcess = process,
+            )
+        }
+        items += buildTurnPersistentItems(leading, resultId)
+    }
+    var runningFromHere = false
+    for (turn in turns) {
+        // 「正在跑」= 「activeTurnKey 起、往后都算」，不是「等于 activeTurnKey」：运行期间若出现后续轮，
+        // 它同样没跑完。只认相等的话，后续轮一落库就会把正在跑的那一轮顶成「已完成」，
+        // 进行中的正文也会被当成最终回答（见上面的 activeTurnKey）。
+        // 运行中插话不开新轮且不渲染（见 splitChatTurns），不会在这里把本轮顶掉。
+        // 轮 key 以 turnKeys 交接来的为准：分页把轮首补进窗口时 reconcileTurnKeys 沿用了半轮时期的
+        // key，窗口怎么装回来都认得出同一轮（手动展开态、运行中判定都按它命中）。
+        val stableTurnKey = turnKeys[turn.userMessage.id] ?: turn.key
+        if (activeTurnKey != null && stableTurnKey == activeTurnKey) runningFromHere = true
+        val running = runningFromHere
+        items += messageRenderItems(turn.userMessage)
+        val endAssistant = turn.messages.lastOrNull {
+            it.role == MessageRole.ASSISTANT && !it.isSystemCardInTurn()
+        }
+        val resultId = if (running) null else turn.messages.lastOrNull { it.isResultCandidate() }?.id
+        // 运行中的那一轮默认展开（过程实时演示可见）；已完成轮默认收起只留最终回答。
+        // 注意不能在运行中就改成收起：展开态一旦从「几十个过程项」缩成一个折叠头，
+        // LazyColumn 的 item 数骤减、锚定位置失真，视口会直接跳到上面去（反向 bug）。
+        // 「滑动时跳顶」的真正原因是贴底校准抢滚动（内层手势未停跟随 + 尾窗盲跑），
+        // 已在 nestedScroll.onPostScroll 与校准尾窗处修掉，与本行无关。
+        val expanded = turnOverrides[stableTurnKey] ?: running
+        // 轮内按消息顺序产出：连续的过程项聚成一段轮头，遇到常显项或结果消息就在该处切断。
+        // 常显项与结果正文因此在时间线原位独立成 item，不再被推到该轮最末（旧实现把它们固定排在轮末，
+        // 晚于常显项的助手消息又被折进轮头，常显项总沉在列表底部）。同一段内连续工具仍分组。
+        // 每段的展开态取同一个 expanded：整轮展开/收起对所有段一视同仁。
+        var segment = ArrayList<AgentUIMessage>()
+        var segmentTail = ArrayList<ChatRenderItem>()
+        var headerIndex = 0
+        var emittedForTurn = false
+        fun flushSegment() {
+            if (segment.isEmpty() && segmentTail.isEmpty()) return
+            val key = if (headerIndex == 0) "${stableTurnKey}#header" else "${stableTurnKey}#header#$headerIndex"
+            headerIndex++
+            items += ChatRenderItem(
+                message = turn.userMessage,
+                key = key,
+                contentType = TURN_HEADER_CONTENT_TYPE,
+                turnHeader = TurnHeaderState(
+                    key = stableTurnKey,
+                    endMessageId = endAssistant?.id,
+                    running = running,
+                    expanded = expanded,
+                    processCount = segment.size + segmentTail.size,
+                ),
+                turnProcess = buildTurnProcessItems(
+                    messages = segment,
+                    resultId = null,
+                    groupOverrides = groupOverrides,
+                ) + segmentTail,
+            )
+            segment = ArrayList()
+            segmentTail = ArrayList()
+            emittedForTurn = true
+        }
+        for (message in turn.messages) {
+            when {
+                message.id == resultId -> {
+                    // 结果的思考抽为过程项并入当前段；正文另作常显的顶层 item（不重复渲染思考）。
+                    if (!message.reasoning.isNullOrEmpty()) {
+                        segmentTail += ChatRenderItem(
+                            message = message,
+                            key = "${message.id}#reasoning",
+                            contentType = REASONING_CONTENT_TYPE,
+                        )
+                    }
+                    flushSegment()
+                    items += messageRenderItems(message).map { it.copy(reasoningVisible = false) }
+                    emittedForTurn = true
+                }
+                message.isPersistentInTurn() -> {
+                    flushSegment()
+                    items += messageRenderItems(message)
+                    emittedForTurn = true
+                }
+                else -> segment += message
+            }
+        }
+        flushSegment()
+        // 末轮运行中但整轮没有任何过程项、结果或常显项：仍产出一个空轮头显示「执行中」。
+        if (running && !emittedForTurn) {
+            items += ChatRenderItem(
+                message = turn.userMessage,
+                key = "${stableTurnKey}#header",
+                contentType = TURN_HEADER_CONTENT_TYPE,
+                turnHeader = TurnHeaderState(
+                    key = stableTurnKey,
+                    endMessageId = endAssistant?.id,
+                    running = running,
+                    expanded = expanded,
+                ),
+                turnProcess = emptyList(),
+            )
+        }
+    }
+    return items.withUniqueKeys()
+}
+
+/**
+ * 保证 LazyColumn item key 全局唯一：同 key 会让 Compose 直接抛 “Key ... was already used” 而整页崩。
+ * 这是兜底而非修复：重复可能来自轮头 key 复用（见 [reconcileTurnKeys]），也可能是别的上游脏 key。
+ *
+ * 不静默丢弃重复项：保留全部内容，只给后来者补一个后缀（同 key 的后续项用 `#dupN`），
+ * 这样用户至少能看到内容、崩溃也不再发生；真正的重复留给上游修。
+ */
+private fun List<ChatRenderItem>.withUniqueKeys(): List<ChatRenderItem> {
+    val seen = HashSet<String>(size)
+    var hadDup = false
+    val out = map { item ->
+        if (seen.add(item.key)) {
+            item
+        } else {
+            hadDup = true
+            var i = 2
+            var candidate = "${item.key}#dup$i"
+            while (!seen.add(candidate)) {
+                i++
+                candidate = "${item.key}#dup$i"
+            }
+            item.copy(key = candidate)
+        }
+    }
+    if (hadDup) {
+        FileLogger.w("AIChatPanel", "聊天列表出现重复 item key，已加后缀兜住：共 ${out.size} 项")
+    }
+    return out
+}
+
+internal fun flattenChatProcesses(items: List<ChatRenderItem>): List<ChatRenderItem> = buildList {
+    for (item in items) {
+        if (item.turnHeader == null) {
+            add(item)
+            continue
+        }
+        add(item.copy(turnProcess = emptyList()))
+        if (!item.turnHeader.expanded) continue
+        for (child in item.turnProcess) {
+            val group = child.toolGroup
+            if (group == null) {
+                add(child)
+            } else {
+                add(child)
+                if (child.groupExpanded) {
+                    group.forEach { member ->
+                        add(ChatRenderItem(
+                            message = member,
+                            key = member.id,
+                            contentType = member.role.name,
+                            groupMember = true,
+                        ))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 一轮任务：轮首用户消息 + 其后的全部消息（助手 / 工具 / 压缩卡片等）。 */
+private class ChatTurn(
+    val key: String,
+    val userMessage: AgentUIMessage,
+    val messages: List<AgentUIMessage>,
+)
+
+/**
+ * 按「用户消息」切成轮。返回 (轮首之前的散消息, 轮列表)。
+ *
+ * 后台通知虽可能是 USER 角色，但它是系统注入的提示条而非用户输入，不作为轮起点（归入当前轮内容）。
+ * 运行中插话（isInterjection）在入口处整体剔除：忙碌插话落库只为记录与进模型 payload，
+ * 不渲染为用户气泡、不进时间线（留在这儿会被当成轮内过程项画出来）。
+ */
+private fun splitChatTurns(allMessages: List<AgentUIMessage>): Pair<List<AgentUIMessage>, List<ChatTurn>> {
+    val messages = allMessages.filterNot { it.isInterjection }
+    val leading = ArrayList<AgentUIMessage>()
+    val turns = ArrayList<ChatTurn>()
+    var user: AgentUIMessage? = null
+    var body: MutableList<AgentUIMessage>? = null
+    for (message in messages) {
+        if (message.role == MessageRole.USER && !message.isBackgroundNotification && !message.isCompactionMarker) {
+            user?.let { turns += ChatTurn(turnKeyOf(it.id), it, body?.toList().orEmpty()) }
+            user = message
+            body = ArrayList()
+        } else {
+            if (body == null) leading += message else body.add(message)
+        }
+    }
+    user?.let { turns += ChatTurn(turnKeyOf(it.id), it, body?.toList().orEmpty()) }
+    return leading to turns
+}
+
+/**
+ * 可以挂「复制 / 更多」操作行的消息 id 集合（每个已收尾轮次的末条可挂消息，含开头的散消息）。
+ *
+ * 轮次是否收尾只看 [activeTurnKey]：它以及排在它之后的轮都属于正在跑的那次运行，一律不挂——否则本轮
+ * 进行中的正文会被当成最终回答，生成中途就冒出操作行。运行中插话不开新轮也不渲染
+ * （见 [splitChatTurns]），不影响这里的轮次归属。
+ * [busy] 为真但 [activeTurnKey] 为空（本轮没有轮首用户行，或它还没被加载进来）时退回旧判据
+ * 「除末轮外都算收尾」，与改动前一致。
+ */
+internal fun actionableResultIds(
+    messages: List<AgentUIMessage>,
+    activeTurnKey: String?,
+    busy: Boolean
+): Set<String> {
+    val (leading, turns) = splitChatTurns(messages)
+    val ids = mutableSetOf<String>()
+    leading.filter { it.rendersActionRow() }.forEach { ids += it.id }
+    val runningFrom = activeTurnKey?.let { key -> turns.indexOfFirst { it.key == key }.takeIf { it >= 0 } }
+    for (i in turns.indices) {
+        val turn = turns[i]
+        val turnFinished = if (runningFrom != null) i < runningFrom else (!busy || i != turns.lastIndex)
+        if (!turnFinished) continue
+        val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() && it.rendersActionRow() }
+            ?: turn.messages.lastOrNull { it.rendersActionRow() }
+        if (resultMsg != null) {
+            ids += resultMsg.id
+        }
+    }
+    return ids
+}
+
+/**
+ * 被窗口截断、找不到轮首的那一截过程（见 [buildChatItems]）的折叠头 key。
+ *
+ * 取块尾消息 id 而非块首：窗口继续向前补加载时新消息插在块首，块尾不变、key 保持稳定。
+ */
+private fun leadingHeadKey(lastMessage: AgentUIMessage): String = "turn:head:${lastMessage.id}"
+
+/** 轮内「常显」项（保持原序）：结果正文（拆块，不重复渲染思考）与带附件的工具行。 */
+private fun buildTurnPersistentItems(
+    messages: List<AgentUIMessage>,
+    resultId: String?,
+): List<ChatRenderItem> {
+    val out = ArrayList<ChatRenderItem>()
+    for (message in messages) {
+        if (message.id == resultId) {
+            messageRenderItems(message).forEach { out += it.copy(reasoningVisible = false) }
+        } else if (message.isPersistentInTurn()) {
+            out += messageRenderItems(message)
+        }
+    }
+    return out
+}
+
+/**
+ * 该消息在整轮折叠里是否「常显」——不参与过程折叠，无论轮展开与否都显示。
+ *
+ * 仅限带附件的工具（sendFile / generateImage 产出的文件行）：文件就是结果本身，折进
+ * 「N 次工具调用」或整轮折叠等于把产出物藏起来。后台通知与压缩卡片是过程性提示，
+ * 随过程一起折叠（见 [isSystemCardInTurn]）。
+ */
+private fun AgentUIMessage.isPersistentInTurn(): Boolean =
+    role == MessageRole.TOOL && attachments.isNotEmpty()
+
+/**
+ * 系统注入的卡片型消息（后台通知条 / 压缩标记·摘要·失败）：折进轮过程，且不得被选为
+ * 轮「结果」或轮末耗时锚点——压缩摘要是 ASSISTANT 角色，不排除会顶掉真正的回复正文。
+ */
+private fun AgentUIMessage.isSystemCardInTurn(): Boolean =
+    isCompactionMarker || isContextSummary || isCompactionFailure || isBackgroundNotification
+
+/** 能否作为一轮的「结果」：最后一条有可见正文的普通助手消息（系统卡片不算，见 [isSystemCardInTurn]）。 */
+private fun AgentUIMessage.isResultCandidate(): Boolean =
+    role == MessageRole.ASSISTANT && !isSystemCardInTurn() && content.hasVisibleContent()
+
+/**
+ * 轮内「过程」项（保持原序）：思考、连续工具调用分组、中间助手正文、后台通知条与压缩卡片。
+ * 挂在轮头 item 内一起展开。
+ *
+ * 结果消息的思考归过程（抽为一个 [REASONING_CONTENT_TYPE] 项）；带附件工具常显、不进过程，
+ * 轮内由 [buildChatItems] 在原位直接产出，块首半轮由 [buildTurnPersistentItems] 产出。
+ */
+private fun buildTurnProcessItems(
+    messages: List<AgentUIMessage>,
+    resultId: String?,
+    groupOverrides: Map<String, Boolean>,
+): List<ChatRenderItem> {
+    val out = ArrayList<ChatRenderItem>(messages.size)
+    var i = 0
+    while (i < messages.size) {
+        val message = messages[i]
+        if (message.isGroupableTool()) {
+            var j = i
+            while (j < messages.size && messages[j].isGroupableTool()) j++
+            val members = messages.subList(i, j).toList()
+            // 只有一条工具时不折成「1 次工具调用」，直接当普通工具行显示。
+            if (members.size == 1) {
+                out += messageRenderItems(members.first())
+            } else {
+                val key = toolGroupKey(members.first())
+                out += ChatRenderItem(
+                    message = members.first(),
+                    key = key,
+                    contentType = TOOL_GROUP_CONTENT_TYPE,
+                    toolGroup = members,
+                    groupExpanded = groupOverrides[key]
+                        ?: members.firstNotNullOfOrNull { groupOverrides[toolGroupKey(it)] }
+                        ?: members.any { groupOverrides[it.id] == true },
+                )
+            }
+            i = j
+            continue
+        }
+        when {
+            message.isPersistentInTurn() -> Unit
+            message.id == resultId -> {
+                if (!message.reasoning.isNullOrEmpty()) {
+                    out += ChatRenderItem(
+                        message = message,
+                        key = "${message.id}#reasoning",
+                        contentType = REASONING_CONTENT_TYPE,
+                    )
+                }
+            }
+            else -> out += messageRenderItems(message)
+        }
+        i++
+    }
+    return out
+}
+
+/** 超过该长度（字符）的助手正文拆成多条有界 chunk。 */
+private const val CHUNK_SPLIT_THRESHOLD_CHARS = 2_000
+
+/**
+ * 预热队列上限：与 [MarkdownRenderCache] 容量同量级。再多也会被 LRU 挤掉，
+ * 先把最近窗口喂熟就已经覆盖「滑到哪都能命中」。
+ */
+private const val MARKDOWN_WARM_MAX_ENTRIES = 200
+
+/** 每条 chunk 的目标字符预算：正文按 markdown 块打包，单块超出预算（如巨大表格）时
+ *  按行硬切兜底，保证任意 chunk 高度有界（≈0.5-0.7 屏）。 */
+private const val CHUNK_BUDGET_CHARS = 1_200
+
+/**
+ * 长正文拆块：以行为单位识别三类 markdown 块——代码围栏（整段）、表格（连续 | 行，
+ * 整表保持完整）、普通段落（以空行分隔），然后按字符预算贪心打包成 chunk。
+ * 超预算的单块按行拆分为多个块，宁可打断表格也不让某条 item 无界长高。
+ */
+internal fun splitLongContent(text: String): List<String> {
+    val lines = text.lines()
+    val rawBlocks = ArrayList<String>()
+    var i = 0
+    while (i < lines.size) {
+        val line = lines[i]
+        val trimmed = line.trimStart()
+        when {
+            trimmed.startsWith("```") || trimmed.startsWith("~~~") -> {
+                val fence = if (trimmed.startsWith("```")) "```" else "~~~"
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && !lines[j].trimStart().startsWith(fence)) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                if (j < lines.size) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+            line.isBlank() -> i++
+            trimmed.startsWith("|") -> {
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && lines[j].isNotBlank() && lines[j].trimStart().startsWith("|")) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+            else -> {
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && lines[j].isNotBlank() &&
+                    !lines[j].trimStart().startsWith("```") &&
+                    !lines[j].trimStart().startsWith("~~~") &&
+                    !lines[j].trimStart().startsWith("|")
+                ) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+        }
+    }
+    if (rawBlocks.isEmpty()) return listOf(text)
+
+    // 超预算单块（如巨型表格/巨型段落）按行切成预算内的小块，兜底保证有界。
+    // 代码块（``` / ~~~）作为不可分割的语法单元必须保持完整，绝不能按行拆碎，
+    // 否则围栏闭合被破坏，后续片段会退化为普通正文、丢失高亮与复制，HTML 更会被预处理器误清洗。
+    val blocks = ArrayList<String>()
+    for (block in rawBlocks) {
+        val isCodeBlock = block.trimStart().let { it.startsWith("```") || it.startsWith("~~~") }
+        if (block.length <= CHUNK_BUDGET_CHARS || isCodeBlock) {
+            blocks.add(block)
+        } else {
+            val piece = StringBuilder()
+            var weight = 0
+            for (ln in block.lines()) {
+                if (weight > 0 && weight + 1 + ln.length > CHUNK_BUDGET_CHARS) {
+                    blocks.add(piece.toString()); piece.setLength(0); weight = 0
+                }
+                piece.append(ln).append('\n'); weight += ln.length + 1
+            }
+            if (piece.isNotBlank()) blocks.add(piece.toString())
+        }
+    }
+
+    val chunks = ArrayList<String>()
+    val cur = StringBuilder()
+    var weight = 0
+    for (block in blocks) {
+        val w = block.length + 2
+        if (weight > 0 && weight + w > CHUNK_BUDGET_CHARS) {
+            chunks.add(cur.toString()); cur.setLength(0); weight = 0
+        }
+        // 块间必须留空行：丢空行会让 markdown 语义粘连（段落 + 紧跟 --- 会被解析成 setext 标题，段落被夸成标题字号）。
+        if (weight > 0) cur.append('\n')
+        cur.append(block).append('\n'); weight += w
+    }
+    if (cur.isNotBlank()) chunks.add(cur.toString())
+    return chunks
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AIChatPanel(
+    viewModel: AIAgentViewModel,
+    onNavigateToTerminal: () -> Unit = {},
+    onNavigateToGit: () -> Unit = {},
+    onNavigateToBrowser: () -> Unit = {},
+    settingsViewModel: SettingsViewModel? = null,
+    workspaceViewModel: WorkspaceViewModel? = null,
+    onOpenDrawer: () -> Unit,
+    showMenuButton: Boolean = true,
+    /** 大屏右栏当前开的是终端 / Git 时，顶栏对应图标高亮。 */
+    terminalActive: Boolean = false,
+    gitActive: Boolean = false,
+    browserActive: Boolean = false,
+    currentFile: String? = null,
+    selectedCode: String? = null,
+    onboardingStep: OnboardingStep? = null,
+    onSelectModelInOnboarding: (() -> Unit)? = null,
+    onDismissModelSheetInOnboarding: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val agentState by viewModel.agentState.collectAsStateWithLifecycle()
+    val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
+    val messages = messagesState.messages
+    val pendingScroll by viewModel.pendingScrollMessage.collectAsStateWithLifecycle()
+    // 子代理卡片：状态与动作经 CompositionLocal 下发给 task 工具行，避免逐层透传。
+    val subAgentCards by viewModel.subAgentCards.collectAsStateWithLifecycle()
+
+    val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
+    // 工具卡片入场调度：只排本次浏览期间新追加到尾部的 TOOL 消息，逐个错开淡入。
+    // 换会话时调度器重建，新会话的存量消息不入场。
+    val entryScheduler = remember(currentSessionId) { MessageEntryScheduler() }
+    val messageEntryDelays = remember(messages, entryScheduler) { entryScheduler.schedule(messages) }
+    val currentSessionState by viewModel.currentSessionState.collectAsStateWithLifecycle()
+    val currentSession = currentSessionState
+    val sessionTitle = currentSession?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_new_session_btn)
+    val sessionInputTokens = currentSession?.totalInputTokens ?: 0
+    val sessionOutputTokens = currentSession?.totalOutputTokens ?: 0
+    // 压缩判定发布的占用快照（含实际生效阈值），按会话分开存：取不到就说明本会话还没判定过。
+    val contextUsages by viewModel.contextUsage.collectAsStateWithLifecycle()
+    // 本轮自然语言触发的技能（按用户消息 id）：仅用于气泡下方 chip。
+    val triggeredSkills by viewModel.triggeredSkills.collectAsStateWithLifecycle()
+    val sessionContextUsage = contextUsages[currentSessionId]
+    // 取不到快照时（表现为「没有环」）必须能自证原因：是本会话还没判定过，还是判定发的是别的会话。
+    // 后者曾是「已触发压缩、环却只显示一小截」的根因，只在会话或快照归属变化时记一条。
+    LaunchedEffect(currentSessionId, sessionContextUsage?.sessionId) {
+        FileLogger.i(
+            "AIChatPanel",
+            "上下文环 当前会话=${currentSessionId ?: "-"} 快照会话=${sessionContextUsage?.sessionId ?: "无"}"
+        )
+    }
+    val messagesReady = messagesState.loaded && messagesState.sessionId == currentSessionId
+    val runningTool by viewModel.runningTool.collectAsStateWithLifecycle()
+    val isCompacting by viewModel.isCompacting.collectAsStateWithLifecycle()
+    // 压缩步数（2/5）：只影响「正在压缩」那行文案，不新增弹窗、不占输入框。
+    val compactionProgress by viewModel.compactionProgress.collectAsStateWithLifecycle()
+    val retryState by viewModel.retryState.collectAsStateWithLifecycle()
+    val keySwitchState by viewModel.keySwitchState.collectAsStateWithLifecycle()
+    val streamingText by viewModel.streamingText.collectAsStateWithLifecycle()
+    val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
+    val reasoningTiming by viewModel.reasoningTiming.collectAsStateWithLifecycle()
+    val preparingTool by viewModel.preparingTool.collectAsStateWithLifecycle()
+    // 等待模型或工具执行时的状态文案：
+    // 1. 若当前有正在执行的工具（runningTool）或模型正在准备的工具（preparingTool，工具名先到参数还在流式），
+    //    直接说清在做什么（「正在读取文件」、「正在编辑文件」等，见 toolRunningLabelRes）；
+    // 2. 否则（如等待模型首字吐出、纯思考间隙）兜底显示「正在思考」。
+    val activeToolName = runningTool.lastOrNull()?.toolName?.takeIf { it.isNotBlank() } ?: preparingTool
+    val thinkingLabel = activeToolName?.let { stringResource(toolRunningLabelRes(it)) }
+        ?: stringResource(R.string.chat_status_thinking)
+    val pendingPermission by viewModel.pendingToolPermission.collectAsStateWithLifecycle()
+    val pendingPermissionSessionTitle by viewModel.pendingToolPermissionSessionTitle.collectAsStateWithLifecycle()
+    val pendingQuestion by viewModel.pendingUserQuestion.collectAsStateWithLifecycle()
+    val currentTodoItems by viewModel.currentSessionTodoItems.collectAsStateWithLifecycle()
+    val queuedRequests by viewModel.queuedRequests.collectAsStateWithLifecycle()
+    val planApproval by viewModel.pendingPlanApproval.collectAsStateWithLifecycle()
+    // 「插话」即时确认：点击后短暂在输入框上方显示该条内容（约 2.6s 自动隐去）。
+    // 不用 Toast：输入框区域就是用户此刻看的地方，且不会遮挡聊天内容。
+    var interjectionAck by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(interjectionAck) {
+        val ack = interjectionAck ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(INTERJECTION_ACK_MS)
+        if (interjectionAck == ack) interjectionAck = null
+    }
+    // 正在运行的那一轮的轮首用户行 id（运行时真值，见 AIAgentViewModel.currentSessionRunningTurnAnchorId）：
+    // 「哪一轮还在跑」只认它。
+    val runningTurnAnchorId by viewModel.currentSessionRunningTurnAnchorId.collectAsStateWithLifecycle()
+    // 本轮助手行（承载可见正文/思考那条）在库里的主键，由 ViewModel 在落库前显式登记
+    // （见 AIAgentViewModel.currentSessionPendingAssistantRowId）：界面靠它认定落库行是否已回流，
+    // 取代「前缀猜同源 + 4s 强制退休」。
+    val pendingAssistantRowId by viewModel.currentSessionPendingAssistantRowId.collectAsStateWithLifecycle()
+    val targetRewindMessageId by viewModel.targetRewindMessageId.collectAsStateWithLifecycle()
+    val providers = (settingsViewModel?.providers?.collectAsStateWithLifecycle()?.value ?: emptyList()).filter { it.isEnabled }
+    val modelMetadata = settingsViewModel?.modelMetadata?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val sessionProviderModel by viewModel.currentSessionProviderModel.collectAsStateWithLifecycle()
+    val defaultProviderId = settingsViewModel?.defaultModelProviderId?.collectAsStateWithLifecycle()?.value ?: ""
+    val defaultModelName = settingsViewModel?.defaultModel?.collectAsStateWithLifecycle()?.value ?: ""
+    // 未绑定会话回退：新会话默认模型（主页空会话中选择后记忆），未设置则为 null（UI 显示默认图标/顶栏模型名留空）。
+    val defaultFallbackProvider = providers
+        .find { it.id == defaultProviderId }
+        ?.takeIf { it.hasUsableApiKey }
+        ?.let { if (defaultModelName.isNotBlank() && defaultModelName in it.models) it.copy(selectedModel = defaultModelName) else it }
+    val activeProvider = run {
+        val (boundProviderId, boundModel) = sessionProviderModel
+        if (!boundProviderId.isNullOrBlank()) {
+            // 与 workflow.resolveProviderConfig 保持一致：绑定 provider 须启用且已填 apiKey，否则回退默认模型
+            providers.find { it.id == boundProviderId }
+                ?.takeIf { it.hasUsableApiKey }
+                // 绑定模型已被移出列表时绑定失效，回退默认模型（与 workflow.resolveProviderConfig 一致）
+                ?.takeIf { boundModel.isNullOrBlank() || boundModel in it.models }
+                ?.let {
+                    if (!boundModel.isNullOrBlank()) it.copy(selectedModel = boundModel) else it
+                } ?: defaultFallbackProvider
+        } else {
+            defaultFallbackProvider
+        }
+    }
+    val currentWorkspace = workspaceViewModel?.current?.collectAsStateWithLifecycle()?.value
+    val projectRoot = currentWorkspace?.path ?: ""
+    val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
+    val currentGoal by viewModel.currentSessionGoal.collectAsStateWithLifecycle()
+    val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
+    val fileMentionState by viewModel.fileMentionState.collectAsStateWithLifecycle()
+
+    val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
+    // 输入 "/" 打开命令菜单时重扫技能，反映磁盘上技能的增删改。
+    LaunchedEffect(inputText) {
+        if (inputText == "/") viewModel.refreshSlashCommands()
+    }
+    var pendingAttachments by remember { mutableStateOf<List<PendingUploadAttachment>>(emptyList()) }
+    var uploadingCount by remember { mutableStateOf(0) }
+    // 进行中的上传任务：供「取消上传」入口取消。取消会经 runInterruptible 打断阻塞的 SFTP 写循环。
+    var uploadJob by remember { mutableStateOf<Job?>(null) }
+    // 附件上传串行化：连续两次选取时两次上传会并发跑，槽位判断与 pendingAttachments 的读-改-写
+    // 必须同处一个临界区，否则按同一份旧计数各自放行（超发）并在写回时互相覆盖（先选附件预览丢失）。
+    val attachmentUploadMutex = remember { Mutex() }
+    var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
+    var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
+    var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
+    // 已发出、还没在消息列表里就位的用户消息（乐观上屏）。发送时当场生成 id，尾巴 item 据此画气泡；
+    // 「什么时候退场」只认 id 相等（落库行 id / 队列条目的 clientMessageId），见 [resolvePendingUserMessages]。
+    // 按会话 remember：切会话即清空，不会把上一个会话的待落库气泡带过来。
+    var pendingUserMessages by remember(currentSessionId) {
+        mutableStateOf<List<PendingUserMessage>>(emptyList())
+    }
+    val persistedMessageIds = remember(messages) { messages.mapTo(HashSet<String>()) { it.id } }
+    val queuedClientMessageIds = remember(queuedRequests) {
+        queuedRequests.mapNotNullTo(HashSet<String>()) { it.clientMessageId }
+    }
+    // 已被 VM 丢弃（删除 / 插话 / 回退 / 全部停止）的 id：这些既不会落库也不会留在队列里，
+    // 不把 VM 记下的这一笔当判据，气泡就再也等不到退场信号。
+    val discardedClientMessageIds by viewModel.discardedClientMessageIds.collectAsStateWithLifecycle()
+    val visiblePendingUserMessages = resolvePendingUserMessages(
+        pending = pendingUserMessages,
+        persistedIds = persistedMessageIds,
+        queuedClientMessageIds = queuedClientMessageIds,
+        discardedClientMessageIds = discardedClientMessageIds
+    )
+    // 退场后同时把状态收拾干净：只靠 filter 的话，每次发送都会在列表里堆一条永不释放的条目。
+    LaunchedEffect(pendingUserMessages, persistedMessageIds, queuedClientMessageIds, discardedClientMessageIds) {
+        if (pendingUserMessages.isEmpty()) return@LaunchedEffect
+        val kept = resolvePendingUserMessages(
+            pending = pendingUserMessages,
+            persistedIds = persistedMessageIds,
+            queuedClientMessageIds = queuedClientMessageIds,
+            discardedClientMessageIds = discardedClientMessageIds
+        )
+        if (kept.size != pendingUserMessages.size) pendingUserMessages = kept
+    }
+    val listState = rememberLazyListState()
+    // 消息未就绪时的加载提示：本地读库通常几十毫秒，立刻显示反而闪一下，等一小会儿还没就绪才提示。
+    var showMessagesLoading by remember(currentSessionId) { mutableStateOf(false) }
+    LaunchedEffect(currentSessionId, messagesReady) {
+        if (messagesReady) {
+            showMessagesLoading = false
+            return@LaunchedEffect
+        }
+        delay(MESSAGES_LOADING_HINT_DELAY_MS)
+        showMessagesLoading = true
+    }
+    // 贴底滚动留白：首帧测量前用兜底值（约输入框 + 间距），实测悬浮层高度后改为动态值，
+    // 横幅/面板/输入框任何形态下最后一条消息都停在悬浮层上方不被遮挡。
+    //
+    // 直接跟随实测高度，**不做「只增不减」**：底栏能展开也能收起，留白只涨不降的话，
+    // 用户展开过一次面板，收起来后最后一条消息下方就永久留一大块空白。
+    // 当初担心「留白变小会把内容往上拽」，但那个跳动的真正来源是列表 item 内的
+    // expandVertically 高度动画（已改为 alpha 淡入淡出），与 contentPadding 无关。
+    val inputBarBottomReserveDp = 156.dp
+    var floatingLayerHeightPx by remember { mutableStateOf(0) }
+    val inputBarReservePx = with(LocalDensity.current) {
+        (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
+        else inputBarBottomReserveDp.toPx()).toInt()
+    }
+    val markdownCache = remember { MarkdownRenderCache() }
+    // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
+    // key = 分组 key（`toolgroup:<组内首条消息 id>`）或单条消息 id。
+    val toolExpansionOverrides = viewModel.toolExpansionOverrides
+    // 快照：derivedStateOf 订阅底层 SnapshotStateMap，但只在内容真变时才换实例。
+    // 直接 toMap() 每次重组都新建 Map，会把下面 chatItems 的 remember key 顶掉、整表重建。
+    val toolGroupOverrideSnapshot by remember { derivedStateOf { toolExpansionOverrides.toMap() } }
+    // 整轮折叠的手动展开态，同款快照。
+    val turnExpansionOverrides = viewModel.turnExpansionOverrides
+    val turnOverrideSnapshot by remember { derivedStateOf { turnExpansionOverrides.toMap() } }
+    // 思考卡片的展开态，同款快照。
+    val reasoningExpansionOverrides = viewModel.reasoningExpansionOverrides
+    val reasoningOverrideSnapshot by remember { derivedStateOf { reasoningExpansionOverrides.toMap() } }
+    // 正在执行的工具 id 集合：只让集合内容参与 remember key，避免实时输出逐字刷新导致整表重建。
+    val runningToolIds by remember { derivedStateOf { runningTool.mapTo(HashSet()) { it.messageId } } }
+    // 实时工具输出按消息 id 摊平：runningTool 每来一个 token 就换实例，item 里逐项 firstOrNull
+    // 会让每个可见 item 在组合期各扫一遍；摊平后 item 只查一次表。
+    val liveToolOutputs = remember(runningTool) { runningTool.associate { it.messageId to it.text } }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    val isBusy = agentState is AgentUIState.Streaming
+    // 拆块 + 工具分组：超长助手消息展开成多条有界 item（单条滚动轴、外观连续），
+    // 连续的工具调用折成一个「N 次工具调用」分组；chatItems 的顺序即 LazyColumn item 顺序。
+    // 提到这里（而不是 LazyColumn 分支内）是因为 isFarFromBottom 的「布局是否对应当前消息」判定
+    // 需要它：分组会让 item 数 ≠ 消息数 + 1，不能再拿消息数当期望值。
+    // 末轮且 agent 忙 = 当前正在跑的那一轮：它的折叠头默认展开（显示「执行中」），收工后自动收起。
+    val turnKeyHistory = remember(currentSessionId) {
+        currentSessionId?.let { viewModel.turnMessageKeys.getOrPut(it) { mutableMapOf() } }
+            ?: mutableMapOf()
+    }
+    val stableTurnKeys = remember(messages, currentSessionId, messagesReady) {
+        if (messagesReady) {
+            reconcileTurnKeys(messages, turnKeyHistory)
+        } else {
+            emptyMap()
+        }
+    }
+    SideEffect { turnKeyHistory.putAll(stableTurnKeys) }
+    val activeTurnKey = if (!isBusy) {
+        null
+    } else {
+        // 定位用运行时真值：本轮轮首用户行 id（VM 在本轮用户行落库时登记，见 AIAgentViewModel 的
+        // currentSessionRunningTurnAnchorId）。不能按「最后一条用户消息」定位；插话不渲染
+        //（splitChatTurns 已剔除），本就不参与候选。
+        val anchorId = runningTurnAnchorId
+        if (anchorId != null) {
+            // 锚点行不在已加载窗口内（分页把它翻出去了）时也要认出「正在跑的那轮」：直接按 id
+            // 构造轮 key，否则该轮被当成已完成轮，折叠头 running=false，用户看到永不变化的死行。
+            stableTurnKeys[anchorId] ?: turnKeyOf(anchorId)
+        } else {
+            // 没有锚点（自动触发轮次、后台通知轮次）时退回旧判据：最后一条普通用户消息。
+            messages.lastOrNull { it.role == MessageRole.USER && !it.isBackgroundNotification && !it.isCompactionMarker }
+                ?.let { message -> stableTurnKeys[message.id] ?: turnKeyOf(message.id) }
+        }
+    }
+    // 长会话里重建整张列表要遍历全部消息（拆轮、分组、拆块），在主线程上做会卡住每次落库与补载历史。
+    // 超过阈值后改在后台算，算完前继续显示上一版（LazyColumn 与它的条数一直自洽）；
+    // 切换会话后的首版仍同步算，避免短暂显示上一个会话的内容。
+    val chatItemsKey = remember(messages, toolGroupOverrideSnapshot, turnOverrideSnapshot, activeTurnKey, currentSessionId, stableTurnKeys) { Any() }
+    val buildItems = {
+        flattenChatProcesses(buildChatItems(
+            messages = messages,
+            groupOverrides = toolGroupOverrideSnapshot,
+            turnOverrides = turnOverrideSnapshot,
+            activeTurnKey = activeTurnKey,
+            sessionId = currentSessionId,
+            turnKeys = stableTurnKeys,
+        ))
+    }
+    val useAsyncItems = messages.size > ASYNC_CHAT_ITEMS_THRESHOLD
+    var asyncItems by remember { mutableStateOf<AsyncChatItems?>(null) }
+    LaunchedEffect(chatItemsKey, useAsyncItems) {
+        if (!useAsyncItems) return@LaunchedEffect
+        val sessionId = currentSessionId
+        val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { buildItems() }
+        asyncItems = AsyncChatItems(sessionId, built)
+    }
+    val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && it.sessionId == currentSessionId }
+    val chatItems = readyAsyncItems?.items ?: remember(chatItemsKey) { buildItems() }
+
+    // 预热队列：最近窗口里会走 Markdown 渲染的定稿正文。长文渲染的是分块切片（见 messageRenderItems），
+    // 所以取 item.slice 而不是整条正文，否则预热写进去的缓存键与渲染时查的键对不上。
+    // 从最近处往历史上预热：用户回看是从底部往上翻，先把即将滑入视口的那几条喂熟才划算。
+    // 异步构建时 chatItems 先返回上一版，队列会跟着重建一次、新列表到后再重建一次：
+    // key 里带的就是当前 chatItems，不会对着旧列表写错缓存键。
+    val markdownWarmQueue = remember(currentSessionId, chatItems) {
+        chatItems
+            .filter { it.turnHeader == null && it.toolGroup == null && it.contentType != REASONING_CONTENT_TYPE }
+            .filter { it.message.role != MessageRole.TOOL && it.message.content.hasVisibleContent() }
+            .map { it.slice ?: it.message.content }
+            .takeLast(MARKDOWN_WARM_MAX_ENTRIES)
+            .asReversed()
+    }
+    // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方。
+    // 正在跑的那一轮（以及运行期间出现的后续轮）不给结论：耗时与用量都要等本轮收工才成立。
+    // 按轮首用户行 id 传入（与 activeTurnKey 同一个运行时真值），插话才顶不掉它。
+    val runningTurnStartId = if (isBusy) runningTurnAnchorId else null
+    val turnStats = remember(messages, isBusy, runningTurnStartId) {
+        computeTurnStats(messages, lastTurnFinished = !isBusy, runningTurnStartId = runningTurnStartId)
+    }
+    val taskDurations = turnStats.taskDurations
+    val turnUsages = turnStats.turnUsages
+    val reasoningDurations = viewModel.reasoningDurations
+    // 方案 A：每轮正常收尾的最终回复（包括历史所有轮次的回复）均挂操作行（复制/更多），
+    // 彻底解决依赖内存集合导致重启 App 后历史消息丢失操作按钮的 Bug。
+    // 仅在最新一轮正在生成（isBusy == true）时暂不挂出，避免生成中途按钮乱跳；
+    // 「正在跑的那一轮」按 activeTurnKey 定位（见上），运行期间出现的后续轮同属本次运行，也不挂。
+    val actionableMessageIds = remember(messages, isBusy, activeTurnKey) {
+        actionableResultIds(messages, activeTurnKey, isBusy)
+    }
+    val activeModel = activeProvider?.effectiveModel.orEmpty()
+    val activeModelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, activeModel)] }
+    val canUploadFiles = projectRoot.isNotBlank() && activeModelMetadata?.supportsTools == true
+    val canUploadImages = projectRoot.isNotBlank()
+    val reasoningEffort by viewModel.currentSessionReasoningEffort.collectAsStateWithLifecycle()
+
+    val providerDashboards by (settingsViewModel?.providerDashboards?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) })
+    val currentDashboardState = activeProvider?.let { providerDashboards[it.id] } ?: ProviderDashboardState.Idle
+
+    // 键盘弹出时收起面板，避免输入框被挤压。
+    // WindowInsets 的像素值本就不该在组合期读（官方文档：读它会让动画的每一帧都做一次组合），
+    // 而 WindowInsets.ime 又是 @Composable getter，只能在组合期取到 insets 对象、不能塞进
+    // derivedStateOf 的 lambda。这里先取对象与 density，再把「键盘是否可见」这个布尔交给
+    // derivedStateOf——只在翻转时才通知读取者，动画期间不再逐帧往下传。
+    val imeInsets = WindowInsets.ime
+    val density = LocalDensity.current
+    val imeVisible by remember(imeInsets, density) {
+        derivedStateOf { imeInsets.getBottom(density) > 0 }
+    }
+
+    // 输入框上方四类面板（排队/待办/自定义/提问）全局互斥：同一时刻最多一个展开。
+    // 展开态由各面板自己持有，这里只记「当前展开的是哪一个」，其余面板由 ChatInputBar 压成收起态。
+    var activePanel by rememberSaveable(stateSaver = ChatPanelSlotSaver) { mutableStateOf(ChatPanelSlot.None) }
+    // ProviderDashboardBar 仅在有面板脚本的 provider 下渲染（见 ChatInputBar）。面板随 provider
+    // 切换/脚本移除而消失后，activePanel 若仍指向它，会把其余面板永久压成收起态；
+    // 故叠加可见性，并由下方 effect 释放已不存在的面板占位。
+    val dashboardBarVisible = activeProvider?.dashboardScriptPath?.isNotBlank() == true
+    // 键盘/授权/计划弹层会把排队、待办、自定义面板本身压成收起态，此时它们并不占用输入框上方，
+    // 不能连带把提问/计划/授权面板也压掉（后者本来就在等用户操作）。
+    val panelsBlockedByOverlay = imeVisible || pendingPermission != null || planApproval != null
+    val activePanelOccupied = when (activePanel) {
+        ChatPanelSlot.Queue -> queuedRequests.isNotEmpty()
+        ChatPanelSlot.Todo -> currentTodoItems.isNotEmpty()
+        ChatPanelSlot.Dashboard -> dashboardBarVisible
+        ChatPanelSlot.Question, ChatPanelSlot.None -> false
+    }
+    val dashboardCollapseActive = activePanelOccupied && !panelsBlockedByOverlay
+
+    LaunchedEffect(
+        activePanel,
+        queuedRequests.isNotEmpty(),
+        currentTodoItems.isNotEmpty(),
+        dashboardBarVisible,
+        pendingQuestion != null
+    ) {
+        val stale = when (activePanel) {
+            ChatPanelSlot.Queue -> queuedRequests.isEmpty()
+            ChatPanelSlot.Todo -> currentTodoItems.isEmpty()
+            ChatPanelSlot.Dashboard -> !dashboardBarVisible
+            ChatPanelSlot.Question -> pendingQuestion == null
+            ChatPanelSlot.None -> false
+        }
+        if (stale) activePanel = ChatPanelSlot.None
+    }
+
+    // 排队面板的默认展开靠这条：受控展开下 [ChatPanelSlot.None] 表示全部收起，
+    // 新排进来的消息就看不见了（改动前它默认展开）。只在「从无到有」且没有其它面板占位、
+    // 也没有待答提问时把它设为活动面板；用户手动收起后 key 不变，不会被重新顶开。
+    // 声明在提问面板的自动切槽之前，两者同帧到达时提问后写、最终占位。
+    LaunchedEffect(queuedRequests.isNotEmpty()) {
+        if (queuedRequests.isNotEmpty() &&
+            activePanel == ChatPanelSlot.None &&
+            pendingQuestion == null
+        ) {
+            activePanel = ChatPanelSlot.Queue
+        }
+    }
+
+    fun buildDashboardContext(
+        lastInput: Int = 0,
+        lastOutput: Int = 0,
+        lastCached: Int = 0,
+        refreshReason: String = ""
+    ): DashboardContext {
+        val curSessionId = currentSessionId.orEmpty()
+        val agentStateStr = when (agentState) {
+            is AgentUIState.Idle -> "idle"
+            is AgentUIState.Streaming -> "streaming"
+            is AgentUIState.Result -> "result"
+            is AgentUIState.Error -> "error"
+        }
+        // 未显式传最近 token（切会话/任务完成/手动刷新等场景）时，从最后一条含 token 的助手消息兜底：
+        // 否则面板的「最近输入/输出/缓存」会显示 0。llm 事件触发的刷新仍用事件带的实时值（更及时）。
+        val lastTokenMsg = messages.asReversed().firstOrNull {
+            it.role == MessageRole.ASSISTANT && (it.inputTokens > 0 || it.outputTokens > 0)
+        }
+        val effLastInput = if (lastInput > 0) lastInput else (lastTokenMsg?.inputTokens ?: 0)
+        val effLastOutput = if (lastOutput > 0) lastOutput else (lastTokenMsg?.outputTokens ?: 0)
+        val effLastCached = if (lastCached > 0) lastCached else (lastTokenMsg?.cachedInputTokens ?: 0)
+        return DashboardContext(
+            model = activeModel,
+            // 面板脚本在容器内执行，工作区路径必须是容器视角（~/workspace）；宿主真实路径在容器内不存在
+            workspacePath = WorkspacePathMapper.CONTAINER_ROOT,
+            workspaceName = if (projectRoot.isNotBlank()) File(projectRoot).name else "",
+            sessionId = curSessionId,
+            lastInputTokens = effLastInput,
+            lastOutputTokens = effLastOutput,
+            lastCachedTokens = effLastCached,
+            totalInputTokens = currentSession?.totalInputTokens ?: 0,
+            totalOutputTokens = currentSession?.totalOutputTokens ?: 0,
+            modelContextTokens = activeModelMetadata?.contextTokens ?: 0,
+            modelMaxInputTokens = activeModelMetadata?.inputTokens ?: 0,
+            modelMaxOutputTokens = activeModelMetadata?.outputTokens ?: 0,
+            modelInputCostUsdPerM = activeModelMetadata?.inputCostUsdPerM ?: 0.0,
+            modelOutputCostUsdPerM = activeModelMetadata?.outputCostUsdPerM ?: 0.0,
+            modelCacheReadCostUsdPerM = activeModelMetadata?.cacheReadCostUsdPerM ?: 0.0,
+            modelSupportsTools = activeModelMetadata?.supportsTools ?: false,
+            modelSupportsVision = activeModelMetadata?.supportsVision ?: false,
+            modelSupportsReasoning = activeModelMetadata?.supportsReasoning ?: false,
+            messageCount = messages.size,
+            agentState = agentStateStr,
+            sessionMode = currentMode.name.lowercase(),
+            reasoningEffort = reasoningEffort.apiValue,
+            refreshReason = refreshReason
+        )
+    }
+
+    // 首次进入、切换提供商、切换脚本路径或切换会话时拉取一次面板。
+    // 会话切换时等 currentSession / messages 都落到新会话（sessionReady）再刷新：
+    // 否则 buildDashboardContext 读到的是切换瞬间的旧会话快照，面板会显示旧数据或空 token。
+    val sessionReady = currentSession?.id == currentSessionId && messagesReady
+    LaunchedEffect(activeProvider?.id, activeProvider?.dashboardScriptPath, currentSessionId, sessionReady) {
+        val provider = activeProvider ?: return@LaunchedEffect
+        if (provider.dashboardScriptPath.isBlank()) return@LaunchedEffect
+        if (!sessionReady) return@LaunchedEffect
+        val context = buildDashboardContext(refreshReason = "session")
+        settingsViewModel?.refreshProviderDashboard(provider, context = context, force = true)
+    }
+
+    // 每次单次 LLM 请求返回时，立即带上最新 Token 与上下文实时刷新面板
+    // 注意：LaunchedEffect(Unit) 只启动一次，collect 闭包会捕获首次组合时的变量快照，
+    // 必须用 rememberUpdatedState 取最新值，否则会话累计 Token/消息数等永远停留在旧值。
+    val latestBuildDashboardContext by rememberUpdatedState(
+        { lastInput: Int, lastOutput: Int, lastCached: Int, refreshReason: String ->
+            buildDashboardContext(lastInput, lastOutput, lastCached, refreshReason)
+        }
+    )
+    val latestActiveProvider by rememberUpdatedState(activeProvider)
+    LaunchedEffect(Unit) {
+        viewModel.llmCallEvents.collect { callEvent ->
+            val provider = latestActiveProvider ?: return@collect
+            if (provider.dashboardScriptPath.isBlank()) return@collect
+            val context = latestBuildDashboardContext(
+                callEvent.inputTokens,
+                callEvent.outputTokens,
+                callEvent.cachedTokens,
+                "llm"
+            )
+            settingsViewModel?.refreshProviderDashboard(provider, context = context, force = true)
+        }
+    }
+
+    // AI 一轮任务完成后刷新面板：让脚本拿到最终 agentState（result/idle/error），
+    // 否则面板状态会一直停在「生成中」。busy→非busy 每轮只发生一次（Result 后再置 Idle 属
+    // 非busy→非busy，不会重复触发），故这里触发的刷新恰好落在最终状态上。
+    var lastAgentStateForPanel by remember { mutableStateOf<AgentUIState?>(null) }
+    LaunchedEffect(agentState) {
+        val prev = lastAgentStateForPanel
+        lastAgentStateForPanel = agentState
+        val wasBusy = prev is AgentUIState.Streaming
+        val nowDone = agentState !is AgentUIState.Streaming
+        if (wasBusy && nowDone) {
+            val provider = latestActiveProvider ?: return@LaunchedEffect
+            if (provider.dashboardScriptPath.isBlank()) return@LaunchedEffect
+            val context = latestBuildDashboardContext(0, 0, 0, "done")
+            settingsViewModel?.refreshProviderDashboard(provider, context = context, force = true)
+        }
+    }
+
+    LaunchedEffect(activeProvider?.type, activeModel) {
+        val provider = activeProvider ?: return@LaunchedEffect
+        if (activeModel.isNotBlank()) {
+            settingsViewModel?.resolveModelMetadata(provider.id, provider.type, listOf(activeModel))
+        }
+    }
+
+    // 主页模型选择面板复用 ModelSelectionSheet，能力 Tag 依赖全量模型元数据；
+    // 仅 resolve 当前激活模型会导致未选过的模型无 Tag（设置页进入时已全量加载，主页补齐）。
+    // providers 异步加载，首次组合时为空，需等非空后再解析（providers 后续变化也会触发，成本低有缓存）。
+    LaunchedEffect(providers) {
+        if (providers.isNotEmpty()) {
+            settingsViewModel?.loadAllModelMetadata()
+        }
+    }
+
+    fun removePendingAttachment(index: Int) {
+        pendingAttachments = pendingAttachments.filterIndexed { i, _ -> i != index }
+    }
+
+    fun handlePickedAttachments(uris: List<Uri>, images: Boolean) {
+        if (uris.isEmpty()) return
+        if (projectRoot.isBlank()) {
+            Toast.makeText(context, emptyWorkspaceMessage(context), Toast.LENGTH_SHORT).show()
+            return
+        }
+        uploadJob = scope.launch {
+            var successCount = 0
+            var skipped = 0
+            val failures = mutableListOf<String>()
+            // 槽位判断、截断与写回在同一临界区：锁外判断会让两次选取读到同一份旧计数各自放行，
+            // 上传结果又都是「读 pendingAttachments → 追加 → 写回」，并发时互相覆盖。
+            val started = attachmentUploadMutex.withLock {
+                if (!hasAttachmentSlots(pendingAttachments.size)) {
+                    false
+                } else {
+                    val selected = selectedAttachments(uris, pendingAttachments.size)
+                    skipped = uris.size - selected.size
+                    uploadingCount = selected.size
+                    try {
+                        selected.forEach { uri ->
+                            runCatching {
+                                copyUriToWorkspace(context, uri, viewModel.fileAccess, includeImageData = images)
+                            }.onSuccess { uploaded ->
+                                pendingAttachments = pendingAttachments + uploaded.toPendingAttachment()
+                                successCount += 1
+                            }.onFailure { error ->
+                                // 取消不是失败：原样上抛，否则会被计成失败项并继续后续文件，取消等于没生效。
+                                if (error is CancellationException) throw error
+                                failures += (error.message ?: uploadFallbackError(context))
+                            }
+                        }
+                    } finally {
+                        uploadingCount = 0
+                    }
+                    true
+                }
+            }
+            // Toast 放在锁外，避免持锁期间做与临界区无关的事。
+            if (!started) {
+                Toast.makeText(context, maxAttachmentMessage(context, MAX_PENDING_ATTACHMENTS), Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            // 结果提示：全失败展示首个错误；有文件被上限截断或上传失败时用 partial 文案；全成功用 success 文案。
+            when {
+                successCount == 0 && failures.isNotEmpty() ->
+                    Toast.makeText(context, failures.first(), Toast.LENGTH_LONG).show()
+                skipped > 0 || failures.isNotEmpty() ->
+                    Toast.makeText(context, partialUploadMessage(context, successCount), Toast.LENGTH_LONG).show()
+                else ->
+                    Toast.makeText(context, uploadSuccessMessage(context, successCount), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun cancelUpload() {
+        // 只有确实有上传在跑时才提示：横条的退场动画期间按钮仍可点，重复点不该再弹一次。
+        val job = uploadJob
+        if (job != null && job.isActive) {
+            job.cancel()
+            Toast.makeText(
+                context,
+                context.getString(R.string.chat_attachment_upload_cancelled),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        handlePickedAttachments(uris, images = false)
+    }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+        handlePickedAttachments(uris, images = true)
+    }
+
+    // 拍照：输出到 cache 临时文件（FileProvider 授权 uri），拍完按图片附件处理。
+    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val uri = cameraPhotoUri
+        cameraPhotoUri = null
+        if (success && uri != null) {
+            handlePickedAttachments(listOf(uri), images = true)
+        }
+    }
+    fun takePhoto() {
+        val photoFile = File(context.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
+        val uri = runCatching {
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+        }.getOrNull()
+        if (uri == null) {
+            Toast.makeText(context, context.getString(R.string.chat_camera_file_failed), Toast.LENGTH_SHORT).show()
+            return
+        }
+        cameraPhotoUri = uri
+        takePictureLauncher.launch(uri)
+    }
+
+    // 缓冲流式文本与思考过程：流式期间跟随 streamingText / streamingReasoning；流式刚结束而数据库尚未完成派发期间（messages 末尾仍是 USER/TOOL 消息），
+    // 持续保留本轮完整文本与思考，撑住底部气泡，彻底杜绝「字快打完了突然整段蒸发消失（空白闪回）」或「思考块突然消失又冒出」；
+    // 一旦本轮登记行在 messages 列表中回流（判据见下方的 isAssistantSettled，认显式交接的行 id），立即清空让位。
+    var retainedStreamingText by remember { mutableStateOf<String?>(null) }
+    var retainedStreamingReasoning by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentSessionId) {
+        retainedStreamingText = null
+        retainedStreamingReasoning = null
+    }
+
+    // 用户主动停止信号：ViewModel 在 stopAgentSession 里自增该会话的停止代际（见 stopGenerations）。
+    // 停止是用户明确表达「这一轮到此为止」：收到后当场清空 retained，让残留流式 / 思考气泡立即退休。
+    // 它作为兜底只在「本轮根本没有可认领的落库助手行」时才起作用（R4）——若有登记行，正常交接即可退休。
+    // saveable 记住已处理代际：全屏路由返回时 StateFlow 会重放当前值，只按「数值前进」触发一次。
+    val stopGeneration = viewModel.stopGenerations.collectAsStateWithLifecycle().value[currentSessionId] ?: 0
+    var handledStopGeneration by rememberSaveable(currentSessionId) { mutableStateOf(0) }
+
+    // 本轮助手消息是否已经在消息列表中正式就位渲染：判据抽成纯函数 [isAssistantSettled]（认「显式交接
+    // 的行 id」）。ViewModel 在本轮 AssistantText（有可见正文或思考）落库前登记该行主键
+    // （currentSessionPendingAssistantRowId），这里只需判断它是否已出现在 messages 里。
+    // 不再做前缀 / 双向包含猜同源，也不再依赖 4s 强制退休窗口。
+    val assistantSettled = isAssistantSettled(
+        streamingText = streamingText,
+        streamingReasoning = streamingReasoning,
+        pendingRowId = pendingAssistantRowId,
+        messages = messages
+    )
+
+    LaunchedEffect(streamingText, assistantSettled) {
+        val st = streamingText
+        if (st != null && st.hasVisibleContent()) {
+            retainedStreamingText = st
+        } else if (assistantSettled) {
+            retainedStreamingText = null
+        }
+    }
+
+    LaunchedEffect(streamingReasoning, assistantSettled) {
+        val sr = streamingReasoning
+        if (sr != null && sr.hasVisibleContent()) {
+            retainedStreamingReasoning = sr
+        } else if (assistantSettled) {
+            retainedStreamingReasoning = null
+        }
+    }
+
+    // 收到停止代际后记账（只按数值前进处理一次），并顺手清空 retained：
+    // 停止路径下 retained 往往与任何落库行都对不上（本轮没有登记 id 或没有落库行），
+    // 靠这条兜底立即退休，避免残留气泡卡住。
+    LaunchedEffect(stopGeneration) {
+        if (stopGeneration > handledStopGeneration) {
+            handledStopGeneration = stopGeneration
+            retainedStreamingText = null
+            retainedStreamingReasoning = null
+        }
+    }
+
+    // 「本轮收尾但没有可认领助手行」信号：某轮以异常 / 取消结束且没落任何助手行时，pending 助手行 id
+    // 为空或停留旧值，上面的 [isAssistantSettled] 恒 false → 残留流式 / 思考气泡永不退休。
+    // 收到该信号即清空 retained 让残留退休（非计时兜底）。同 stopGeneration：saveable 记住已处理代际，
+    // 只按数值前进处理一次，避免全屏路由返回时重放。
+    val settledWithoutTargetGeneration =
+        viewModel.settledWithoutTargetGenerations.collectAsStateWithLifecycle().value[currentSessionId] ?: 0
+    var handledSettledWithoutTargetGeneration by rememberSaveable(currentSessionId) { mutableStateOf(0) }
+    LaunchedEffect(settledWithoutTargetGeneration) {
+        if (settledWithoutTargetGeneration > handledSettledWithoutTargetGeneration) {
+            handledSettledWithoutTargetGeneration = settledWithoutTargetGeneration
+            retainedStreamingText = null
+            retainedStreamingReasoning = null
+        }
+    }
+
+    val displayStreamingText = if (assistantSettled) null else (streamingText ?: retainedStreamingText)
+    val showStreaming = displayStreamingText?.hasVisibleContent() == true
+
+    val displayStreamingReasoning = if (assistantSettled) null else (streamingReasoning ?: retainedStreamingReasoning)
+    val showReasoning = displayStreamingReasoning?.hasVisibleContent() == true
+
+    // 打字机渲染进度：持有在 LazyColumn 之外，尾巴 item 滚出视口被 dispose 后进度不丢。
+    val typewriter = rememberTypewriterStreamingText(
+        text = displayStreamingText ?: "",
+        active = streamingText != null,
+        sessionKey = currentSessionId
+    )
+    val typewriterRenderText = typewriter.text
+    // 思考过程同样走打字机：与回复文本共用同一速率自适应逻辑。
+    // 正文开始输出（streamingText 非空）即视为思考结束：思考打字机立即收尾，
+    // 避免思考还没打完、正文已开始导致两者叠着慢慢打。
+    val typewriterReasoningText = rememberTypewriterStreamingText(
+        text = displayStreamingReasoning ?: "",
+        active = streamingReasoning != null && streamingText == null,
+        sessionKey = currentSessionId
+    ).text
+
+    // 自动滚动跟随
+    // 两个状态都必须 saveable：窄窗打开编辑器 / 终端 / Git / 设置都是全屏路由，聊天页整棵组合
+    // 被 dispose。用普通 remember 的话返回时 positionedSession 归 null（当成换了会话重新贴底）、
+    // followBottom 归 true（校准循环把恢复出的位置拉回底部），浏览历史的位置就丢了。
+    var positionedSession by rememberSaveable { mutableStateOf<String?>(null) }
+    var followBottom by rememberSaveable { mutableStateOf(true) }
+    var userScrollGesture by remember { mutableStateOf(false) }
+    var pointerDown by remember { mutableStateOf(false) }
+    var nestedFling by remember { mutableStateOf(false) }
+    val userScrollConnection = remember(listState) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y != 0f) {
+                    userScrollGesture = true
+                    followBottom = false
+                }
+                return Offset.Zero
+            }
+
+            /**
+             * 内层滚动（思考窗口、工具输出卡片都自带内层滚动）先吃手势：剩余可用量经这里上抛，
+             * source 仍是 UserInput。
+             *
+             * 关键：以前只盯 onPreScroll，内层滚动手势在这层看不到 —— followBottom 一直是 true，
+             * 校准循环随即判定「跟丢」并把视口拉回底部（用户滑动时突然跳顶的真因）。
+             * 只要消费量或剩余量非 0 且来源是用户输入，就一律停跟随。
+             */
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.UserInput &&
+                    (consumed.y != 0f || available.y != 0f)
+                ) {
+                    userScrollGesture = true
+                    followBottom = false
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                nestedFling = true
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                nestedFling = false
+                return Velocity.Zero
+            }
+        }
+    }
+
+    // 回退复位：ViewModel 在回退成功后自增 rewindGeneration（见 executeRewindOption）。回退只删库 +
+    // 回填输入框，不复位 UI 侧状态——不处理的话 followBottom / positionedSession / 流式缓冲会停在
+    // 回退前那一轮，列表停在旧位置（表现为「回退后内容还在、手动刷新才好」）。
+    // 用 saveable 记住已处理代际：从编辑器/终端等全屏路由返回时整棵组合重挂载，StateFlow 会把当前值
+    // 重放一遍；只按「数值前进」复位，避免返回时把浏览位置拉回底部。
+    val rewindGeneration by viewModel.rewindGeneration.collectAsStateWithLifecycle()
+    var handledRewindGeneration by rememberSaveable { mutableStateOf(0) }
+    LaunchedEffect(rewindGeneration) {
+        if (rewindGeneration > handledRewindGeneration) {
+            handledRewindGeneration = rewindGeneration
+            followBottom = true
+            positionedSession = null
+            retainedStreamingText = null
+            retainedStreamingReasoning = null
+        }
+    }
+
+    // key 必须带上 inputBarReservePx：闭包捕获的是创建时的值，用无 key 的 remember 会让
+    // 判定永远停在首帧的兜底留白（156dp）上，面板展开把悬浮层顶高后仍按旧安全区算。
+    val isAtBottom by remember(inputBarReservePx) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            // 列表还没测量（首帧、或消息未就绪期间 LazyColumn 未挂载）时 layoutInfo 为空、
+            // canScrollForward 恒 false。此时不能判「在底部」——从别的页面返回的首帧会因此
+            // 恢复跟随，把 listState 刚恢复出的滚动位置拉回底部。
+            val lastVisible = layout.visibleItemsInfo.lastOrNull()
+                ?: return@derivedStateOf false
+            if (!listState.canScrollForward) return@derivedStateOf true
+            // 到底 = 最后内容底部停在安全区（悬浮层上沿）附近，而非视口底：
+            // 必须同时卡上下界。只写 `<= safeBottom + tolerance` 时，最后一条消息只要还在屏幕上，
+            // 往上滑多少都满足条件，isAtBottom 会一直为 true；松手后 followBottom 被误恢复，
+            // 下一次内容增长就会 requestScrollToItem 瞬移回底部（无动画的突然跳回）。
+            val safeBottom = layout.viewportEndOffset - inputBarReservePx
+            isScrolledToBottom(
+                lastVisibleIndex = lastVisible.index,
+                totalItemsCount = layout.totalItemsCount,
+                lastVisibleBottomPx = lastVisible.offset + lastVisible.size,
+                safeBottomPx = safeBottom,
+                tolerancePx = AUTO_SCROLL_TOLERANCE_PX
+            )
+        }
+    }
+
+    LaunchedEffect(pointerDown, userScrollGesture, nestedFling, listState.isScrollInProgress) {
+        if (!pointerDown && userScrollGesture && !nestedFling && !listState.isScrollInProgress) {
+            delay(150)
+            userScrollGesture = false
+            followBottom = isAtBottom
+        }
+    }
+
+    // 回底按钮的显示门槛：只用「不在底部」会让流式增长的那一两帧（校准循环还没把视口拉回）
+    // 也算离底，按钮跟着闪。要求离底超过半个视口，用户真的翻上去看历史时才出现。
+    // messagesReady / messages.isEmpty() 与 totalItemsCount 是同一枚硬币的两面：layoutInfo 是
+    // 「最后一次布局 pass」的产物，LazyColumn 卸载（空会话 WelcomeState、加载占位）后不会自动
+    // 清空——旧会话翻历史后切到空会话，残留布局会让按钮悬在新会话上。totalItemsCount 再拦截
+    // 「新列表尚未按当前消息重测」（layout 开始前 layoutInfo 仍是旧会话的）那一帧。
+    val isFarFromBottom by remember(inputBarReservePx, messagesReady, messages.size, chatItems.size) {
+        derivedStateOf {
+            if (!messagesReady || messages.isEmpty()) return@derivedStateOf false
+            if (!listState.canScrollForward) return@derivedStateOf false
+            val layout = listState.layoutInfo
+            val lastVisible = layout.visibleItemsInfo.lastOrNull()
+                ?: return@derivedStateOf false
+            if (layout.totalItemsCount != chatItems.size + 1) return@derivedStateOf false
+            if (lastVisible.index < layout.totalItemsCount - 1) return@derivedStateOf true
+            val safeBottom = layout.viewportEndOffset - inputBarReservePx
+            (lastVisible.offset + lastVisible.size) - safeBottom > layout.viewportEndOffset / 2
+        }
+    }
+
+    // 用户开始拖拽：停止跟随。松手时若已到底则恢复跟随。
+    // 额外：流式输出时内容持续增长，用户可能松手后又被「顶」离底部——
+    // 用 snapshotFlow { isAtBottom } 持续监测，只要滑到底部就恢复跟随，
+    // 满足「流式中滚到底部自动继续跟随」。
+    val latestIsAtBottom = rememberUpdatedState(isAtBottom)
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> followBottom = false
+                is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                    // 松手后延迟判定是否恢复跟随：等惯性滚动稳定，
+                    // 避免「松手在底部但惯性上滑」被立即拉回。
+                    scope.launch {
+                        delay(150)
+                        if (!userScrollGesture) followBottom = latestIsAtBottom.value
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { isAtBottom && !userScrollGesture && !pointerDown }.collect { atBottom ->
+            if (atBottom) followBottom = true
+        }
+    }
+
+    // 贴底定位（发送消息、切换会话）：直接滚到锚点——scrollToItem 的目标 offset 使
+    // 最后一项底部恰好停在悬浮层上方（contentPadding 预留 reserve，滚到该位置即列表
+    // 可滚的最底部，无需依赖动画与逐步对齐）。
+    val snapToBottom: suspend () -> Unit = {
+        val lastIndex = listState.layoutInfo.totalItemsCount - 1
+        if (lastIndex >= 0) {
+            // 滚到列表可滚最底部：scrollToItem 的 offset 会被 clamp 到 maxScroll，
+            // 最后一项底部恰好停在 contentPadding 底部（= 悬浮层上沿预留），无需手算项高度。
+            listState.scrollToItem(lastIndex, Int.MAX_VALUE)
+        }
+    }
+
+    // 锚点式常驻校准循环：锚点 = 最后内容底部恰好停在悬浮层（输入框）上沿。
+    // requestScrollToItem(最后一项, Int.MAX_VALUE) 请求把最后一项滚到可滚最底部
+    // （contentPadding 底部预留 reserve 保证），即最后一项底部停在悬浮层上沿，
+    // 目标由 LazyColumn 在**下一帧重新测量**时 clamp 到 maxScroll，
+    // 不依赖“最后可见项 == 最后一项”的高度假设（高度跳变时也不会算错目标）。
+    // 用 requestScrollToItem 而非 scrollToItem：后者是 suspend 的 scroll{} 加 forceRemeasure=true，
+    // 当帧就把整个列表同步重测一遍，还会把 isScrollInProgress 翻成 true——而本循环的触发条件
+    // 恰好包含 isScrollInProgress，等于自己给自己续命（收工后的收尾窗口里反复重启）。
+    // 前者只登记滚动请求、remeasure 交给下一次测量，且无滚动进行中时不会去动滚动互斥量，
+    // 不会把 isScrollInProgress 从 false 翻成 true。
+    // 每帧检查最后可见项：最后内容被增长推下（底部超安全区）或有内容被推出视口下方
+    // （最后可见项不是最后一项，即跟丢）时，滚回锚点；md 异步解析的高度跳变也会在
+    // 下一帧被检测到，不存在信号与渲染错位。
+    // 只向下校准：内容变矮（流式结束、折叠）时保持当前位置，避免「往回滚」与拉锯。
+    // reserve 经 State 传递：下面这个 lambda 只创建一次，直接捕获局部 Int 会一直用首帧的兜底值。
+    val reservePxState = rememberUpdatedState(inputBarReservePx)
+    val busyState = rememberUpdatedState(isBusy)
+    val calibrateToAnchor: suspend () -> Unit = remember(listState) {
+        {
+            // 无向下滚动空间（内容不满屏或已滚到锚点）：最后内容必然在安全区上方，无需校准。
+            // 手指在屏幕上（哪怕还没越过 touch slop）也不动视口：门槛见 [shouldCalibrateToAnchor]。
+            if (shouldCalibrateToAnchor(followBottom, userScrollGesture, pointerDown, listState.canScrollForward)) {
+                val layout = listState.layoutInfo
+                val lastIndex = layout.totalItemsCount - 1
+                if (lastIndex >= 0) {
+                    val lastVisible = layout.visibleItemsInfo.lastOrNull()
+                    val safeBottom = layout.viewportEndOffset - reservePxState.value
+                    // 最后一项被推出视口下方（跟丢）或最后内容底部越过安全区：滚回锚点。
+                    // 用户在别处浏览时 followBottom 已为 false，不会走到这里。
+                    val lost = lastVisible == null || lastVisible.index < lastIndex
+                    val pushedDown = lastVisible != null &&
+                        lastVisible.offset + lastVisible.size > safeBottom + AUTO_SCROLL_TOLERANCE_PX
+                    if (lost || pushedDown) listState.requestScrollToItem(lastIndex, Int.MAX_VALUE)
+                }
+            }
+        }
+    }
+
+    // 只在「跟随中且内容可能还在动」时逐帧校准。原来是无条件 while(true)，followBottom
+    // 为 false 也只 continue、帧回调照旧注册，等于让主线程全程每帧醒一次（空闲也在耗电）。
+    LaunchedEffect(listState, messagesReady) {
+        if (!messagesReady) return@LaunchedEffect
+        snapshotFlow { followBottom && (busyState.value || listState.isScrollInProgress) }
+            .collectLatest { active ->
+                if (active) {
+                    while (true) {
+                        withFrameNanos { }
+                        calibrateToAnchor()
+                    }
+                } else {
+                    // 收工那一刻内容未必已稳定（md 异步解析往往落在后面），再兜一小段再收手。
+                    // 一旦用户开始滑动（或跟随已被关掉）立即退出：这个尾窗以前会盲跑 1.2s，
+                    // 与“滑完松手”的惯性抢滚动，是跳动的来源之一。
+                    val deadline = System.nanoTime() + CALIBRATE_TAIL_MS * 1_000_000L
+                    while (System.nanoTime() < deadline) {
+                        withFrameNanos { }
+                        if (!followBottom || userScrollGesture || pointerDown) break
+                        calibrateToAnchor()
+                    }
+                }
+            }
+    }
+
+    // 内容变化信号旁路：文本/思考/消息条数变化时立即校准一次，不等下一帧——
+    // 与常驻校准循环互为补充，覆盖「无动画帧」的间隙，杜绝跟丢窗口。
+    val latestMessageCount = rememberUpdatedState(messages.size)
+    LaunchedEffect(listState, messagesReady) {
+        if (!messagesReady) return@LaunchedEffect
+        snapshotFlow {
+            // 第 4 项是待落库用户气泡的字数：它长在尾巴 item 内，出现那一帧同样要把底部校准一次——
+            // 用户空闲时发出消息，isBusy 仍为 false（逐帧校准循环没在跑）、messages.size 也没变，
+            // 没有这一项就没有任何信号去把气泡从输入框后面拉出来。
+            listOf(
+                streamingText?.length ?: -1,
+                streamingReasoning?.length ?: -1,
+                messages.size,
+                pendingUserMessages.sumOf { it.text.length },
+            )
+        }.collect { calibrateToAnchor() }
+    }
+
+    val sendMessage: () -> Unit = {
+        val text = inputText.trim()
+        if (text.isNotEmpty() || pendingAttachments.isNotEmpty()) {
+            val attachments = pendingAttachments
+            val modelSupportsVision = activeModelMetadata?.supportsVision == true
+            val promptAttachments = if (modelSupportsVision) attachments.filterNot { it.isImage } else attachments
+            val modelRequest = appendAttachmentsToRequest(context, text, promptAttachments)
+            val images = if (modelSupportsVision) attachments.toAgentImages() else emptyList()
+            val agentAttachments = attachments.toAgentAttachments()
+            // 先给这条消息定 id：它就是落库行的主键，乐观气泡与队列条目都拿它认领。
+            // 同一段文本连发两次时两个 id 不同，先落库的那条不会把后发的那条顶掉。
+            val clientMessageId = UUID.randomUUID().toString()
+            pendingUserMessages = pendingUserMessages + PendingUserMessage(
+                id = clientMessageId,
+                text = text,
+                attachments = agentAttachments
+            )
+            // 统一走队列：AI 忙时入队（等本轮结束后自动发送下一条），空闲时直接发送。
+            // 斜杠命令在 ViewModel 内（agent workflow 之前）分流执行，无需在此区分。
+            viewModel.enqueueAgentRequest(
+                request = text,
+                modelRequest = modelRequest,
+                currentFile = currentFile,
+                selectedCode = selectedCode,
+                projectRoot = projectRoot,
+                inputImages = images,
+                inputAttachments = agentAttachments,
+                clientMessageId = clientMessageId
+            )
+            viewModel.clearInputDraft()
+            pendingAttachments = emptyList()
+            followBottom = true
+            scope.launch {
+                kotlinx.coroutines.delay(0)
+                snapToBottom()
+            }
+        }
+    }
+
+    // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
+    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems) {
+        if (!messagesReady) return@LaunchedEffect
+        val pending = pendingScroll
+        if (pending != null && pending.first == currentSessionId) {
+            val index = findChatMessageIndex(chatItems, pending.second)
+            if (index >= 0) {
+                // 等一帧让 LazyColumn 按新会话完成重组，再瞬移到目标消息。
+                withFrameNanos { }
+                followBottom = false
+                listState.scrollToItem(index)
+                positionedSession = currentSessionId
+                viewModel.consumePendingScroll()
+            } else if (!messagesState.hasMore) {
+                // 全部消息已加载仍找不到（消息可能已被删除）：放弃，避免卡在待定位态。
+                viewModel.consumePendingScroll()
+            }
+            return@LaunchedEffect
+        }
+        if (positionedSession != currentSessionId) {
+            // 等一帧让 LazyColumn 按新会话完成重组，再滚到锚点（maxScroll）。
+            withFrameNanos { }
+            snapToBottom()
+            positionedSession = currentSessionId
+            followBottom = true
+        }
+    }
+
+    // 展开/收起一条 item（工具卡片、工具分组头）之后**不做任何主动滚动**：就地展开、就地收起，
+    // 视口一动不动；只暂停贴底跟随（用户滚回底部时由 isAtBottom 监测自动恢复）。
+    //
+    // 从前这里会按「让 item 底部露出安全区」重定位视口，还带一条「item 完全不可见就 scrollToItem」
+    // 的兜底；卡片比一屏高时前者算出的目标被夹到 0，后者干脆把 item 顶到视口顶——两条路径都会让
+    // 被点的那一行整条跳到顶部（概率性出现，取决于点的那一刻布局稳定到哪一帧）。这个跳动比
+    // 「展开后底部被输入框挡一点」难接受得多，整段重定位逻辑去掉。
+    // 记忆化：这个 lambda 会作为 item 渲染依赖传下去，每次重组新建会让整表依赖失效。
+    val onToolItemToggled: () -> Unit = remember { { followBottom = false } }
+
+    // 顶部快到头时加载更多历史。绝不能把 firstVisibleItemIndex 作为组合期读取的 effect key：
+    // fling 中 index 每跨一个 item 就变一次，会让整个 AIChatPanel 大函数随之重组、连带全部可见
+    // item 重组，是快速滚动掉帧（进而 fling 补偿跳变、抽搐）的主要放大器。改为在协程内用
+    // snapshotFlow 观察 index，组合体完全不读它。
+    // 触发信号里带上分页上限：消息按条数分页，一轮长过程折叠后整页补载可能一个可见项都不增加，
+    // index 不再变化；只监听 index 会卡在这里，要用户上下晃动才能再触发一页。
+    // 上限纳入信号后，每页补载完成都会重新判断，仍在顶部就连续补载。
+    val latestMessagesState = rememberUpdatedState(messagesState)
+    // 滑动到顶触发：lambda 每帧执行，不能把消息状态也塞进来——那会让滑动每一帧多一次
+    // StateFlow 快照读取 + Pair 分配（用户实测：滑动中卡、加载完静止不卡）。
+    LaunchedEffect(listState, messagesReady) {
+        if (!messagesReady) return@LaunchedEffect
+        // 触发信号里带上分页上限：消息按条数分页，一轮长过程折叠后整页补载可能一个可见项都不增加，
+        // index 不再变化；只监听 index 会卡在这里，要用户上下晃动才能再触发一页。
+        // 上限纳入信号后，每页补载完成都会重新判断，仍在顶部就连续补载。
+        // 代价是 lambda 每帧多读一次消息快照；用 distinctUntilChanged 把下游触发压到真正变化时。
+        snapshotFlow {
+            val ms = latestMessagesState.value
+            Triple(listState.firstVisibleItemIndex <= 3 && ms.hasMore && !ms.isLoadingMore, ms.sessionId, ms.limit)
+        }
+            .distinctUntilChanged()
+            .collect { (shouldLoad, _, _) ->
+                if (shouldLoad) viewModel.loadMoreMessages()
+            }
+    }
+    // 折叠头死锁兜底：长对话列表被折叠头压成少数 item 后可能一开局就停在 index ≤ 3 且
+    // 手指「没得滑」，index 永不再变化，上面的触发器就此沉默。这里只在已加载条数 / hasMore /
+    // isLoadingMore 变化时检查一次，滑动路径不读消息状态。
+    LaunchedEffect(listState, messagesReady) {
+        snapshotFlow {
+            val ms = latestMessagesState.value
+            Triple(ms.messages.size, ms.hasMore, ms.isLoadingMore)
+        }
+            .collect { (_, hasMore, isLoadingMore) ->
+                if (!hasMore || isLoadingMore) return@collect
+                if (listState.firstVisibleItemIndex <= 3) viewModel.loadMoreMessages()
+            }
+    }
+
+    val executionMode = settingsViewModel?.executionMode?.collectAsStateWithLifecycle()?.value
+    val connectionState = settingsViewModel?.connectionState?.collectAsStateWithLifecycle()?.value
+    val isRemote = executionMode == com.aicove.feature.settings.data.repository.ExecutionMode.REMOTE_SSH
+
+    // 连接失败时的动作入口：重试走与「回到前台自动重连」同一条路径（C9）；settingsViewModel 为空
+    // （嵌入式面板不传）时不显示按钮。
+    val onRetryRemoteConnection: (() -> Unit)? = settingsViewModel?.let { vm ->
+        { vm.retryRemoteConnection() }
+    }
+
+    // 重连遇到「主机密钥待确认」：重连链自己从不设置这个状态，必须由重试入口把它露出来，
+    // 否则用户点「重试连接」看不到任何反应。弹窗本体与「连接配置」页共用。
+    val pendingHostKeyConfirm = settingsViewModel?.pendingHostKeyConfirm?.collectAsStateWithLifecycle()?.value
+    // 重连的其它失败原因：以前被 runCatching 吞掉，用户只能看到状态在 CONNECTING/FAILED 之间翻。
+    val remoteRetryError = settingsViewModel?.remoteRetryError?.collectAsStateWithLifecycle()?.value
+    LaunchedEffect(remoteRetryError) {
+        val message = remoteRetryError ?: return@LaunchedEffect
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        settingsViewModel?.consumeRemoteRetryError()
+    }
+
+    val markdownImageTransformer = remember(viewModel.fileAccess) {
+        MarkdownImageTransformer(viewModel.fileAccess)
+    }
+    val imageViewerState = rememberImageViewerState()
+    val viewerDecodeSpec = rememberViewerDecodeSpec()
+    val chatImageLoad = remember(viewModel.fileAccess, viewerDecodeSpec) {
+        chatImageLoader(viewModel.fileAccess, viewerDecodeSpec.maxEdge, viewerDecodeSpec.maxPixels)
+    }
+
+    // 文件卡片点击用系统 app 打开：重取/拷贝需要在 IO 线程跑（远程模式要下载），故由这里注入协程。
+    val attachmentOpener = remember(viewModel.fileAccess, context) {
+        AttachmentOpener { attachment ->
+            scope.launch { openSentAttachment(context, attachment, viewModel.fileAccess) }
+        }
+    }
+
+    // item 渲染依赖打包：字段全为 val，依赖不变时 remember 复用同一实例，
+    // 顶层 RenderChatItem 才能作为可跳过组真的跳过重组。
+    val onOpenMessageMenu: (AgentUIMessage) -> Unit = remember { { messageForMenu = it } }
+    val chatItemEnv = remember(
+        viewModel,
+        markdownCache,
+        taskDurations,
+        reasoningDurations,
+        turnUsages,
+        actionableMessageIds,
+        toolGroupOverrideSnapshot,
+        reasoningOverrideSnapshot,
+        messageEntryDelays,
+        triggeredSkills,
+        runningToolIds,
+        liveToolOutputs,
+        onToolItemToggled,
+        onOpenMessageMenu
+    ) {
+        ChatItemEnv(
+            viewModel = viewModel,
+            markdownCache = markdownCache,
+            taskDurations = taskDurations,
+            reasoningDurations = reasoningDurations,
+            turnUsages = turnUsages,
+            actionableMessageIds = actionableMessageIds,
+            toolGroupOverrides = toolGroupOverrideSnapshot,
+            reasoningOverrides = reasoningOverrideSnapshot,
+            messageEntryDelays = messageEntryDelays,
+            triggeredSkills = triggeredSkills,
+            runningToolIds = runningToolIds,
+            liveOutputs = liveToolOutputs,
+            onToolItemToggled = onToolItemToggled,
+            onOpenMessageMenu = onOpenMessageMenu,
+        )
+    }
+
+    CompositionLocalProvider(
+        LocalMarkdownImageTransformer provides markdownImageTransformer,
+        LocalImageViewer provides imageViewerState,
+        LocalAttachmentOpener provides attachmentOpener,
+        LocalSubAgentCardHost provides SubAgentCardHost(
+            states = subAgentCards,
+            onOpen = { id -> viewModel.selectSession(id) },
+            onStop = { id -> viewModel.stopAgentSession(id) }
+        )
+    ) {
+        Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            ChatHeader(
+                sessionTitle = sessionTitle,
+                modelName = activeProvider?.effectiveModel,
+                inputTokens = sessionInputTokens,
+                outputTokens = sessionOutputTokens,
+                onOpenDrawer = {
+                    keyboardController?.hide()
+                    onOpenDrawer()
+                },
+                onNewChat = { viewModel.newSession() },
+                onNavigateToTerminal = onNavigateToTerminal,
+                onNavigateToGit = onNavigateToGit,
+                onNavigateToBrowser = onNavigateToBrowser,
+                currentMode = currentMode,
+                onToggleMode = { viewModel.setSessionMode(it) },
+                connectionState = connectionState?.takeIf { isRemote },
+                onRetryConnection = onRetryRemoteConnection,
+                showMenuButton = showMenuButton,
+                terminalActive = terminalActive,
+                gitActive = gitActive,
+                browserActive = browserActive
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+        // 大屏正文列限宽居中：铺满整个平板宽度会让一行文字过长、气泡横跨全屏，读起来很累。
+        // 窄窗下 readableContentMaxWidth() 返回 Dp.Unspecified，widthIn 不产生任何约束。
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .widthIn(max = readableContentMaxWidth())
+                .fillMaxSize()
+        ) {
+            // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
+            Column(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f)) {
+                if (!messagesReady) {
+                    // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
+                    if (isRemote && connectionState != null && connectionState != com.aicove.feature.agent.domain.container.ConnectionState.CONNECTED) {
+                        RemoteConnectingPlaceholder(state = connectionState, onRetry = onRetryRemoteConnection)
+                    } else if (showMessagesLoading) {
+                        // 本地模式读库偏慢时的占位：以前这里什么都不画，切会话会先闪一下空白。
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (messages.isEmpty() && visiblePendingUserMessages.isEmpty()) {
+                    WelcomeState(
+                        bottomReserve = with(LocalDensity.current) { inputBarReservePx.toDp() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(userScrollConnection)
+                            .pointerInput(listState) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    pointerDown = true
+                                    try {
+                                        do {
+                                            val event = awaitPointerEvent(PointerEventPass.Final)
+                                        } while (event.changes.any { it.pressed })
+                                    } finally {
+                                        pointerDown = false
+                                    }
+                                }
+                            },
+                        contentPadding = PaddingValues(
+                            start = Spacing.lg,
+                            end = Spacing.lg,
+                            top = Spacing.md,
+                            bottom = with(LocalDensity.current) { inputBarReservePx.toDp() }
+                        )
+                    ) {
+                        itemsIndexed(chatItems, key = { _, item -> item.key }, contentType = { _, item -> item.contentType }) { _, item ->
+                            RenderChatItem(item, chatItemEnv)
+                        }
+                        val reasoning = displayStreamingReasoning
+                        val showReasoning = reasoning?.hasVisibleContent() == true
+                        // 忙碌状态指示器：在没有正文/思考流式输出、未在压缩、未被权限弹窗或询问挂起时展示。
+                        // 工具正在执行或模型正在准备工具时，文案会由 thinkingLabel 动态呈现为对应场景（如「正在读取文件」）；
+                        // 既无流式又无具体工具时兜底显示「正在思考」。
+                        val showToolPreparation = shouldShowToolPreparation(
+                            preparingTool = preparingTool,
+                            isBusy = isBusy,
+                            isCompacting = isCompacting,
+                            awaitingUserInput = pendingPermission != null || pendingQuestion != null,
+                        )
+                        val showThinking = !showReasoning && !showStreaming && !isCompacting && isBusy && pendingPermission == null && pendingQuestion == null
+                        val showRetrying = retryState != null && isBusy && !isCompacting && !showStreaming && !showReasoning
+                        val showKeySwitched = keySwitchState != null && isBusy && !isCompacting && !showStreaming && !showReasoning
+                        val tailKind = when {
+                            // 压缩优先于流式：折叠发生在两次 LLM 调用之间，此刻流式文本已被
+                            // CompactionStarted 清空，剩下的只可能是 retainedStreamingText（上一轮的
+                            // 旧正文 / 旧思考，因为库里的助手行还没回流到 messages 而未被退休）。
+                            // 若让 showStreaming 先命中，整段折叠（实测约 60 秒）里尾巴会停在旧正文上，
+                            // 「正在压缩上下文」一次都不亮——用户只能当作卡死。
+                            isCompacting -> TailKind.COMPACTING
+                            showStreaming -> TailKind.STREAMING
+                            showKeySwitched -> TailKind.KEY_SWITCHED
+                            showRetrying -> TailKind.RETRYING
+                            showThinking -> TailKind.THINKING
+                            else -> TailKind.NONE
+                        }
+                        // 尾巴 item：思考气泡与状态尾巴合并进同一个永久挂载的 item，二者都不按状态增删。
+                        // 思考开始/结束或流式开始/结束若让 totalItemsCount 突增突减，LazyColumn 会把
+                        // firstVisibleItemIndex 向下 clamp → 视口上跳（旧症状2根因）。item 数量恒为 1，
+                        // anchor 不会被 clamp：showReasoning 时渲染思考气泡（内部自带折叠），否则为空；
+                        // tailKind 为 NONE 时尾巴为空 Box（0 高度）。流结束落库后跟随 effect 会把新消息贴底。
+                        item(key = "__active__", contentType = "tail") {
+                            Column {
+                                if (showReasoning) {
+                                    // 流式实时：默认收起，折叠行跟着正在写的那一行滚动；点开看全文
+                                    val reasoningLive = reasoningTiming != null && reasoningTiming?.second == null &&
+                                        !showStreaming && preparingTool == null
+                                    ReasoningBubble(
+                                        text = typewriterReasoningText,
+                                        cache = markdownCache,
+                                        showTimer = reasoningLive,
+                                        durationMs = reasoningTiming?.let { (start, end) -> end?.minus(start) },
+                                        timerStartMs = reasoningTiming?.first,
+                                        preRendered = true,
+                                        sessionKey = currentSessionId,
+                                        live = reasoningLive,
+                                        expandedOverride = currentSessionId?.let {
+                                            reasoningOverrideSnapshot[viewModel.streamingReasoningKey(it)]
+                                        },
+                                        onExpandedChange = { expanded ->
+                                            currentSessionId?.let {
+                                                viewModel.setReasoningExpanded(viewModel.streamingReasoningKey(it), expanded)
+                                            }
+                                            onToolItemToggled()
+                                        },
+                                    )
+                                }
+                                when (tailKind) {
+                                    TailKind.THINKING -> ThinkingBubble(label = thinkingLabel)
+                                    TailKind.STREAMING -> StreamingBubble(text = typewriterRenderText, cache = markdownCache)
+                                    TailKind.COMPACTING -> CompactionProgressBubble(progress = compactionProgress)
+                                    TailKind.RETRYING -> {
+                                        val rs = retryState
+                                        if (rs != null) RetryingBubble(rs.attempt, rs.maxRetries, rs.error) else Box(Modifier)
+                                    }
+                                    TailKind.KEY_SWITCHED -> {
+                                        val ks = keySwitchState
+                                        if (ks != null) KeySwitchedBubble(ks.newIndex, ks.total) else Box(Modifier)
+                                    }
+                                    TailKind.NONE -> Box(Modifier)
+                                }
+                                // 工具参数仍在生成时，保留的思考或正文不能遮掉进度反馈。
+                                if (showToolPreparation && (tailKind == TailKind.NONE || tailKind == TailKind.STREAMING)) {
+                                    ThinkingBubble(label = thinkingLabel)
+                                }
+                                // 待落库用户气泡：挂在尾巴 item 内而非 chatItems。
+                                // item 数不变 → 不会牵动 firstVisibleItemIndex 的 clamp（本 item 的注释说的就是那个坑），
+                                // 也天然拿不到「复制 / 更多 / 回退」操作行（那些按钮按消息 id 反查库，pending 的 id 库里还没有）。
+                                visiblePendingUserMessages.forEach { pending ->
+                                    PendingUserMessageBubble(pending)
+                                }
+                            }
+                        }
+                    }
+                    // 预热会占用主线程做 MarkdownPreprocessor 预处理，长会话里逐条空转同样拖帧；
+                    // 24 版 beta 实测卡顿，停用。保留缓存容量（200）来减少回翻时的重新解析。
+                }
+            }
+            } // 内容层结束
+
+            // 悬浮层：错误气泡 / 面板 / 输入框（蒙版在 ChatInputBar 内部，跟随键盘上移）
+            val floatingPanelAlpha by animateFloatAsState(
+                targetValue = if (listState.isScrollInProgress) 0.4f else 1f,
+                animationSpec = tween(200),
+                label = "floating-panel-alpha"
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                .onGloballyPositioned {
+                    // 实测即用：留白跟着实际高度走，收起时同步降回去。
+                    if (it.size.height > 0) floatingLayerHeightPx = it.size.height
+                }
+            ) {
+            Box(modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = floatingPanelAlpha }) {
+                StatusBanner(state = agentState)
+            }
+
+            // 退场动画期间 uploadingCount 已归零，直接读会淡出一个「正在上传 0 个文件」，
+            // 与 StatusBanner 同样用非空记忆值兜住退场。
+            val lastUploadingCount = rememberLastNonNull(uploadingCount.takeIf { it > 0 })
+            AnimatedVisibility(
+                visible = uploadingCount > 0,
+                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
+                // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(140))
+            ) {
+                lastUploadingCount?.let { UploadingBanner(count = it, onCancel = { cancelUpload() }) }
+            }
+
+            // 问题到达时自动把它切到最前：四类面板互斥里只有它能由系统主动打开。
+            LaunchedEffect(pendingQuestion?.id) {
+                if (pendingQuestion != null) activePanel = ChatPanelSlot.Question
+            }
+
+            val questionForPanel = rememberLastNonNull(pendingQuestion)
+            AnimatedVisibility(
+                visible = pendingQuestion != null,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .graphicsLayer { alpha = floatingPanelAlpha },
+                // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
+                // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(140))
+            ) {
+                questionForPanel?.let { question ->
+                    // 收起≠取消：pendingQuestion 与 AskUserQuestionManager 的挂起流程不受影响，
+                    // 切到其它面板时只把这里的展开态压成收起，问题本身仍等用户回答。
+                    // 收起时必须同时接管点击，否则未知到底有没有别人的面板压着它。
+                    val questionCollapsed = dashboardCollapseActive
+                    TapToActivatePanel(
+                        enabled = questionCollapsed,
+                        onTap = { activePanel = ChatPanelSlot.Question }
+                    ) {
+                        AskUserQuestionPanel(
+                            question = question,
+                            onConfirm = { answer -> viewModel.resolveUserQuestion(question.id, answer) },
+                            onSkip = { viewModel.resolveUserQuestion(question.id, UserQuestionAnswer(emptyList())) },
+                            forceCollapse = questionCollapsed
+                        )
+                    }
+                }
+            }
+
+            val planForPanel = rememberLastNonNull(planApproval)
+            AnimatedVisibility(
+                visible = planApproval != null,
+                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
+                // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(140))
+            ) {
+                planForPanel?.let { state ->
+                    val planApprovalSessionTitle by viewModel.pendingPlanApprovalSessionTitle
+                        .collectAsStateWithLifecycle()
+                    PlanApprovalPanel(
+                        state = state,
+                        onApprove = { viewModel.approvePlanAndBuild(state.id) },
+                        onRefine = { viewModel.refinePlan(state.id) },
+                        forceCollapse = dashboardCollapseActive,
+                        sessionTitle = planApprovalSessionTitle
+                    )
+                }
+            }
+
+            // 对话中插话的即时确认：紧贴输入框上方一行，短暂显示插的是哪一条。
+            // 没有这一行时，点「插话」只是队列行消失，用户要等到模型真用上这条内容
+            // 才知道自己插进去了（真实反馈过他因此以为没生效）。
+            AnimatedVisibility(
+                visible = interjectionAck != null,
+                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                // 同上：只改 alpha，不参与尺寸动画。
+                enter = fadeIn(tween(140)),
+                exit = fadeOut(tween(160))
+            ) {
+                interjectionAck?.let { text ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg)
+                            .clip(RoundedCornerShape(Radius.md))
+                            .background(MaterialTheme.semanticColors.mutedSurface)
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            FeatherIcons.Zap,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(Spacing.sm))
+                        Text(
+                            text = stringResource(R.string.chat_interjected_ack, text),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            ChatInputBar(
+                value = inputText,
+                onValueChange = viewModel::updateInputDraft,
+                onSend = sendMessage,
+                enterToSend = settingsViewModel?.enterToSend?.collectAsStateWithLifecycle()?.value ?: false,
+                onStop = { viewModel.stopAgent() },
+                isBusy = isBusy,
+                workspaceViewModel = workspaceViewModel,
+                hasRunningSessions = { viewModel.hasRunningSessionsInCurrentWorkspace() },
+                onSwitchWorkspaceConfirmed = { viewModel.stopAllAndCloseTerminal() },
+                activeProvider = activeProvider,
+                providers = providers,
+                modelMetadata = modelMetadata,
+                onSelectModel = { p, m ->
+                    viewModel.setSessionProviderModel(p, m)
+                },
+                currentMode = currentMode,
+                onToggleMode = { viewModel.setSessionMode(it) },
+                currentGoal = currentGoal,
+                onSetGoalPaused = { viewModel.setGoalPaused(it) },
+                onClearGoal = { viewModel.clearGoal() },
+                reasoningEffort = reasoningEffort,
+                onReasoningEffortChange = { viewModel.setSessionReasoningEffort(it) },
+                pendingAttachments = pendingAttachments,
+                onRemoveAttachment = ::removePendingAttachment,
+                canUploadFiles = canUploadFiles,
+                canUploadImages = canUploadImages,
+                onUploadFile = { filePicker.launch(arrayOf("*/*")) },
+                onUploadImage = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onTakePhoto = ::takePhoto,
+                slashCommands = slashCommands,
+                fileMentionState = fileMentionState,
+                onFileMentionOpen = viewModel::requestFileMention,
+                onFileMentionDismiss = viewModel::dismissFileMention,
+                matchFileMentions = viewModel::matchFileMentions,
+                queuedRequests = queuedRequests,
+                onRemoveQueued = { viewModel.removeQueuedRequest(it) },
+                onMoveQueued = { from, to -> viewModel.moveQueuedRequest(from, to) },
+                onEditQueued = { queuedEditing = it },
+                onInterjectQueued = { id ->
+                    // 点「插话」后队列行会立刻消失，但用户看不出「插进去没有」——直到模型真用上
+                    // 这条内容才有回应。这里给一条即时确认：输入框上方短暂显示插话内容（见
+                    // interjectionAck 渲染处），让「已送达」在点击那一瞬就可见。
+                    val text = queuedRequests.firstOrNull { it.id == id }?.request
+                    viewModel.interjectQueuedRequest(id)
+                    if (text != null) interjectionAck = text
+                },
+                dashboardState = currentDashboardState,
+                todoItems = currentTodoItems,
+                sessionId = currentSessionId.orEmpty(),
+                activePanel = activePanel,
+                onActivePanelChange = { activePanel = it },
+                onQueueExpandedChange = { expanded ->
+                    if (expanded) activePanel = ChatPanelSlot.Queue
+                    else if (activePanel == ChatPanelSlot.Queue) activePanel = ChatPanelSlot.None
+                },
+                onTodoExpandedChange = { expanded ->
+                    if (expanded) activePanel = ChatPanelSlot.Todo
+                    else if (activePanel == ChatPanelSlot.Todo) activePanel = ChatPanelSlot.None
+                },
+                forceCollapseDashboard = pendingPermission != null || planApproval != null || imeVisible,
+                onDashboardExpandedChange = { expanded ->
+                    if (expanded) activePanel = ChatPanelSlot.Dashboard
+                    else if (activePanel == ChatPanelSlot.Dashboard) activePanel = ChatPanelSlot.None
+                },
+                onRefreshDashboard = {
+                    activeProvider?.let {
+                        val context = buildDashboardContext(refreshReason = "manual")
+                        settingsViewModel?.refreshProviderDashboard(it, context = context, force = true)
+                    }
+                },
+                onRefreshDashboardByButton = {
+                    activeProvider?.let {
+                        val context = buildDashboardContext(refreshReason = "button")
+                        settingsViewModel?.refreshProviderDashboard(it, context = context, force = true)
+                    }
+                },
+                tokenProgress = run {
+                    // 快照就是判定输入本身：环长 = 判定值占窗口，与是否触发压缩同源。
+                    // 本会话还没判定过时不画弧——退到上次请求的真实 usage 会系统性偏小
+                    // （本轮新塞入的内容还没发出去过），比没有更糟：它会把「已经触发压缩」显示成一小截。
+                    sessionContextUsage?.progress ?: 0f
+                },
+                reportedTokenProgress = sessionContextUsage?.reportedProgress ?: 0f,
+                tokenUsageEstimated = sessionContextUsage?.isEstimated ?: false,
+                isScrolling = listState.isScrollInProgress,
+                forceOpenModelSheet = onboardingStep == OnboardingStep.SIMULATE_CHOOSE_MODEL,
+                onSelectModelInOnboarding = onSelectModelInOnboarding,
+                onModelSheetDismiss = onDismissModelSheetInOnboarding,
+                // 主页模型弹层的「测试」按钮：直接复用设置页的连通性测试链路，状态由弹层自己持有。
+                onRunModelTest = settingsViewModel?.let { svm -> { p, m -> svm.runModelTest(p, m) } },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onboardingTarget(OnboardingStep.SEND_MESSAGE)
+            )
+            } // 悬浮层结束
+
+            // 悬浮授权弹窗：独立于底栏排版流，悬浮于输入框上方，避免撑大底栏高度导致消息列表被顶上去。
+            // 用户上下滑动消息列表时跟随透明弱化，不遮挡阅读视线。
+            val permissionForPanel = rememberLastNonNull(pendingPermission)
+            var permissionPanelHeightPx by remember { mutableStateOf(0) }
+            AnimatedVisibility(
+                visible = pendingPermission != null,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() } + Spacing.xs)
+                    .onGloballyPositioned { permissionPanelHeightPx = if (pendingPermission != null) it.size.height else 0 },
+                enter = fadeIn(tween(220)) +
+                        slideInVertically(tween(220)) { it / 3 } +
+                        scaleIn(initialScale = 0.96f, animationSpec = tween(220)),
+                exit = fadeOut(tween(160)) +
+                       slideOutVertically(tween(160)) { it / 3 } +
+                       scaleOut(targetScale = 0.96f, animationSpec = tween(160))
+            ) {
+                permissionForPanel?.let { request ->
+                    ToolPermissionPanel(
+                        request = request,
+                        onChoice = { choice -> viewModel.resolveToolPermission(request.id, choice) },
+                        sessionTitle = pendingPermissionSessionTitle,
+                        forceCollapse = dashboardCollapseActive,
+                        isScrolling = listState.isScrollInProgress
+                    )
+                }
+            }
+
+            // 滚动到底部按钮：悬浮在输入框右上角上方（避让底栏及可能悬浮的授权弹窗），离底超过半屏时
+            // 显示，不看滚动方向——往上翻历史后停住恰恰是最需要一键回底的时刻；滚动时跟随输入框淡出。
+            val permissionOffsetPx = with(LocalDensity.current) {
+                if (pendingPermission != null) permissionPanelHeightPx + Spacing.xs.toPx() else 0f
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isFarFromBottom,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = Spacing.lg)
+                    .padding(bottom = with(LocalDensity.current) { (floatingLayerHeightPx + permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp() })
+                    .graphicsLayer { alpha = if (listState.isScrollInProgress) 0.4f else 1f },
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut()
+            ) {
+                ScrollToBottomButton(
+                    onClick = {
+                        followBottom = true
+                        scope.launch { snapToBottom() }
+                    }
+                )
+            }
+
+            targetRewindMessageId?.let { targetId ->
+                val targetMsg = messages.find { it.id == targetId }
+                RewindOptionsBottomSheet(
+                    promptSnippet = targetMsg?.content ?: "",
+                    onOptionSelected = { option ->
+                        viewModel.executeRewindOption(targetId, option) { text, attachments ->
+                            viewModel.updateInputDraft(text)
+                            pendingAttachments = attachments.map { it.toPendingAttachment() }
+                        }
+                    },
+                    onDismissRequest = { viewModel.dismissRewindMenu() }
+                )
+            }
+
+            messageForMenu?.let { message ->
+                val clipboard = LocalClipboard.current
+                val copyScope = rememberCoroutineScope()
+                MessageActionsBottomSheet(
+                    message = message,
+                    onDismiss = { messageForMenu = null },
+                    onEditClick = { editingMessage = message },
+                    onCopyClick = {
+                        copyScope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", message.content)))
+                        }
+                    },
+                    onForkClick = { viewModel.forkFromMessage(message.id) },
+                    onDeleteClick = { viewModel.deleteMessage(message.id) }
+                )
+            }
+
+            editingMessage?.let { message ->
+                EditMessageDialog(
+                    initialText = message.content,
+                    onDismiss = { editingMessage = null },
+                    onConfirm = { newContent ->
+                        viewModel.updateMessageContent(message.id, newContent)
+                        editingMessage = null
+                    }
+                )
+            }
+
+            queuedEditing?.let { req ->
+                EditMessageDialog(
+                    initialText = req.request,
+                    onDismiss = { queuedEditing = null },
+                    onConfirm = { newContent ->
+                        viewModel.updateQueuedRequest(req.id, newContent)
+                        queuedEditing = null
+                    }
+                )
+            }
+        }
+        }
+    }
+
+        // Dialog 是独立 window、不占父布局尺寸，挂在 Scaffold 之后即可覆盖整屏 ——
+        // 平板双栏下不会只盖住聊天列，也不会被 MainActivity 画在最上层的全局背景水印压住。
+        ImageViewerHost(state = imageViewerState, load = chatImageLoad)
+
+        // 主机密钥确认（首次连接/指纹变化）：与「连接配置」页同一个组件、同一份指纹文案。
+        // 确认后由 ViewModel 落盘指纹并立即再重连一次，用户不用再点一次「重试连接」。
+        // 仅远程模式弹：切回本地后没有可确认的连接，留着弹窗只会挡页面。
+        if (isRemote) {
+            pendingHostKeyConfirm?.let { pending ->
+                HostKeyConfirmDialog(
+                    pendingHostKey = pending,
+                    onConfirm = { settingsViewModel?.confirmRetryHostKey() },
+                    onReject = { settingsViewModel?.rejectRetryHostKey() }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 记住最后一个非空值，供 [AnimatedVisibility] 的退出动画继续渲染旧内容。
+ *
+ * 用普通对象而不是 [androidx.compose.runtime.MutableState] 持有：这里只需要跨重组留住上一个值，
+ * 不需要它自己触发重组（源值变化本身就会重组读取点），进快照系统反而会多引发一次无效重组。
+ */
+@Composable
+internal fun <T : Any> rememberLastNonNull(value: T?): T? {
+    val holder = remember { LastNonNullHolder<T>() }
+    if (value != null) holder.value = value
+    return holder.value
+}
+
+private class LastNonNullHolder<T : Any>(var value: T? = null)
+
+/**
+ * 工具卡片入场动画的调度器：决定哪些消息该播入场、以及各自错开多久。
+ *
+ * 判据是「本调度器存续期间新追加到尾部」，而不是「timestamp 距今 N 秒内」——
+ * 后者在切页返回时会把仍在时间窗内的那批消息再判成新消息，动画重播一遍。
+ * 首次调用时列表里已有的消息一律记为存量；向上翻页加载进来的历史比已见最大时间戳更旧，
+ * 同样不入场。会话切换时整个调度器重建，新会话的存量消息也不入场。
+ */
+private class MessageEntryScheduler {
+    private val seen = mutableSetOf<String>()
+    private val delays = mutableMapOf<String, Long>()
+    private var initialized = false
+    private var maxSeenTimestamp = Long.MIN_VALUE
+
+    /** 返回「消息 id → 入场延迟（ms）」；不在表内的消息直接显示。 */
+    fun schedule(messages: List<AgentUIMessage>): Map<String, Long> {
+        if (!initialized) {
+            initialized = true
+            messages.forEach { seen += it.id }
+            maxSeenTimestamp = messages.maxOfOrNull { it.timestamp } ?: Long.MIN_VALUE
+            return emptyMap()
+        }
+        var consecutive = 0
+        for (message in messages) {
+            if (message.id in seen) {
+                consecutive = 0
+                continue
+            }
+            seen += message.id
+            val appendedAtTail = message.timestamp >= maxSeenTimestamp
+            maxSeenTimestamp = maxOf(maxSeenTimestamp, message.timestamp)
+            if (appendedAtTail && message.role == MessageRole.TOOL) {
+                delays[message.id] = (consecutive * MESSAGE_ENTRY_STAGGER_MS)
+                    .coerceAtMost(MESSAGE_ENTRY_MAX_STAGGER_MS)
+                consecutive++
+            } else {
+                consecutive = 0
+            }
+        }
+        return delays.toMap()
+    }
+}
+
+/** 滚动到底部按钮：圆形，悬浮在输入框右上角，不在底部时显示。 */
+@Composable
+private fun ScrollToBottomButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 6.dp,
+        modifier = modifier.size(SCROLL_TO_BOTTOM_BTN_SIZE.dp)
+    ) {
+        ShapeClickBox(
+            onClick = onClick,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Icon(
+                imageVector = FeatherIcons.ArrowDown,
+                contentDescription = stringResource(R.string.common_scroll_to_bottom),
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}

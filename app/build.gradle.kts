@@ -86,7 +86,7 @@ val syncAiDocs = tasks.register<Sync>("syncAiDocs") {
 }
 
 android {
-    namespace = "com.aicode"
+    namespace = "com.aicove"
     compileSdk = 36
     buildToolsVersion = "35.0.0"
 
@@ -102,9 +102,9 @@ android {
     }
 
     defaultConfig {
-        // 包名故意用大写 R（`Rely.aicode`）：不合 Java 包名惯例，但用户明确要这个字面。
-        // namespace 保持 com.aicode 不动——源码包声明 / R / 生成的类是 namespace 管的，与包名无关。
-        applicationId = "Rely.aicode"
+        // 包名故意用大写 R（`Rely.aicove`）：不合 Java 包名惯例，但用户明确要这个字面。
+        // namespace 已是 com.aicove——源码包声明 / R / 生成的类由 namespace 管，与 applicationId 无关。
+        applicationId = "Rely.aicove"
         minSdk = 26
         // 仍锁 targetSdk 28，但阻塞项已不是 PRoot：proot 全套改由 jniLibs 装到 nativeLibraryDir
         // （见 sourceSets 与 packaging.jniLibs 注释），W^X 不再挡容器启动。升级前待解决：
@@ -170,9 +170,9 @@ android {
     }
 
     buildTypes {
-        // debug 加包名后缀 .debug → applicationId 变 Rely.aicode.debug，与 release（Rely.aicode）
+        // debug 加包名后缀 .debug → applicationId 变 Rely.aicove.debug，与 release（Rely.aicove）
         // 可同机共存、互不覆盖。IDE 跑 debug 不再因签名不同卸载已装的正式版。
-        // 注意：因 applicationId 不同，debug 变体私有目录为 /data/data/Rely.aicode.debug/，
+        // 注意：因 applicationId 不同，debug 变体私有目录为 /data/data/Rely.aicove.debug/，
         // release 已解压的容器 rootfs 与工作区项目在 debug 下不可见（需重新解压/clone），属预期隔离行为。
         debug {
             applicationIdSuffix = ".debug"
@@ -192,7 +192,7 @@ android {
             }
         }
         // beta 测试版：继承 release 的全部配置（签名/R8/资源压缩/proguard），仅包名后缀 .beta
-        // → applicationId 变 Rely.aicode.beta，可与正式版同机共存、互不覆盖。
+        // → applicationId 变 Rely.aicove.beta，可与正式版同机共存、互不覆盖。
         // 由 .github/workflows/beta.yml 在 push main 时构建并上传 Artifacts，供测机验证。
         create("beta") {
             initWith(getByName("release"))
