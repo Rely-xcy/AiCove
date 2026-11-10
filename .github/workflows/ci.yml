@@ -104,6 +104,29 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testUniversalDebugUnitTest
 
+      # 单测失败时把失败用例名与首行断言消息直接打进日志。
+      # 报告 XML 只在 artifact 里，而 artifact 下载需要仓库权限，排障时往往拿不到；
+      # 只打名字与首行，不刷整个栈，日志仍然可读。
+      - name: Summarize failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          total = 0
+          for path in glob.glob('app/build/test-results/**/*.xml', recursive=True):
+              try:
+                  root = ET.parse(path).getroot()
+              except Exception:
+                  continue
+              for case in root.iter('testcase'):
+                  for fail in list(case.findall('failure')) + list(case.findall('error')):
+                      total += 1
+                      name = f"{case.get('classname')}.{case.get('name')}"
+                      msg = (fail.get('message') or '').strip().splitlines()
+                      print(f"FAILED_TEST :: {name} :: {msg[0] if msg else ''}")
+          print(f"TOTAL_FAILED={total}")
+          PY
+
       # 单测失败时把测试报告与原始 XML 传成 artifact：CI 日志只有 FAILED 摘要，
       # 真栈（例如 kotlinx-coroutines-test 把根因塞进 suppressed、只落到 system-err）
       # 只在测试报告里，日志里捞不到。只在失败时传，平时不占 artifact 配额。
