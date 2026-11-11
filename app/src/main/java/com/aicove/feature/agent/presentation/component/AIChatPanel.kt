@@ -1519,6 +1519,17 @@ fun AIChatPanel(
         }
     }
 
+    // 兜底退休：retained 快照只该活在「流式已结束、落库行尚未回流」的短窗口里。判据取「忙状态翻转」
+    // 加「末尾消息更替」——任何一条新消息落库，都说明本轮输出已经有着落，快照当场让位。
+    // 只靠上面的 pendingRowId 认领会漏：多步工具回合里助手行常与紧随其后的工具消息合并派发，
+    // UI 观察不到它成为末尾的那一帧；登记行若落在渲染层过滤掉的行上，同样永远认不到。
+    // 这两条路径下 assistantSettled 恒 false，快照就一直挂在尾巴上，与新落库的思考块同屏重复
+    // （上方完整、下方残段）。修法同上游 8df88285：不再等待认领，末尾一变就清。
+    LaunchedEffect(isBusy, messages.lastOrNull()?.id) {
+        retainedStreamingText = null
+        retainedStreamingReasoning = null
+    }
+
     val displayStreamingText = if (assistantSettled) null else (streamingText ?: retainedStreamingText)
     val showStreaming = displayStreamingText?.hasVisibleContent() == true
 
