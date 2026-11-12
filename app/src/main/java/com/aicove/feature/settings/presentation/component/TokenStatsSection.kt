@@ -948,15 +948,10 @@ private fun CallRecordRow(call: RecentCallRecord, cost: Double?, textColor: Colo
         TableCell(call.providerName ?: call.record.providerId ?: stringResource(R.string.settings_token_stats_unknown), textColor, COL_PROVIDER_W)
         TableCell(call.record.model ?: stringResource(R.string.settings_token_stats_unknown), textColor, COL_MODEL_W)
         TableCell(call.record.reasoningEffort ?: "-", mutedColor, COL_EFFORT_W)
-        // 发生降级时显示「原档位 → 实际发出」，否则只显示实际发出的思考参数。
-        // 服务端把思考参数记成 `effort=high` 这种 key=value 形式，表里只要档位本身。
-        TableCell(
-            call.record.reasoningClampedFrom?.let { from -> "$from → ${wireEffortOnly(call.record.reasoningWire)}" }
-                ?: wireEffortOnly(call.record.reasoningWire)
-                ?: "-",
-            mutedColor,
-            COL_EFFORT_W
-        )
+        // 只显示实际发出的思考参数。降级前的档位在左侧「思考档位」列已经有了，这里再拼一次
+        // 「原档位 → 实际」在 72dp 里放不下、会被 Ellipsis 截成省略号，恰恰把最该看的值（被降到
+        // 哪一档）切掉。服务端把思考参数记成 `effort=high` 这种 key=value 形式，表里只要档位本身。
+        TableCell(wireEffortOnly(call.record.reasoningWire) ?: "-", mutedColor, COL_EFFORT_W)
         TableCell(call.record.status, statusColor, COL_STATUS_W, FontWeight.Medium)
         TableCell(call.record.inputTokens.toString(), textColor, COL_TOKENS_W)
         TableCell(call.record.outputTokens.toString(), textColor, COL_TOKENS_W)
