@@ -1,6 +1,7 @@
 package com.aicove.core.theme
 
 import android.os.Build
+import com.aicove.core.ui.ProvideSafeTextToolbar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -300,7 +301,8 @@ fun AIEditorTheme(
         MaterialTheme(
             colorScheme = themeColors.colorScheme,
             typography = AppTypography,
-            content = content
+            // 选择工具栏在这里统一兜底：越界的 selection offset 只让那次菜单不弹，不崩进程。
+            content = { ProvideSafeTextToolbar(content) }
         )
     }
 }
