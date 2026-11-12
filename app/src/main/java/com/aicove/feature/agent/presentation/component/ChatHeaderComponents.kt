@@ -201,8 +201,11 @@ internal fun ChatHeader(
                                     this.alpha = shelfAlpha
                                     transformOrigin = TransformOrigin(1f, 0f)
                                 },
+                                // 用应用语义色而不是 colorScheme.surface：主题预设（暖纸等）
+                                // 推导出的 surface 不一定等于卡片色，直接用会和页面里的卡片脱节。
                                 shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surface,
+                                color = MaterialTheme.semanticColors.cardSurface,
+                                border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder),
                                 shadowElevation = 0.dp,
                                 tonalElevation = 0.dp
                             ) {
