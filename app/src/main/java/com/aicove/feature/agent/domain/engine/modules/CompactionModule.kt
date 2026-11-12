@@ -375,7 +375,7 @@ class CompactionModule @Inject constructor(
             return null
         }
         rememberRawEstimate(ctx, estimateCache.estimate(ctx.sessionId, guarded) + call.overheadTokens)
-        return call.copy(messages = guarded)
+        return call.copy(messages = guarded, compacted = compacted)
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.runtime
 
+import com.aicove.core.plugin.AgentLifecycleHooks
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.plugin.domain.PluginHook
 import com.aicove.feature.plugin.domain.PluginHookEvents
@@ -33,10 +34,10 @@ import kotlinx.serialization.json.put
 class PluginHookDispatcher @Inject constructor(
     private val pluginManager: PluginManager,
     private val runtime: PluginRuntimeManager
-) {
+) : AgentLifecycleHooks {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun dispatchRunStarted(
+    override fun onRunStarted(
         sessionId: String,
         runId: String,
         mode: String,
@@ -54,7 +55,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** [status] 取 `success` / `error` / `cancelled`；[toolCalls] 是本次运行的工具调用次数。 */
-    fun dispatchRunFinished(
+    override fun onRunFinished(
         sessionId: String,
         runId: String,
         mode: String,
@@ -75,7 +76,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** 一次模型请求即将发出。 */
-    fun dispatchRequestStarted(
+    override fun onRequestStarted(
         sessionId: String?,
         runId: String,
         requestId: String,
@@ -99,7 +100,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** 一次模型响应结束（成功、失败或取消）。 */
-    fun dispatchRequestFinished(
+    override fun onRequestFinished(
         sessionId: String?,
         runId: String,
         requestId: String,
@@ -131,7 +132,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** 一次工具调用真正开始执行。 */
-    fun dispatchToolStarted(
+    override fun onToolStarted(
         sessionId: String?,
         runId: String,
         callId: String,
@@ -151,7 +152,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** 一次工具调用结束；[status] 取 `success` / `error`。 */
-    fun dispatchToolFinished(
+    override fun onToolFinished(
         sessionId: String?,
         runId: String,
         callId: String,
@@ -175,7 +176,7 @@ class PluginHookDispatcher @Inject constructor(
     }
 
     /** 上下文压缩实际发生。 */
-    fun dispatchCompaction(
+    override fun onCompaction(
         sessionId: String?,
         runId: String,
         mode: String,

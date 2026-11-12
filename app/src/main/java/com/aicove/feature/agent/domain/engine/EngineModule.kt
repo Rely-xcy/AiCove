@@ -66,6 +66,8 @@ data class LlmCall(
     val overheadTokens: Int = 0,
     /** 手动强制压缩（用户点「压缩上下文」）。 */
     val force: Boolean = false,
+    /** 本次模块链是否真的完成了硬折叠；供宿主生命周期事件使用。 */
+    val compacted: Boolean = false,
     /** 压缩过程要往 UI 推的事件（开始/进度/结束/失败）。 */
     val onEvent: suspend (AgentEvent) -> Unit = {}
 )

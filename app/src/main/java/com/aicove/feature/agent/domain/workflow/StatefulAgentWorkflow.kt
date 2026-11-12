@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Base64
 import com.aicove.R
+import com.aicove.core.plugin.AgentLifecycleHooks
 import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
@@ -130,6 +131,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val writeLeaseRegistry: WriteLeaseRegistry,
     private val interruptedWorkRecorder: InterruptedWorkRecorder,
+    private val agentLifecycleHooks: AgentLifecycleHooks,
     @param:ApplicationContext private val appContext: Context
 ) : AgentWorkflow {
 
@@ -653,6 +655,21 @@ class StatefulAgentWorkflow @Inject constructor(
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
+        val hookSessionId = context.sessionId
+        val hookRunId = UUID.randomUUID().toString()
+        val hookScope = if (context.isSubAgent) "subagent" else "main"
+        val hookAgentName = context.agentDefinition?.name
+        var hookToolCalls = 0
+        var hookErrorCode: String? = null
+        if (hookSessionId != null) {
+            agentLifecycleHooks.onRunStarted(
+                sessionId = hookSessionId,
+                runId = hookRunId,
+                mode = currentContext.mode.name,
+                scope = hookScope,
+                agentName = hookAgentName
+            )
+        }
         // 本次运行怎么收场的：正常收尾为 null，失败在下面回填。运行结束回调据此判定要不要留痕。
         var runOutcome: String? = null
         // 本次会话运行结束（正常完成 / 取消 / 异常）就把写范围交还回去。
@@ -669,6 +686,23 @@ class StatefulAgentWorkflow @Inject constructor(
                 cause is CancellationException -> OUTCOME_CANCELLED
                 cause != null -> OUTCOME_FAILED
                 else -> runOutcome
+            }
+            if (hookSessionId != null) {
+                val status = when {
+                    cause is CancellationException -> "cancelled"
+                    cause != null || runOutcome == OUTCOME_FAILED -> "error"
+                    else -> "success"
+                }
+                agentLifecycleHooks.onRunFinished(
+                    sessionId = hookSessionId,
+                    runId = hookRunId,
+                    mode = currentContext.mode.name,
+                    scope = hookScope,
+                    agentName = hookAgentName,
+                    status = status,
+                    toolCalls = hookToolCalls,
+                    errorCode = if (status == "error") hookErrorCode ?: cause?.javaClass?.simpleName else null
+                )
             }
             // 只给子代理留痕：主代理的半成品就在用户眼前那轮对话里，再备份一份只是噪声
             if (reason != null && context.isSubAgent) {
@@ -810,6 +844,10 @@ class StatefulAgentWorkflow @Inject constructor(
                         val sessionLastInputTokens = currentContext.sessionId?.let { sessionUseCase.getSessionById(it)?.lastInputTokens } ?: 0
                         // 上下文预算交给引擎统一调度：CompactionModule 判档位与硬线，
                         // ContextCompactor 只做消息变换（硬压缩、发送前兜底）。
+                        val preCallEstimatedTokens = maxOf(
+                            sessionLastInputTokens,
+                            TokenEstimator.estimateMessages(state.messages) + baseOverheadTokens
+                        )
                         val call = agentEngine.beforeLlmCall(
                             EngineContext(
                                 sessionId = currentContext.sessionId,
@@ -830,6 +868,16 @@ class StatefulAgentWorkflow @Inject constructor(
                             )
                         )
                         compactedMessages = call.messages
+                        if (call.compacted) {
+                            agentLifecycleHooks.onCompaction(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                estimatedInputTokens = preCallEstimatedTokens
+                            )
+                        }
                         // 引用比较：模块未改动时原样返回同一个列表，不必白写一次状态
                         if (call.messages !== state.messages) {
                             state = state.copy(messages = call.messages)
@@ -858,12 +906,25 @@ class StatefulAgentWorkflow @Inject constructor(
                             val stream = StreamAccumulator(callStartElapsed) { send(it) }
                             callError = null
                             callCompleted = false
+                            val hookRequestId = UUID.randomUUID().toString()
+                            agentLifecycleHooks.onRequestStarted(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                requestId = hookRequestId,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                messageCount = messagesToSend.size,
+                                toolCount = currentTools.size,
+                                estimatedInputTokens = TokenEstimator.estimateMessages(messagesToSend) + baseOverheadTokens
+                            )
                         try {
                             providerInUse.completeStream(systemPrompt, messagesToSend, currentTools, currentContext.reasoningEffort)
                                 .collect { stream.onChunk(it) }
                             // 节流窗口内可能还压着最新累积文本：补发，保证 UI 尾巴拿到完整文本再交接落库。
                             stream.flush()
                             val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
+                            hookToolCalls += aiResponse.toolCalls.size
                             // 模型直出图片（Gemini 图像模型）不随流式增量到达，整块在 Final 里：
                             // 先把 base64 落盘到 ~/.aicode/generated-images/ 并构造 UI 附件（只存路径不存 base64），
                             // 再随 LlmResponse 把带 path 的 images 交 reduce 挂上 AssistantMessage 供下一回放。
@@ -962,6 +1023,25 @@ class StatefulAgentWorkflow @Inject constructor(
                         } finally {
                             val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
                             val usage = stream.finalResponse
+                            agentLifecycleHooks.onRequestFinished(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                requestId = hookRequestId,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                status = when {
+                                    callCompleted -> "success"
+                                    callError != null -> "error"
+                                    else -> "cancelled"
+                                },
+                                inputTokens = usage?.inputTokens ?: 0,
+                                outputTokens = usage?.outputTokens ?: 0,
+                                toolCalls = usage?.toolCalls?.size ?: 0,
+                                durationMs = durationMillis,
+                                stopReason = usage?.stopReason,
+                                errorCode = callError
+                            )
                             runCatching {
                                 // 与适配器同源算一次「实际会发什么」：落库后能在统计页分辨
                                 // 「选了但没生效」「被降级」这些静默问题。
@@ -1048,6 +1128,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 并行执行本批已批准的工具。先统一记录 checkpoint（editFile/writeFile 修改前快照），
                         // 再并行执行；mode 切换检查在结果收集后于主协程串行处理（planApproval 单例）。
                         val toolCalls = effect.toolCalls
+                        val hookToolStartedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
                         toolCalls.forEach { toolCall ->
                             if (toolCall.name == "editFile" || toolCall.name == "writeFile") {
                                 (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
@@ -1100,6 +1181,16 @@ class StatefulAgentWorkflow @Inject constructor(
                                             )
 
                                             else -> {
+                                                hookToolStartedAt[toolCall.id] = SystemClock.elapsedRealtime()
+                                                agentLifecycleHooks.onToolStarted(
+                                                    sessionId = hookSessionId,
+                                                    runId = hookRunId,
+                                                    callId = toolCall.id,
+                                                    toolName = toolCall.name,
+                                                    mode = currentContext.mode.name,
+                                                    scope = hookScope,
+                                                    agentName = hookAgentName
+                                                )
                                                 val tool = currentTools.firstOrNull { it.name == toolCall.name }
                                                 val run = if (tool is StreamingAgentTool) {
                                                     runToolStream(tool, toolCall, currentContext) { send(it) }
@@ -1152,6 +1243,19 @@ class StatefulAgentWorkflow @Inject constructor(
                                 }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
+                            hookToolStartedAt.remove(toolCall.id)?.let { startedAt ->
+                                agentLifecycleHooks.onToolFinished(
+                                    sessionId = hookSessionId,
+                                    runId = hookRunId,
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    mode = currentContext.mode.name,
+                                    scope = hookScope,
+                                    agentName = hookAgentName,
+                                    status = if (isError) "error" else "success",
+                                    durationMs = (SystemClock.elapsedRealtime() - startedAt).toInt()
+                                )
+                            }
                         }
 
                         // 本轮内到达的后台任务/子代理完成通知：搭在本批最后一条工具结果上立即送达，
@@ -1267,6 +1371,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val error = state.error
         if (error != null) {
             runOutcome = OUTCOME_FAILED
+            hookErrorCode = state.errorCode
             send(AgentEvent.Failed(error, state.errorCode))
         } else {
             // 失败轮不再补发 Completed：VM 收到它会给父会话发一条「子代理已完成」通知（与 Failed

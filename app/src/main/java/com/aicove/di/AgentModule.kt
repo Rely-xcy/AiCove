@@ -2,6 +2,7 @@ package com.aicove.di
 
 import android.content.Context
 import com.aicove.core.net.applyTcpKeepAlive
+import com.aicove.core.plugin.AgentLifecycleHooks
 import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -470,6 +471,7 @@ object AgentModule {
         fileAccess: FileAccessProvider,
         writeLeaseRegistry: WriteLeaseRegistry,
         interruptedWorkRecorder: InterruptedWorkRecorder,
+        agentLifecycleHooks: AgentLifecycleHooks,
         @ApplicationContext context: Context
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
@@ -499,6 +501,7 @@ object AgentModule {
             fileAccess,
             writeLeaseRegistry,
             interruptedWorkRecorder,
+            agentLifecycleHooks,
             context
         )
     }
