@@ -32,3 +32,21 @@ internal fun rememberSafeTextFieldValueState(text: String): MutableState<TextFie
     }
     return state
 }
+
+/**
+ * 把越界的 selection / composition 夹回文本范围。
+ *
+ * 快速删除时 IME 回传的 TextFieldValue 可能带着指向已删字符的 offset（组合区尤其常见）。
+ * 紧接着长按选词，Compose 会拿这个 offset 去构造 TextSelection.Request，Android 抛
+ * IllegalArgumentException（崩溃栈顶是 TextClassifier$Utils.checkArgument）。
+ * 合法值原样返回，不影响正常输入和中文组合区，只在越界时重建。
+ */
+internal fun TextFieldValue.sanitized(): TextFieldValue {
+    val len = text.length
+    val start = selection.start.coerceIn(0, len)
+    val end = selection.end.coerceIn(0, len)
+    val sel = TextRange(minOf(start, end), maxOf(start, end))
+    val comp = composition?.takeIf { it.start in 0..len && it.end in 0..len && it.start < it.end }
+    if (sel == selection && comp == composition) return this
+    return TextFieldValue(text = text, selection = sel, composition = comp)
+}

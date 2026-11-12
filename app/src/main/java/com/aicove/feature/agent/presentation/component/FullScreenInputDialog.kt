@@ -112,8 +112,9 @@ internal fun FullScreenInputDialog(
                 AppTextField(
                     value = fullScreenValue.value,
                     onValueChange = { new ->
-                        fullScreenValue.value = new
-                        onValueChange(new.text)
+                        val safe = new.sanitized()
+                        fullScreenValue.value = safe
+                        onValueChange(safe.text)
                     },
                     modifier = Modifier
                         .fillMaxWidth()

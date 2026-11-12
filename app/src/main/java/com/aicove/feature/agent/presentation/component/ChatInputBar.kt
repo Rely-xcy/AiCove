@@ -577,8 +577,9 @@ internal fun ChatInputBar(
                     TextField(
                         value = inputFieldValue.value,
                         onValueChange = { new ->
-                            inputFieldValue.value = new
-                            onValueChange(new.text)
+                            val safe = new.sanitized()
+                            inputFieldValue.value = safe
+                            onValueChange(safe.text)
                         },
                         modifier = Modifier
                             .weight(1f)
