@@ -5,6 +5,7 @@ import com.aicove.feature.plugin.domain.PluginContent
 import com.aicove.feature.plugin.domain.PluginManager
 import com.aicove.feature.plugin.domain.PluginWorkspaceTool
 import com.aicove.feature.workspace.data.repository.WorkspaceRepository
+import com.aicove.feature.workspace.domain.ProjectAicodeRoot
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
