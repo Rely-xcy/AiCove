@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -392,7 +393,7 @@ internal fun AgentMessageItem(
                                 color = chatUserBubbleColor(),
                                 modifier = Modifier.widthIn(max = maxUserBubbleWidth)
                             ) {
-                                SelectionContainer {
+                                StableSelectionContainer(message.id) {
                                     CompositionLocalProvider(
                                         LocalTextSelectionColors provides TextSelectionColors(
                                             handleColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -411,7 +412,7 @@ internal fun AgentMessageItem(
                         } else {
                             // 助手正文：不套容器，直接铺在页面底色上（文档流）。分块之间只留一个段落间距，
                             // 整条消息看起来仍是连续的一段正文。
-                            SelectionContainer {
+                            StableSelectionContainer(message.id) {
                                 CompositionLocalProvider(
                                     LocalTextSelectionColors provides TextSelectionColors(
                                         handleColor = MaterialTheme.colorScheme.primary,
@@ -849,4 +850,44 @@ private fun CompactionFailureCard(message: AgentUIMessage) {
             }
         }
     }
+
+/**
+ * 按 [contentKey] 重建的选择容器。
+ *
+ * LazyColumn 复用 item 时，SelectionManager 的选中状态会跟着槽位走；文本换成另一条后
+ * 长按选词，就会拿旧文本的 offset 去构造 TextSelection.Request，Android 抛
+ * IllegalArgumentException（崩溃栈落在 TextClassifier$Utils.checkArgument）。
+ * 用消息 id 当 key，复用时强制重建选择状态，宁可清掉选中也不要拿错 offset。
+ */
+@Composable
+private fun StableSelectionContainer(
+    contentKey: Any,
+    content: @Composable () -> Unit
+) {
+    key(contentKey) {
+        SelectionContainer {
+            content()
+        }
+    }
+}
+
+/**
+ * 按 [contentKey] 重建的选择容器。
+ *
+ * LazyColumn 复用 item 时，SelectionManager 的状态是跟着槽位走的；文本一旦换成另一条，
+ * 长按选词就会拿旧偏移去构造 TextSelection.Request，Android 直接抛
+ * IllegalArgumentException（真机崩溃于聊天页，栈顶是 TextSelection$Request$Builder）。
+ * 用消息 id 当 key，复用时强制重建选择状态，避免旧偏移指向新文本。
+ */
+@Composable
+private fun StableSelectionContainer(
+    contentKey: Any,
+    content: @Composable () -> Unit
+) {
+    key(contentKey) {
+        SelectionContainer {
+            content()
+        }
+    }
+}
 }
