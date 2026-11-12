@@ -105,7 +105,7 @@ import com.aicove.feature.agent.presentation.hasVisibleContent
 import com.aicove.feature.onboarding.domain.OnboardingStep
 import com.aicove.feature.onboarding.presentation.onboardingTarget
 import com.aicove.feature.settings.presentation.SettingsViewModel
-import com.aicove.feature.settings.domain.model.DashboardContext
+import com.aicove.core.ui.adaptive.DashboardContext
 import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import com.aicove.feature.settings.domain.model.modelMetadataKey
 import com.aicove.feature.workspace.domain.WorkspacePathMapper

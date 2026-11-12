@@ -1,19 +1,19 @@
 package com.aicove.feature.settings.domain.service
 
-import com.aicove.feature.settings.domain.model.BadgeElement
-import com.aicove.feature.settings.domain.model.CardColor
-import com.aicove.feature.settings.domain.model.ColumnSetElement
-import com.aicove.feature.settings.domain.model.ContainerElement
-import com.aicove.feature.settings.domain.model.ContainerStyle
-import com.aicove.feature.settings.domain.model.DividerElement
-import com.aicove.feature.settings.domain.model.FactSetElement
-import com.aicove.feature.settings.domain.model.MetricElement
-import com.aicove.feature.settings.domain.model.ProgressBarElement
-import com.aicove.feature.settings.domain.model.RowElement
-import com.aicove.feature.settings.domain.model.StatusDotElement
-import com.aicove.feature.settings.domain.model.TextBlockElement
-import com.aicove.feature.settings.domain.model.TextSize
-import com.aicove.feature.settings.domain.model.TextWeight
+import com.aicove.core.ui.adaptive.BadgeElement
+import com.aicove.core.ui.adaptive.CardColor
+import com.aicove.core.ui.adaptive.ColumnSetElement
+import com.aicove.core.ui.adaptive.ContainerElement
+import com.aicove.core.ui.adaptive.ContainerStyle
+import com.aicove.core.ui.adaptive.DividerElement
+import com.aicove.core.ui.adaptive.FactSetElement
+import com.aicove.core.ui.adaptive.MetricElement
+import com.aicove.core.ui.adaptive.ProgressBarElement
+import com.aicove.core.ui.adaptive.RowElement
+import com.aicove.core.ui.adaptive.StatusDotElement
+import com.aicove.core.ui.adaptive.TextBlockElement
+import com.aicove.core.ui.adaptive.TextSize
+import com.aicove.core.ui.adaptive.TextWeight
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -227,7 +227,7 @@ class ProviderDashboardRunnerTest {
         assertEquals(4, columnSet.margin?.top)
 
         val col1 = columnSet.columns[0]
-        assertEquals(80, (col1.width as com.aicove.feature.settings.domain.model.ColumnWidth.Fixed).dp)
+        assertEquals(80, (col1.width as com.aicove.core.ui.adaptive.ColumnWidth.Fixed).dp)
         assertEquals(60, col1.minHeightDp)
         assertEquals("Center", col1.verticalContentAlignment)
 

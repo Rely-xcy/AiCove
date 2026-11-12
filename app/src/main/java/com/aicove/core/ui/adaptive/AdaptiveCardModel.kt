@@ -1,4 +1,4 @@
-package com.aicove.feature.settings.domain.model
+package com.aicove.core.ui.adaptive
 
 /**
  * 传递给面板脚本的实时上下文环境变量。

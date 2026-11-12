@@ -52,7 +52,7 @@ import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.R
 import com.aicove.feature.settings.domain.model.AIProviderConfig
-import com.aicove.feature.settings.domain.model.AdaptiveCardAction
+import com.aicove.core.ui.adaptive.AdaptiveCardAction
 import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import com.aicove.core.ui.ExpandableChevronIcon
 import compose.icons.FeatherIcons

@@ -6,8 +6,8 @@ import com.aicove.feature.agent.domain.skill.Skill
 import com.aicove.feature.agent.domain.skill.SkillParser
 import com.aicove.feature.agent.domain.subagent.AgentDefinition
 import com.aicove.feature.agent.domain.subagent.AgentDefinitionParser
-import com.aicove.feature.settings.domain.model.AdaptiveCardRoot
-import com.aicove.feature.settings.domain.parser.AdaptiveCardParser
+import com.aicove.core.ui.adaptive.AdaptiveCardRoot
+import com.aicove.core.ui.adaptive.AdaptiveCardParser
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject

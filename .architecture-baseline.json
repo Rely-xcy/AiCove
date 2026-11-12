@@ -33,7 +33,7 @@
   "layering": {
     "feature/agent -> feature/backup": 3,
     "feature/agent -> feature/credentials": 1,
-    "feature/agent -> feature/settings": 131,
+    "feature/agent -> feature/settings": 101,
     "feature/agent -> feature/terminal": 8,
     "feature/agent -> feature/workspace": 84,
     "feature/backup -> feature/agent": 23,

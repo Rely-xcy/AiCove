@@ -83,11 +83,16 @@ class ProjectToolsRepository @Inject constructor(
         }
     }
 
-    private fun configFile(): File = File(projectAicodeRoot.current(), CONFIG_FILE)
+    private fun configFileOrNull(): File? =
+        projectAicodeRoot.currentOrNull()?.let { File(it, CONFIG_FILE) }
 
     /** 重新加载当前工作区的工具配置。 */
     suspend fun reload() = withContext(Dispatchers.IO) {
-        val file = configFile()
+        val file = configFileOrNull()
+        if (file == null) {
+            _tools.value = emptyList()
+            return@withContext
+        }
         val loaded = runCatching {
             if (file.isFile) {
                 json.decodeFromString<ProjectToolsFile>(file.readText()).tools
@@ -138,7 +143,7 @@ class ProjectToolsRepository @Inject constructor(
 
     private fun save(items: List<ProjectToolItem>) {
         runCatching {
-            val file = configFile()
+            val file = configFileOrNull() ?: return
             file.parentFile?.mkdirs()
             file.writeText(json.encodeToString(ProjectToolsFile(items)))
             _tools.value = items

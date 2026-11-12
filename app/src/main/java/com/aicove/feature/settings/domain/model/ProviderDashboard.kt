@@ -1,5 +1,7 @@
 package com.aicove.feature.settings.domain.model
 
+import com.aicove.core.ui.adaptive.AdaptiveCardRoot
+
 /**
  * 自定义面板查询结果。
  */

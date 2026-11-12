@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,41 +55,59 @@ import androidx.compose.ui.unit.sp
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
-import com.aicove.feature.settings.domain.model.AdaptiveCardAction
-import com.aicove.feature.settings.domain.model.AdaptiveCardElement
-import com.aicove.feature.settings.domain.model.AdaptiveCardRoot
-import com.aicove.feature.settings.domain.model.ActionButtonElement
-import com.aicove.feature.settings.domain.model.BadgeElement
-import com.aicove.feature.settings.domain.model.CardColor
-import com.aicove.feature.settings.domain.model.CardPadding
-import com.aicove.feature.settings.domain.model.ColumnElement
-import com.aicove.feature.settings.domain.model.ColumnSetElement
-import com.aicove.feature.settings.domain.model.ColumnWidth
-import com.aicove.feature.settings.domain.model.ContainerElement
-import com.aicove.feature.settings.domain.model.ContainerStyle
-import com.aicove.feature.settings.domain.model.DividerElement
-import com.aicove.feature.settings.domain.model.FactSetElement
-import com.aicove.feature.settings.domain.model.FlowRowElement
-import com.aicove.feature.settings.domain.model.ImageElement
-import com.aicove.feature.settings.domain.model.MetricElement
-import com.aicove.feature.settings.domain.model.ProgressBarElement
-import com.aicove.feature.settings.domain.model.RowElement
-import com.aicove.feature.settings.domain.model.ScrollRowElement
-import com.aicove.feature.settings.domain.model.SpacerElement
-import com.aicove.feature.settings.domain.model.SpacingSize
-import com.aicove.feature.settings.domain.model.StatusDotElement
-import com.aicove.feature.settings.domain.model.TabElement
-import com.aicove.feature.settings.domain.model.TabSetElement
-import com.aicove.feature.settings.domain.model.TextBlockElement
-import com.aicove.feature.settings.domain.model.TextSize
-import com.aicove.feature.settings.domain.model.TextWeight
+import com.aicove.core.ui.adaptive.AdaptiveCardAction
+import com.aicove.core.ui.adaptive.AdaptiveCardElement
+import com.aicove.core.ui.adaptive.AdaptiveCardRoot
+import com.aicove.core.ui.adaptive.ActionButtonElement
+import com.aicove.core.ui.adaptive.BadgeElement
+import com.aicove.core.ui.adaptive.CardColor
+import com.aicove.core.ui.adaptive.CardPadding
+import com.aicove.core.ui.adaptive.ColumnElement
+import com.aicove.core.ui.adaptive.ColumnSetElement
+import com.aicove.core.ui.adaptive.ColumnWidth
+import com.aicove.core.ui.adaptive.ContainerElement
+import com.aicove.core.ui.adaptive.ContainerStyle
+import com.aicove.core.ui.adaptive.DividerElement
+import com.aicove.core.ui.adaptive.FactSetElement
+import com.aicove.core.ui.adaptive.FlowRowElement
+import com.aicove.core.ui.adaptive.GridElement
+import com.aicove.core.ui.adaptive.ImageElement
+import com.aicove.core.ui.adaptive.MetricElement
+import com.aicove.core.ui.adaptive.ProgressBarElement
+import com.aicove.core.ui.adaptive.RowElement
+import com.aicove.core.ui.adaptive.ScrollRowElement
+import com.aicove.core.ui.adaptive.SpacerElement
+import com.aicove.core.ui.adaptive.SpacingSize
+import com.aicove.core.ui.adaptive.StatusDotElement
+import com.aicove.core.ui.adaptive.TabElement
+import com.aicove.core.ui.adaptive.TabSetElement
+import com.aicove.core.ui.adaptive.TextBlockElement
+import com.aicove.core.ui.adaptive.TextSize
+import com.aicove.core.ui.adaptive.TextWeight
+
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import com.aicove.core.ui.adaptive.ActionSubmitElement
+import com.aicove.core.ui.adaptive.CardElement
+import com.aicove.core.ui.adaptive.CodeBlockElement
+import com.aicove.core.ui.adaptive.InputChoiceItem
+import com.aicove.core.ui.adaptive.InputListElement
+import com.aicove.core.ui.adaptive.InputSelectElement
+import com.aicove.core.ui.adaptive.InputTextElement
+import com.aicove.core.ui.adaptive.InputToggleElement
+import com.aicove.core.ui.adaptive.MarkdownBlockElement
+
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Copy
 import compose.icons.feathericons.ExternalLink
 import compose.icons.feathericons.HelpCircle
 
+val LocalCardFormState = compositionLocalOf<MutableMap<String, Any>?> { null }
+val LocalCardOnSubmit = compositionLocalOf<((String, String?, Map<String, Any>) -> Unit)?> { null }
+
 /**
  * Adaptive Card 原生 Compose 渲染主入口。
+ * 统一支持供应商面板（DIY）与插件结构化页面的渲染。
  */
 @Composable
 fun AdaptiveCardView(
@@ -96,41 +115,48 @@ fun AdaptiveCardView(
     isExpanded: Boolean,
     onAction: (AdaptiveCardAction) -> Unit = {},
     onRefresh: () -> Unit = {},
+    formState: MutableMap<String, Any>? = null,
+    onSubmit: ((actionId: String, commandTemplate: String?, formValues: Map<String, Any>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    if (!isExpanded) {
-        // ── 收起态视图 ──
-        if (card.compact != null) {
-            RenderElement(card.compact, isCompact = true, onAction = onAction, onRefresh = onRefresh, modifier = modifier)
-        } else {
-            // 自动从 body 提取前 2~3 个主要组件紧凑展示
-            Row(
-                modifier = modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-            ) {
-                card.body.take(3).forEach { element ->
-                    Box(modifier = Modifier.weight(1f)) {
-                        RenderElement(element, isCompact = true, onAction = onAction, onRefresh = onRefresh)
+    CompositionLocalProvider(
+        LocalCardFormState provides formState,
+        LocalCardOnSubmit provides onSubmit
+    ) {
+        if (!isExpanded) {
+            // ── 收起态视图 ──
+            if (card.compact != null) {
+                RenderElement(card.compact, isCompact = true, onAction = onAction, onRefresh = onRefresh, modifier = modifier)
+            } else {
+                // 自动从 body 提取前 2~3 个主要组件紧凑展示
+                Row(
+                    modifier = modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    card.body.take(3).forEach { element ->
+                        Box(modifier = Modifier.weight(1f)) {
+                            RenderElement(element, isCompact = true, onAction = onAction, onRefresh = onRefresh)
+                        }
                     }
                 }
             }
-        }
-    } else {
-        // ── 展开态视图 ──
-        Column(
-            modifier = modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            card.body.forEach { element ->
-                RenderElement(element, isCompact = false, onAction = onAction, onRefresh = onRefresh)
+        } else {
+            // ── 展开态视图 ──
+            Column(
+                modifier = modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                card.body.forEach { element ->
+                    RenderElement(element, isCompact = false, onAction = onAction, onRefresh = onRefresh)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RenderElement(
+internal fun RenderElement(
     element: AdaptiveCardElement,
     isCompact: Boolean,
     onAction: (AdaptiveCardAction) -> Unit,
@@ -142,6 +168,7 @@ private fun RenderElement(
         is ColumnElement -> RenderColumn(element, isCompact, onAction, onRefresh, modifier)
         is ContainerElement -> RenderContainer(element, isCompact, onAction, onRefresh, modifier)
         is RowElement -> RenderRow(element, isCompact, onAction, onRefresh, modifier)
+        is GridElement -> RenderGrid(element, isCompact, onAction, onRefresh, modifier)
         is FlowRowElement -> RenderFlowRow(element, isCompact, onAction, onRefresh, modifier)
         is ScrollRowElement -> RenderScrollRow(element, isCompact, onAction, onRefresh, modifier)
         is SpacerElement -> RenderSpacer(element, modifier)
@@ -160,9 +187,15 @@ private fun RenderElement(
         is StatusDotElement -> RenderStatusDot(element, modifier)
         is FactSetElement -> RenderFactSet(element, modifier)
         is DividerElement -> RenderDivider(element, modifier)
-        // 新版 AdaptiveCardModel 新增的元素类型（如 ActionSubmitElement、ImageSet 等）暂不渲染。
-        // 这个 when 没有 else，少一个分支就会因穷尽性检查失败而编译不过。
-        else -> Unit
+        // ── 通用表单与富文本扩展 ──
+        is InputTextElement -> RenderInputText(element, modifier)
+        is InputSelectElement -> RenderInputSelect(element, modifier)
+        is InputToggleElement -> RenderInputToggle(element, modifier)
+        is InputListElement -> RenderInputList(element, modifier)
+        is CodeBlockElement -> RenderCodeBlock(element, modifier)
+        is MarkdownBlockElement -> RenderMarkdownBlock(element, modifier)
+        is CardElement -> RenderCard(element, isCompact, onAction, onRefresh, modifier)
+        is ActionSubmitElement -> RenderActionSubmit(element, modifier)
     }
 }
 
@@ -1126,7 +1159,7 @@ private fun resolveContainerColors(style: ContainerStyle): Pair<Color, Color> {
     }
 }
 
-private fun Modifier.applyPadding(padding: CardPadding?): Modifier {
+internal fun Modifier.applyPadding(padding: CardPadding?): Modifier {
     if (padding == null || padding.isZero) return this
     return this.padding(
         start = padding.left.dp,
@@ -1136,7 +1169,7 @@ private fun Modifier.applyPadding(padding: CardPadding?): Modifier {
     )
 }
 
-private fun Modifier.applyMargin(margin: CardPadding?): Modifier {
+internal fun Modifier.applyMargin(margin: CardPadding?): Modifier {
     return applyPadding(margin)
 }
 

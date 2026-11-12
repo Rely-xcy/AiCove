@@ -100,7 +100,7 @@ import com.aicove.feature.workspace.domain.model.RemoteConnection
 import com.aicove.feature.workspace.domain.repository.RemoteRepository
 import com.aicove.feature.workspace.presentation.remote.PendingHostKeyConfirmation
 import com.aicove.feature.settings.domain.model.AIProviderConfig
-import com.aicove.feature.settings.domain.model.DashboardContext
+import com.aicove.core.ui.adaptive.DashboardContext
 import com.aicove.feature.settings.domain.model.ModelMetadata
 import com.aicove.feature.settings.domain.model.ModelContextPolicy
 import com.aicove.feature.settings.domain.model.modelMetadataKey
