@@ -132,6 +132,9 @@ import kotlinx.coroutines.launch
 /** 输入框区域蒙版高度：盖住圆角容器，滚动内容滑入时被渐变遮罩；随键盘（IME）上移。 */
 private val INPUT_BAR_MASK_HEIGHT = 110.dp
 
+/** 输入岛圆角：视觉规范要的一体胶囊（22~24dp），比页面里的普通卡片圆得多。 */
+private val INPUT_ISLAND_CORNER = 22.dp
+
 /** 输入框高度上下限：超过上限后文本在框内滚动，右上角露出「展开」按钮。与 TextField 的 heightIn 一致。 */
 private val INPUT_FIELD_MIN_HEIGHT = 44.dp
 private val INPUT_FIELD_MAX_HEIGHT = 140.dp
@@ -553,12 +556,12 @@ internal fun ChatInputBar(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.lg))
+                    .clip(RoundedCornerShape(INPUT_ISLAND_CORNER))
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
                     .border(
                         1.dp,
                         MaterialTheme.colorScheme.outlineVariant,
-                        RoundedCornerShape(Radius.lg)
+                        RoundedCornerShape(INPUT_ISLAND_CORNER)
                     )
                     .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
             ) {
@@ -644,7 +647,7 @@ internal fun ChatInputBar(
                             AgentMode.BUILD -> MaterialTheme.semanticColors.onSuccess
                         }
                         Surface(
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(Radius.pill),
                             color = modeColor,
                             modifier = Modifier
                                 .clickable {
