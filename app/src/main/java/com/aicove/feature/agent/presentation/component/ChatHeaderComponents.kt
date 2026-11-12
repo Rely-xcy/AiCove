@@ -27,9 +27,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -51,6 +54,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.aicove.R
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
+import com.aicove.core.ui.AdaptiveModalBottomSheet
 import com.aicove.feature.agent.domain.model.AgentMode
 import com.aicove.feature.onboarding.domain.OnboardingStep
 import com.aicove.feature.onboarding.presentation.onboardingTarget
@@ -145,26 +149,24 @@ internal fun ChatHeader(
                         )
                     }
                 }
-                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全收进浮层，窄屏不再挤标题。
+                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全收进底部面板。
                 var workbenchExpanded by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { workbenchExpanded = true }) {
-                        Icon(
-                            FeatherIcons.MoreHorizontal,
-                            contentDescription = stringResource(R.string.common_more),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (workbenchExpanded) {
-                        WorkbenchShelf(
-                            onDismiss = { workbenchExpanded = false },
-                            onNewChat = onNewChat,
-                            onSwitchWorkspace = onSwitchWorkspace,
-                            onNavigateToTerminal = onNavigateToTerminal,
-                            onNavigateToGit = onNavigateToGit,
-                            terminalActive = terminalActive,
-                            gitActive = gitActive
-                        )
-                    }
+                IconButton(onClick = { workbenchExpanded = true }) {
+                    Icon(
+                        FeatherIcons.MoreHorizontal,
+                        contentDescription = stringResource(R.string.common_more),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (workbenchExpanded) {
+                    WorkbenchSheet(
+                        onDismiss = { workbenchExpanded = false },
+                        onNewChat = onNewChat,
+                        onSwitchWorkspace = onSwitchWorkspace,
+                        onNavigateToTerminal = onNavigateToTerminal,
+                        onNavigateToGit = onNavigateToGit,
+                        terminalActive = terminalActive,
+                        gitActive = gitActive
+                    )
                 }
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计
@@ -188,12 +190,12 @@ internal fun ChatHeader(
 }
 
 /**
- * 顶栏折叠浮层。不用 Material 默认 DropdownMenu：它自带直角、纯白底和一套固定的
- * 阴影与内边距，跟页面里其它卡片对不上。这里用应用自己的 cardSurface / subtleBorder /
- * Radius 画一张浮层，展开时才组合，收起时零开销。
+ * 顶栏折叠入口的操作面板。用应用统一的 [AdaptiveModalBottomSheet]（窄屏贴底、宽屏居中），
+ * 不另画一套浮层：样式、圆角、拖拽手势和设置页那些面板保持一致。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WorkbenchShelf(
+private fun WorkbenchSheet(
     onDismiss: () -> Unit,
     onNewChat: () -> Unit,
     onSwitchWorkspace: () -> Unit,
@@ -202,80 +204,76 @@ private fun WorkbenchShelf(
     terminalActive: Boolean,
     gitActive: Boolean
 ) {
-    Popup(
-        alignment = Alignment.TopEnd,
-        offset = IntOffset(0, with(LocalDensity.current) { Spacing.sm.roundToPx() }),
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true)
+        sheetState = rememberModalBottomSheetState(),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Surface(
-            modifier = Modifier.width(196.dp),
-            shape = RoundedCornerShape(Radius.md),
-            color = MaterialTheme.semanticColors.cardSurface,
-            border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder),
-            shadowElevation = 8.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = Spacing.xl)
         ) {
-            Column(modifier = Modifier.padding(vertical = Spacing.xs)) {
-                ShelfItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
-                    onDismiss()
-                    onNewChat()
-                }
-                ShelfItem(FeatherIcons.Folder, stringResource(R.string.workspace_open)) {
-                    onDismiss()
-                    onSwitchWorkspace()
-                }
-                HorizontalDivider(
-                    color = MaterialTheme.semanticColors.subtleBorder,
-                    modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
-                )
-                ShelfItem(
-                    icon = FeatherIcons.Terminal,
-                    label = stringResource(R.string.chat_open_terminal),
-                    active = terminalActive
-                ) {
-                    onDismiss()
-                    onNavigateToTerminal()
-                }
-                ShelfItem(
-                    icon = FeatherIcons.GitBranch,
-                    label = stringResource(R.string.chat_open_git),
-                    active = gitActive
-                ) {
-                    onDismiss()
-                    onNavigateToGit()
-                }
+            WorkbenchSheetItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
+                onDismiss()
+                onNewChat()
+            }
+            WorkbenchSheetItem(FeatherIcons.Folder, stringResource(R.string.workspace_open)) {
+                onDismiss()
+                onSwitchWorkspace()
+            }
+            HorizontalDivider(
+                color = MaterialTheme.semanticColors.subtleBorder,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            )
+            WorkbenchSheetItem(
+                icon = FeatherIcons.Terminal,
+                label = stringResource(R.string.chat_open_terminal),
+                active = terminalActive
+            ) {
+                onDismiss()
+                onNavigateToTerminal()
+            }
+            WorkbenchSheetItem(
+                icon = FeatherIcons.GitBranch,
+                label = stringResource(R.string.chat_open_git),
+                active = gitActive
+            ) {
+                onDismiss()
+                onNavigateToGit()
             }
         }
     }
 }
 
-/** 浮层里的一行：图标 + 文字，当前停留的页面用品牌色标出，和原来图标按钮的高亮一致。 */
+/** 面板里的一行：图标 + 文字，当前停留的页面用品牌色标出（与原来图标按钮的 active 态一致）。 */
 @Composable
-private fun ShelfItem(
+private fun WorkbenchSheetItem(
     icon: ImageVector,
     label: String,
     active: Boolean = false,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Spacing.md, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
-            modifier = Modifier.size(16.dp)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-        )
+    Surface(onClick = onClick, color = Color.Transparent) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }
 
