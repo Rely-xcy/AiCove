@@ -257,7 +257,7 @@ class TaskToolWriteScopeTest {
             createdAt = 0L,
             updatedAt = 0L
         )
-        every { agentDefinitionRepository.listEnabled() } returns emptyList()
+        every { agentDefinitionRepository.listEnabledDefinitions() } returns emptyList()
         every { aiProviderRepository.getAllProviders() } returns emptyFlow()
         coEvery { tierSettings.snapshot() } returns emptyMap()
         coEvery { sessionUseCase.upsertSession(any()) } just Runs

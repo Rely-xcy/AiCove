@@ -9,9 +9,7 @@ import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.schedule.WriteLeaseRegistry
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.agent.domain.subagent.AgentDefinition
-import com.aicove.feature.agent.domain.subagent.AgentDefinitionEntry
 import com.aicove.feature.agent.domain.subagent.AgentDefinitionRepository
-import com.aicove.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
 import com.aicove.feature.agent.domain.subagent.SubagentModelTier
 import com.aicove.feature.agent.domain.subagent.SubagentTierSelection
@@ -404,9 +402,7 @@ class TaskToolModelBindingTest {
     }
 
     private fun stubDefinitions(vararg definitions: AgentDefinition) {
-        every { agentDefinitionRepository.listEnabled() } returns definitions.map {
-            AgentDefinitionEntry(it, AgentDefinitionScope.GLOBAL)
-        }
+        every { agentDefinitionRepository.listEnabledDefinitions() } returns definitions.toList()
     }
 
     /** 记录 TaskTool 交给会话实体的绑定。 */
