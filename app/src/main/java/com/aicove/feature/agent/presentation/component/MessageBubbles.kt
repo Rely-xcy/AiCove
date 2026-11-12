@@ -60,6 +60,7 @@ import com.aicove.core.theme.Brand
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
 import com.aicove.core.ui.ChevronRotationStyle
+import com.aicove.core.ui.StableSelectionContainer
 import com.aicove.core.ui.ContentWidth
 import com.aicove.core.ui.ExpandableChevronIcon
 import com.aicove.feature.agent.presentation.AgentUIMessage
@@ -393,7 +394,7 @@ internal fun AgentMessageItem(
                                 color = chatUserBubbleColor(),
                                 modifier = Modifier.widthIn(max = maxUserBubbleWidth)
                             ) {
-                                StableSelectionContainer(message.id) {
+                                StableSelectionContainer(message.id to message.content) {
                                     CompositionLocalProvider(
                                         LocalTextSelectionColors provides TextSelectionColors(
                                             handleColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -412,7 +413,7 @@ internal fun AgentMessageItem(
                         } else {
                             // 助手正文：不套容器，直接铺在页面底色上（文档流）。分块之间只留一个段落间距，
                             // 整条消息看起来仍是连续的一段正文。
-                            StableSelectionContainer(message.id) {
+                            StableSelectionContainer(message.id to (contentSlice ?: message.content)) {
                                 CompositionLocalProvider(
                                     LocalTextSelectionColors provides TextSelectionColors(
                                         handleColor = MaterialTheme.colorScheme.primary,
@@ -852,22 +853,3 @@ private fun CompactionFailureCard(message: AgentUIMessage) {
     }
 }
 
-/**
- * 按 [contentKey] 重建的选择容器。
- *
- * LazyColumn 复用 item 时，SelectionManager 的选中状态会跟着槽位走；文本换成另一条后
- * 长按选词，就会拿旧文本的 offset 去构造 TextSelection.Request，Android 抛
- * IllegalArgumentException（崩溃栈落在 TextClassifier$Utils.checkArgument）。
- * 用消息 id 当 key，复用时强制重建选择状态，宁可清掉选中也不要拿错 offset。
- */
-@Composable
-private fun StableSelectionContainer(
-    contentKey: Any,
-    content: @Composable () -> Unit
-) {
-    key(contentKey) {
-        SelectionContainer {
-            content()
-        }
-    }
-}

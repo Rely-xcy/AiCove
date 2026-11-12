@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.aicove.core.ui.StableSelectionContainer
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -745,7 +746,7 @@ internal fun ToolSection(label: String, content: String, live: Boolean = false) 
                 .nestedScroll(rememberBoundNestedScrollConnection(scrollState))
                 .verticalScroll(scrollState)
         ) {
-            SelectionContainer {
+            StableSelectionContainer(if (live) displayedContent else content) {
                 Text(
                     text = if (live) displayedContent else content,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
