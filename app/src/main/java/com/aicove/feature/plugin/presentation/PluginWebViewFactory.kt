@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.aicove.core.ui.web.PluginThemeTokens
 import androidx.webkit.WebViewAssetLoader
 import com.aicove.R
 import com.aicove.feature.plugin.domain.PluginSettingsPage

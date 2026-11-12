@@ -2351,6 +2351,8 @@
     <string name="plugins_scope_badge">Plugin</string>
     <string name="plugins_item_readonly_hint">This item is provided by plugin \"%1$s\". Manage or disable it in Plugin Settings.</string>
     <string name="plugins_add_parameter">Add Parameter</string>
+    <string name="card_form_param_placeholder">Parameter</string>
+    <string name="card_form_add_param">Add Parameter</string>
     <string name="plugins_current_project">Current Project</string>
     <string name="plugins_quick_run">Run</string>
     <string name="plugins_no_project_tools">No tools added to current project</string>

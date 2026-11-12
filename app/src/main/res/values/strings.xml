@@ -2350,6 +2350,8 @@
     <string name="plugins_scope_badge">插件</string>
     <string name="plugins_item_readonly_hint">此内容由插件「%1$s」提供，如需禁用或卸载请前往插件管理。</string>
     <string name="plugins_add_parameter">添加参数</string>
+    <string name="card_form_param_placeholder">参数</string>
+    <string name="card_form_add_param">添加参数</string>
     <string name="plugins_current_project">当前项目</string>
     <string name="plugins_quick_run">运行</string>
     <string name="plugins_no_project_tools">当前项目尚未添加任何工具</string>

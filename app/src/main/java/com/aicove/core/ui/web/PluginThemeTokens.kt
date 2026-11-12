@@ -1,4 +1,4 @@
-package com.aicove.feature.plugin.presentation
+package com.aicove.core.ui.web
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
@@ -59,8 +59,8 @@ object PluginThemeTokens {
         "--aicode-radius-xl" to px(Radius.xl.value),
         "--aicode-font-scale" to String.format(Locale.US, "%.2f", fontScale),
         "--aicode-touch-target" to "44px",
-        "--aicode-switch-track" to if (isDark(scheme)) "#334155" else "#E2E8F0",
-        "--aicode-switch-thumb" to if (isDark(scheme)) "#F8FAFC" else "#FFFFFF",
+        "--aicode-switch-track" to scheme.surfaceVariant.toCss(),
+        "--aicode-switch-thumb" to scheme.surface.toCss(),
         "--aicode-font-sans" to "system-ui, -apple-system, \"Noto Sans CJK SC\", sans-serif",
         "--aicode-font-mono" to "ui-monospace, \"Roboto Mono\", monospace"
     )

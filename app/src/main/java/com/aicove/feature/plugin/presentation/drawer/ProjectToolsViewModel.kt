@@ -27,7 +27,6 @@ import com.aicove.feature.plugin.data.ProjectToolItem
 import com.aicove.feature.plugin.data.ProjectToolsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -174,66 +173,40 @@ class ProjectToolsViewModel @Inject constructor(
         val token = ++runToken
         _runState.value = ToolRunState(phase = ToolRunPhase.RUNNING, command = command, tabId = tabId)
 
-        val flow = terminalSessionProvider.tabOutput(tabId)
-        if (flow == null) {
-            _runState.value = _runState.value.copy(phase = ToolRunPhase.CANCELLED)
-            return
-        }
-
         outputJob = viewModelScope.launch(Dispatchers.Default) {
-            val formatter = ToolOutputFormatter()
-            try {
-                flow.collect { bytes ->
-                    formatter.feed(bytes)
-                    publishProgress(token, formatter, tabId, command)
+            var formatter = ToolOutputFormatter()
+            var previousTranscript = ""
+            while (token == runToken) {
+                val transcript = terminalSessionProvider.getTabOutput(tabId).orEmpty()
+                if (transcript != previousTranscript) {
+                    formatter = if (transcript.startsWith(previousTranscript)) {
+                        formatter.apply {
+                            feed(transcript.substring(previousTranscript.length).toByteArray())
+                        }
+                    } else {
+                        ToolOutputFormatter().apply { feed(transcript.toByteArray()) }
+                    }
+                    previousTranscript = transcript
+                    _runState.value = _runState.value.copy(lines = formatter.snapshot())
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                FileLogger.e("ProjectToolsVM", "读取插件工具输出失败", e)
+                if (formatter.exitCode != null) break
+                if (terminalSessionProvider.listTabs().none { it.id == tabId }) break
+                delay(OUTPUT_POLL_MS)
             }
+
             formatter.finish()
             if (token != runToken) return@launch
             val exit = formatter.exitCode
-            val phase = when {
-                stopRequested -> ToolRunPhase.CANCELLED
-                exit == null -> ToolRunPhase.CANCELLED
-                exit == 0 -> ToolRunPhase.SUCCESS
-                else -> ToolRunPhase.FAILED
-            }
             _runState.value = _runState.value.copy(
-                phase = phase,
+                phase = when {
+                    stopRequested -> ToolRunPhase.CANCELLED
+                    exit == 0 -> ToolRunPhase.SUCCESS
+                    else -> ToolRunPhase.FAILED
+                },
                 exitCode = exit,
                 lines = formatter.snapshot()
             )
         }
-    }
-
-    private fun publishProgress(
-        token: Int,
-        formatter: ToolOutputFormatter,
-        tabId: String,
-        command: String
-    ) {
-        if (token != runToken) return
-        val exit = formatter.exitCode
-        if (exit == null) {
-            _runState.value = _runState.value.copy(lines = formatter.snapshot())
-            return
-        }
-        _runState.value = ToolRunState(
-            phase = when {
-                stopRequested -> ToolRunPhase.CANCELLED
-                exit == 0 -> ToolRunPhase.SUCCESS
-                else -> ToolRunPhase.FAILED
-            },
-            lines = formatter.snapshot(),
-            exitCode = exit,
-            tabId = tabId,
-            command = command
-        )
-        // 命令已结束，标签随后进入保活 shell，后续输出属于用户交互，不再写入运行日志。
-        outputJob?.cancel()
     }
 
     /** 页面里的 submit 可能包在 Card/TabSet/Container 里，快速运行不能只看 body 直接子级。 */
@@ -258,6 +231,7 @@ class ProjectToolsViewModel @Inject constructor(
     }
 
     private companion object {
+        const val OUTPUT_POLL_MS = 100L
         const val STOP_TIMEOUT_MS = 3_000L
     }
 }
