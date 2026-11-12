@@ -1,5 +1,8 @@
 package com.aicove.feature.agent.domain.skill
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 /**
  * 技能数据源抽象接口，支持多渠道加载（本地目录、远程 URL 等）。
  */
@@ -18,4 +21,6 @@ interface SkillSource {
 }
 
 /** 外部能力向 Agent 贡献的只读技能源；实现通过 DI 集合注册，Agent 不依赖具体 feature。 */
-interface SkillContributionSource : SkillSource
+interface SkillContributionSource : SkillSource {
+    val changes: Flow<Unit> get() = emptyFlow()
+}

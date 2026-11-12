@@ -21,6 +21,8 @@ class PluginSkillSource @Inject constructor(
     private val manager: PluginManager
 ) : SkillContributionSource {
 
+    override val changes: Flow<Unit> = manager.plugins.drop(1).map { Unit }
+
     override fun listSkills(): List<Skill> = manager.activeSkills()
 
     /** 全部插件技能，不论插件是否启用，供插件管理界面展示。 */

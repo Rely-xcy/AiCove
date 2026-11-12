@@ -1,6 +1,7 @@
 package com.aicove.feature.agent.domain.command
 
 import android.content.Context
+import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.skill.Skill
 import com.aicove.feature.agent.domain.skill.SkillRepository
 import com.aicove.feature.agent.domain.skill.SkillTriggerHit
@@ -8,10 +9,14 @@ import com.aicove.feature.agent.domain.skill.SkillTriggerMatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -48,6 +53,18 @@ class SlashCommandRegistry @Inject constructor(
 
     /** `/` 菜单展示的命令列表。 */
     val commands: StateFlow<List<SlashCommand>> = _commands.asStateFlow()
+
+    private val refreshScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, error ->
+            FileLogger.w(TAG, "外部技能变化后刷新斜杠命令失败", error)
+        }
+    )
+
+    init {
+        skillRepository.contributionChangeFlows.forEach { changes ->
+            refreshScope.launch { changes.collect { refresh() } }
+        }
+    }
 
     /** 重新扫描技能并重建菜单。涉及文件 IO，调用方应在 IO 上下文调用。 */
     suspend fun refresh() = withContext(Dispatchers.IO) {
@@ -135,6 +152,8 @@ class SlashCommandRegistry @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "SlashCommandRegistry"
+
         /**
          * 构造技能本轮指令：把技能正文里的 `$ARGUMENTS` 替换为 [args]；
          * 无占位且 [args] 非空时追加一行，保证用户输入不丢失。

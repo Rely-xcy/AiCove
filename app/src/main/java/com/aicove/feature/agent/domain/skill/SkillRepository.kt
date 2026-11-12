@@ -5,6 +5,7 @@ import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.container.BulkFileSource
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import java.io.InputStream
+import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,6 +42,10 @@ class SkillRepository @Inject constructor(
         BulkFileSource.Disabled,
         emptySet()
     )
+    /** 外部技能源变化通知；斜杠命令表据此重建，不依赖具体插件类型。 */
+    val contributionChangeFlows: List<Flow<Unit>>
+        get() = contributionSources.map { it.changes }
+
     /**
      * 全部技能（含来源作用域），未过滤禁用；同名技能项目级优先（与 MCP 两级配置一致）。
      * 顺序：全局在前、项目在后，各自按用户拖拽排的顺序表排（没排过的按名称）。

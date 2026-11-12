@@ -6,7 +6,10 @@ import com.aicove.feature.agent.domain.skill.Skill
 import com.aicove.feature.agent.domain.skill.SkillRepository
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -18,7 +21,9 @@ import org.junit.Test
 class SlashCommandRegistryTest {
 
     private val context = mockk<Context>()
-    private val skillRepository = mockk<SkillRepository>()
+    private val skillRepository = mockk<SkillRepository>().apply {
+        every { contributionChangeFlows } returns emptyList()
+    }
 
     private fun action(cmdName: String, descRes: Int, takesArgs: Boolean = false) =
         object : ActionCommandHandler {
@@ -47,6 +52,21 @@ class SlashCommandRegistryTest {
     }
 
     // ---- 菜单合并 ----
+
+    @Test
+    fun contributionChange_refreshesCommands() = runBlocking {
+        val changes = MutableSharedFlow<Unit>(replay = 1)
+        every { skillRepository.contributionChangeFlows } returns listOf(changes)
+        every { skillRepository.listSkills() } returns listOf(skill("plugin-skill", "插件技能"))
+        changes.tryEmit(Unit)
+
+        val registry = registry()
+        val commands = withTimeout(1_000) {
+            registry.commands.first { list -> list.any { it.name == "plugin-skill" } }
+        }
+
+        assertEquals(listOf("plugin-skill"), commands.map { it.name })
+    }
 
     @Test
     fun commands_builtinsFirstThenSkills() {
