@@ -54,6 +54,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.aicove.R
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
+import com.aicove.core.theme.semanticColors
 import com.aicove.core.ui.AdaptiveModalBottomSheet
 import com.aicove.feature.agent.domain.model.AgentMode
 import com.aicove.feature.onboarding.domain.OnboardingStep
