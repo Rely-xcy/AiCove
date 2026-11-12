@@ -28,7 +28,7 @@
     "app/src/main/java/com/aicove/feature/backup/data/BackupManagerImpl.kt": 1908,
     "app/src/main/java/com/aicove/feature/settings/presentation/SettingsViewModel.kt": 3413,
     "app/src/main/java/com/aicove/feature/settings/presentation/component/ProviderEditorScreen.kt": 3244,
-    "app/src/main/java/com/aicove/feature/settings/presentation/component/SettingsScreen.kt": 2114
+    "app/src/main/java/com/aicove/feature/settings/presentation/component/SettingsScreen.kt": 2124
   },
   "layering": {
     "feature/agent -> feature/backup": 3,

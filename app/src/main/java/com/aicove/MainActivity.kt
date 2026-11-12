@@ -97,6 +97,7 @@ import com.aicove.feature.onboarding.domain.OnboardingStep
 import com.aicove.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aicove.feature.onboarding.presentation.OnboardingOverlay
 import com.aicove.feature.onboarding.presentation.OnboardingTargetRegistry
+import com.aicove.feature.plugin.presentation.PluginManagementScreen
 import com.aicove.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicove.feature.settings.data.repository.AppThemeMode
 import com.aicove.feature.settings.data.repository.BackgroundSettingsRepository
@@ -790,6 +791,7 @@ fun AppNavigation(
                         // 大屏返回聊天页后侧栏本就常驻，不再弹 modal 抽屉。
                         if (!expanded) scope.launch { drawerState.open() }
                     },
+                    onOpenPlugins = { navController.navigate("plugins") },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
                     onRerunOnboarding = {
                         // 从设置页「重新运行引导」：清状态回 in_progress、激活引导并回聊天页。
@@ -813,6 +815,11 @@ fun AppNavigation(
                             onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
                         }
                     }
+                )
+            }
+            composable("plugins") {
+                PluginManagementScreen(
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable("terminal") { entry ->

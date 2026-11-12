@@ -115,6 +115,7 @@ import compose.icons.feathericons.Lock
 import compose.icons.feathericons.Moon
 import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Edit2
+import compose.icons.feathericons.Package
 import compose.icons.feathericons.PieChart
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.RefreshCw
@@ -213,6 +214,7 @@ private fun SettingsSection.depth(): Int = when (this) {
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
+    onOpenPlugins: () -> Unit = {},
     onStopAllAndCloseTerminal: () -> Unit = {},
     onRerunOnboarding: () -> Unit = {},
     onboardingStep: OnboardingStep? = null,
@@ -533,6 +535,7 @@ fun SettingsScreen(
                 )
             },
             onRerunOnboarding = onRerunOnboarding,
+            onOpenPlugins = onOpenPlugins,
             onOpen = {
                 if (it == SettingsSection.Log) {
                     logReturnSection = SettingsSection.Menu
@@ -1824,6 +1827,7 @@ internal fun SettingsMenu(
     onOpenLanguageSheet: () -> Unit,
     onOpenManual: () -> Unit,
     onRerunOnboarding: () -> Unit,
+    onOpenPlugins: () -> Unit,
     onOpen: (SettingsSection) -> Unit
 ) {
     Column(
@@ -1934,6 +1938,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.Users,
                 title = stringResource(SettingsSection.SubAgents.titleRes),
                 onClick = { onOpen(SettingsSection.SubAgents) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Package,
+                title = stringResource(R.string.settings_plugins),
+                onClick = onOpenPlugins
             )
             SettingsDivider()
             SettingsRow(
