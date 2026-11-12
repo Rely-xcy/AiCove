@@ -160,6 +160,9 @@ private fun RenderElement(
         is StatusDotElement -> RenderStatusDot(element, modifier)
         is FactSetElement -> RenderFactSet(element, modifier)
         is DividerElement -> RenderDivider(element, modifier)
+        // 新版 AdaptiveCardModel 新增的元素类型（如 ActionSubmitElement、ImageSet 等）暂不渲染。
+        // 这个 when 没有 else，少一个分支就会因穷尽性检查失败而编译不过。
+        else -> Unit
     }
 }
 
