@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,8 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.aicove.R
@@ -154,51 +154,66 @@ internal fun ChatHeader(
                 }
                 // 顶栏只留一个入口：新建、切换工作区、终端、Git 都在这个下拉里。
                 var workbenchExpanded by remember { mutableStateOf(false) }
-                // 菜单必须和入口包在同一个 Box 里：DropdownMenu 以父组合的位置为锚点，
-                // 直接放在 Row 里会从整行左边展开，跑到屏幕左侧去。
+                val density = LocalDensity.current
                 Box {
-                    IconButton(onClick = { workbenchExpanded = true }) {
+                    IconButton(onClick = { workbenchExpanded = true }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             FeatherIcons.MoreHorizontal,
                             contentDescription = stringResource(R.string.common_more),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    DropdownMenu(
-                        expanded = workbenchExpanded,
-                        onDismissRequest = { workbenchExpanded = false },
-                        shape = RoundedCornerShape(Radius.md),
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 0.dp,
-                        shadowElevation = 8.dp,
-                        border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder)
-                    ) {
-                        WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
-                            workbenchExpanded = false
-                            onNewChat()
-                        }
-                        WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
-                            workbenchExpanded = false
-                            onSwitchWorkspace()
-                        }
-                        HorizontalDivider(
-                            color = MaterialTheme.semanticColors.subtleBorder,
-                            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
-                        WorkbenchMenuItem(
-                            icon = FeatherIcons.Terminal,
-                            label = stringResource(R.string.chat_open_terminal),
-                            active = terminalActive
+                    }
+                    // 自绘弹出菜单：DropdownMenu 会强制带 MenuDefaults 的柔和阴影，
+                    // 这里要的是无阴影的平面卡片，与 muse 顶栏一致。
+                    if (workbenchExpanded) {
+                        Popup(
+                            alignment = Alignment.TopEnd,
+                            offset = IntOffset(
+                                with(density) { (-8).dp.roundToPx() },
+                                with(density) { 42.dp.roundToPx() }
+                            ),
+                            onDismissRequest = { workbenchExpanded = false },
+                            properties = PopupProperties(focusable = true)
                         ) {
-                            workbenchExpanded = false
-                            onNavigateToTerminal()
-                        }
-                        WorkbenchMenuItem(
-                            icon = FeatherIcons.GitBranch,
-                            label = stringResource(R.string.chat_open_git),
-                            active = gitActive
-                        ) {
-                            workbenchExpanded = false
-                            onNavigateToGit()
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                shadowElevation = 0.dp,
+                                tonalElevation = 0.dp
+                            ) {
+                                Column(modifier = Modifier.width(168.dp).padding(vertical = 4.dp)) {
+                                    WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
+                                        workbenchExpanded = false
+                                        onNewChat()
+                                    }
+                                    WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
+                                        workbenchExpanded = false
+                                        onSwitchWorkspace()
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 40.dp, end = 12.dp),
+                                        thickness = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                    )
+                                    WorkbenchMenuItem(
+                                        icon = FeatherIcons.Terminal,
+                                        label = stringResource(R.string.chat_open_terminal),
+                                        active = terminalActive
+                                    ) {
+                                        workbenchExpanded = false
+                                        onNavigateToTerminal()
+                                    }
+                                    WorkbenchMenuItem(
+                                        icon = FeatherIcons.GitBranch,
+                                        label = stringResource(R.string.chat_open_git),
+                                        active = gitActive
+                                    ) {
+                                        workbenchExpanded = false
+                                        onNavigateToGit()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -223,7 +238,7 @@ internal fun ChatHeader(
     }
 }
 
-/** 下拉菜单里的一行：图标 + 文字，当前停留的页面用品牌色标出（与原来图标按钮的 active 态一致）。 */
+/** 菜单项：图标 + 文本，开启中时右侧蓝点。无涟漪，跟随 Popup 的点击反馈。 */
 @Composable
 private fun WorkbenchMenuItem(
     icon: ImageVector,
@@ -231,24 +246,38 @@ private fun WorkbenchMenuItem(
     active: Boolean = false,
     onClick: () -> Unit
 ) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
             )
-        },
-        leadingIcon = {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
-                modifier = Modifier.size(18.dp)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(11.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        if (active) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
             )
-        },
-        onClick = onClick
-    )
+        }
+    }
 }
 
 /** 顶栏工作台入口按钮：大屏右栏开着对应内容时高亮，否则看不出点一下是开还是关。 */
