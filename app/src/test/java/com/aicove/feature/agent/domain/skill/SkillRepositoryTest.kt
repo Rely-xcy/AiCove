@@ -97,6 +97,26 @@ class SkillRepositoryTest {
     }
 
     @Test
+    fun appendContributedSkills_userWinsAndDisabledContributionIsFiltered() {
+        val own = skill("same").copy(instructions = "own")
+        val contributed = listOf(
+            skill("zeta"),
+            skill("SAME").copy(instructions = "plugin"),
+            skill("disabled"),
+            skill("alpha")
+        )
+
+        val merged = SkillRepository.appendContributedSkills(
+            own = listOf(own),
+            contributed = contributed,
+            disabled = setOf("disabled")
+        )
+
+        assertEquals(listOf("same", "alpha", "zeta"), merged.map { it.name })
+        assertEquals("own", merged.first().instructions)
+    }
+
+    @Test
     fun mergeAll_combinesGlobalAndProject() {
         val merged = SkillRepository.mergeAll(
             global = listOf(skill("a"), skill("b")),

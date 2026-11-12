@@ -58,7 +58,8 @@ class McpManager @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val containerSettingsRepository: ContainerSettingsRepository,
     private val oauthManager: McpOAuthManager,
-    private val tokenStore: McpTokenStore
+    private val tokenStore: McpTokenStore,
+    private val contributionSources: Set<@JvmSuppressWildcards McpServerContributionSource>
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val reloadMutex = Mutex()
@@ -82,6 +83,14 @@ class McpManager @Inject constructor(
             configRepository.externalChanges.collect {
                 FileLogger.i(TAG, "检测到 MCP 配置文件外部变更，自动重载")
                 reload()
+            }
+        }
+        contributionSources.forEach { source ->
+            scope.launch {
+                source.changes.collect {
+                    FileLogger.i(TAG, "检测到外部 MCP 贡献变化，自动重载")
+                    reload()
+                }
             }
         }
         // 容器 profile 切换：stdio server 的进程跑在旧容器的 rootfs 上，必须重建才能用新容器；
@@ -111,7 +120,7 @@ class McpManager @Inject constructor(
     }
 
     suspend fun reload() = reloadMutex.withLock {
-        val servers = configRepository.getEffectiveServers()
+        val servers = effectiveServers()
         FileLogger.i(TAG, "重新加载 MCP 配置，共 ${servers.size} 个 server")
 
         teardown()
@@ -227,7 +236,7 @@ class McpManager @Inject constructor(
      * 配置中不存在该 name 时静默返回。
      */
     suspend fun reloadServer(name: String) = reloadMutex.withLock {
-        val cfg = configRepository.getEffectiveServers().firstOrNull { it.name == name } ?: return@withLock
+        val cfg = effectiveServers().firstOrNull { it.name == name } ?: return@withLock
         teardownServer(name)
         if (_statuses.value.none { it.name == name }) {
             _statuses.value = _statuses.value + McpServerStatus(name, McpServerStatus.State.CONNECTING)
@@ -246,7 +255,7 @@ class McpManager @Inject constructor(
      * 提示「下次会话生效」；本方法让新会话真正连上未连接的 server，不打断已连接的工具。
      */
     suspend fun reconnectUnconnected() = reloadMutex.withLock {
-        val servers = configRepository.getEffectiveServers().filter { it.enabled }
+        val servers = effectiveServers().filter { it.enabled }
         for (cfg in servers) {
             val connected = synchronized(activeClients) { activeClients.containsKey(cfg.name) }
             if (connected) continue
@@ -299,7 +308,7 @@ class McpManager @Inject constructor(
      * 旧进程钉在旧容器的 rootfs 上，必须 teardown 后才能用新容器拉起；单个 server 失败不影响其它。
      */
     private suspend fun reloadStdioServers() = reloadMutex.withLock {
-        val servers = configRepository.getEffectiveServers().filter { it.enabled && it.isStdio }
+        val servers = effectiveServers().filter { it.enabled && it.isStdio }
         if (servers.isEmpty()) return@withLock
         FileLogger.i(TAG, "容器配置变化，重建 ${servers.size} 个 stdio MCP server")
         for (cfg in servers) {
@@ -310,7 +319,7 @@ class McpManager @Inject constructor(
 
     /** 令牌来源变化后重建启用了 OAuth 的远程 server；stdio 与匿名 server 不受令牌影响，不动。 */
     private suspend fun reloadAuthServers() = reloadMutex.withLock {
-        val servers = configRepository.getEffectiveServers()
+        val servers = effectiveServers()
             .filter { it.enabled && !it.isStdio && it.auth != null }
         if (servers.isEmpty()) return@withLock
         for (cfg in servers) {
@@ -345,7 +354,7 @@ class McpManager @Inject constructor(
      * 重连成败随结果一起返回：授权成功但连不上时调用方不能再显示「已连接」。
      */
     suspend fun authorize(name: String): Result<McpAuthorizeResult> {
-        val cfg = configRepository.getEffectiveServers().firstOrNull { it.name == name }
+        val cfg = effectiveServers().firstOrNull { it.name == name }
             ?: return Result.failure(McpOAuthException("未找到 MCP server: $name"))
         return runCatching {
             oauthManager.authorize(cfg)
@@ -360,7 +369,7 @@ class McpManager @Inject constructor(
 
     /** 退出登录：清除该 server 的令牌并重连（将再次变为需要授权）。 */
     suspend fun logout(name: String) {
-        val cfg = configRepository.getEffectiveServers().firstOrNull { it.name == name } ?: return
+        val cfg = effectiveServers().firstOrNull { it.name == name } ?: return
         oauthManager.logout(cfg)
         reloadServer(name)
     }
@@ -368,6 +377,29 @@ class McpManager @Inject constructor(
     /** 取消某个 server 正在进行的 OAuth 授权。 */
     fun cancelAuthorize(name: String) {
         oauthManager.cancel(name)
+    }
+
+    /** 用户配置优先；外部贡献不能覆盖同名 server，多个贡献源之间按名称稳定去重。 */
+    private suspend fun effectiveServers(): List<McpServerConfig> {
+        val userServers = configRepository.getEffectiveServers()
+        val taken = userServers.mapTo(LinkedHashSet()) { it.name }
+        val accepted = mutableListOf<McpServerConfig>()
+        contributionSources
+            .flatMap { source ->
+                runCatching { source.activeServers() }.getOrElse { error ->
+                    FileLogger.w(TAG, "读取外部 MCP 贡献失败: ${error.message}", error)
+                    emptyList()
+                }
+            }
+            .sortedBy { it.name }
+            .forEach { server ->
+                if (taken.add(server.name)) {
+                    accepted += server
+                } else {
+                    FileLogger.w(TAG, "外部 MCP server 与已有配置同名，已跳过: ${server.name}")
+                }
+            }
+        return userServers + accepted
     }
 
     private fun teardownServer(name: String) {

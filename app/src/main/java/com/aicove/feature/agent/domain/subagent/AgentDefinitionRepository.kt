@@ -22,7 +22,8 @@ class AgentDefinitionRepository @Inject constructor(
     private val configRepository: AgentDefinitionConfigRepository,
     private val fileAccess: FileAccessProvider,
     private val listOrderStore: ListOrderStore,
-    private val bulk: BulkFileSource
+    private val bulk: BulkFileSource,
+    private val contributionSources: Set<@JvmSuppressWildcards AgentDefinitionContributionSource>
 ) {
     /**
      * 定义内容版本：经本仓库的 save/delete/setDisabled 修改定义后递增。
@@ -31,7 +32,8 @@ class AgentDefinitionRepository @Inject constructor(
      * 这部分维持原有的「新会话才刷新」行为。
      */
     @Volatile private var definitionsVersionField: Long = 0
-    val definitionsVersion: Long get() = definitionsVersionField
+    val definitionsVersion: Long
+        get() = definitionsVersionField + contributionSources.sumOf { it.revision }
 
     private fun bumpVersion() {
         definitionsVersionField++
@@ -44,7 +46,15 @@ class AgentDefinitionRepository @Inject constructor(
         configRepository: AgentDefinitionConfigRepository,
         fileAccess: FileAccessProvider,
         listOrderStore: ListOrderStore
-    ) : this(globalSource, projectSource, configRepository, fileAccess, listOrderStore, BulkFileSource.Disabled)
+    ) : this(
+        globalSource,
+        projectSource,
+        configRepository,
+        fileAccess,
+        listOrderStore,
+        BulkFileSource.Disabled,
+        emptySet()
+    )
 
     /**
      * 全部定义（含来源作用域），未过滤禁用。
@@ -61,15 +71,26 @@ class AgentDefinitionRepository @Inject constructor(
         ) { it.definition.name }
     }
 
-    /** 已启用的定义（注入主代理的可派发清单用）。 */
+    /** 已启用的用户自建定义。 */
     fun listEnabled(): List<AgentDefinitionEntry> {
         val disabled = configRepository.disabledNames()
         return listAll().filterNot { it.definition.name.lowercase() in disabled }
     }
 
+    /** 已启用的全部可派发定义；用户定义优先，外部贡献不能覆盖同名项。 */
+    fun listEnabledDefinitions(): List<AgentDefinition> {
+        val own = listEnabled().map { it.definition }
+        val taken = own.mapTo(HashSet()) { it.name.lowercase() }
+        val contributed = contributionSources
+            .flatMap { it.listDefinitions() }
+            .filter { taken.add(it.name.lowercase()) }
+            .sortedBy { it.name.lowercase() }
+        return own + contributed
+    }
+
     /** 按名称查找可派发的定义（忽略大小写）；不存在或已被禁用时返回 null。 */
     fun find(name: String): AgentDefinition? =
-        listEnabled().firstOrNull { it.definition.name.equals(name, ignoreCase = true) }?.definition
+        listEnabledDefinitions().firstOrNull { it.name.equals(name, ignoreCase = true) }
 
     /**
      * 按名称查找定义，包含已禁用的。已经派出去的子会话要用它还原自己的提示词与工具集——
@@ -77,6 +98,9 @@ class AgentDefinitionRepository @Inject constructor(
      */
     fun findIncludingDisabled(name: String): AgentDefinition? =
         listAll().firstOrNull { it.definition.name.equals(name, ignoreCase = true) }?.definition
+            ?: contributionSources.firstNotNullOfOrNull { source ->
+                source.listAllDefinitions().firstOrNull { it.name.equals(name, ignoreCase = true) }
+            }
 
     /** 当前被禁用的子代理名集合（小写归一化）。批量判断取一次即可，避免逐个重读配置文件。 */
     fun disabledNames(): Set<String> = configRepository.disabledNames()

@@ -16,3 +16,6 @@ interface SkillSource {
     /** 读取指定 skill 的完整指令正文；不存在或解析失败时返回 null。 */
     fun loadInstructions(name: String): String?
 }
+
+/** 外部能力向 Agent 贡献的只读技能源；实现通过 DI 集合注册，Agent 不依赖具体 feature。 */
+interface SkillContributionSource : SkillSource

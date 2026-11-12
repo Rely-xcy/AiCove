@@ -297,7 +297,7 @@ class TaskTool @Inject constructor(
         }
 
         // 预检查指定的 agent 是否都存在（一次扫描本地匹配，避免逐任务重复读盘）
-        val enabledDefinitions = agentDefinitionRepository.listEnabled()
+        val enabledDefinitions = agentDefinitionRepository.listEnabledDefinitions()
         val definitions = mutableMapOf<SubagentTaskSpec, AgentDefinition?>()
         for (spec in specs) {
             if (spec.agent == null) {
@@ -305,10 +305,10 @@ class TaskTool @Inject constructor(
                 continue
             }
             val def = enabledDefinitions.firstOrNull {
-                it.definition.name.equals(spec.agent, ignoreCase = true)
-            }?.definition
+                it.name.equals(spec.agent, ignoreCase = true)
+            }
             if (def == null) {
-                val available = enabledDefinitions.map { it.definition.name }
+                val available = enabledDefinitions.map { it.name }
                 val hint = if (available.isEmpty()) "当前未定义任何自定义子代理" else "可用：${available.joinToString(", ")}"
                 return ToolResult.Error("子代理定义不存在：${spec.agent}（$hint）", "AGENT_NOT_FOUND")
             }

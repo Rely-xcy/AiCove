@@ -22,7 +22,8 @@ class SkillRepository @Inject constructor(
     private val skillConfigRepository: SkillConfigRepository,
     private val fileAccess: FileAccessProvider,
     private val listOrderStore: ListOrderStore,
-    private val bulk: BulkFileSource
+    private val bulk: BulkFileSource,
+    private val contributionSources: Set<@JvmSuppressWildcards SkillContributionSource>
 ) {
     /** 不启用远程批量读取缓存的构造（单测与无远端场景）。 */
     internal constructor(
@@ -37,7 +38,8 @@ class SkillRepository @Inject constructor(
         skillConfigRepository,
         fileAccess,
         listOrderStore,
-        BulkFileSource.Disabled
+        BulkFileSource.Disabled,
+        emptySet()
     )
     /**
      * 全部技能（含来源作用域），未过滤禁用；同名技能项目级优先（与 MCP 两级配置一致）。
@@ -56,15 +58,23 @@ class SkillRepository @Inject constructor(
         return sortEntries(mergeAll(global, project))
     }
 
-    /** 启用的技能列表（注入系统提示词用），禁用技能被过滤。 */
-    fun listSkills(): List<Skill> =
-        filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
+    /** 启用的技能列表（注入系统提示词用），禁用技能被过滤，外部贡献排在用户技能之后。 */
+    fun listSkills(): List<Skill> {
+        val disabled = skillConfigRepository.disabledNames()
+        val own = filterDisabled(listAllSkills(), disabled).map { it.skill }
+        return appendContributedSkills(own, contributedSkills(), disabled)
+    }
 
-    /** 同 [listSkills]，但任一来源读取失败时返回 null（读失败不该被当成「没有技能」缓存下来）。 */
-    fun listSkillsOrNull(): List<Skill>? =
-        listAllSkillsOrNull()?.let { entries ->
-            filterDisabled(entries, skillConfigRepository.disabledNames()).map { it.skill }
-        }
+    /** 同 [listSkills]，但目录来源读取失败时返回 null（读失败不该被当成「没有技能」缓存下来）。 */
+    fun listSkillsOrNull(): List<Skill>? {
+        val ownEntries = listAllSkillsOrNull() ?: return null
+        val disabled = skillConfigRepository.disabledNames()
+        val own = filterDisabled(ownEntries, disabled).map { it.skill }
+        return appendContributedSkills(own, contributedSkills(), disabled)
+    }
+
+    private fun contributedSkills(): List<Skill> =
+        contributionSources.flatMap { source -> source.listSkills() }
 
     private fun sortEntries(merged: List<SkillEntry>): List<SkillEntry> =
         listOrderStore.sort(
@@ -211,6 +221,7 @@ class SkillRepository @Inject constructor(
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null
         return projectDirectorySkillSource.loadInstructions(name)
             ?: globalDirectorySkillSource.loadInstructions(name)
+            ?: contributionSources.firstNotNullOfOrNull { it.loadInstructions(name) }
     }
 
     /** 在指定作用域启用/禁用某个技能。@return false 表示项目级配置因工作区未就绪被跳过。 */
@@ -390,6 +401,18 @@ class SkillRepository @Inject constructor(
         /** 过滤禁用技能（禁用名单已归一化为小写）。 */
         internal fun filterDisabled(entries: List<SkillEntry>, disabled: Set<String>): List<SkillEntry> =
             entries.filterNot { it.skill.name.lowercase() in disabled }
+
+        /** 用户技能优先；外部贡献不能覆盖同名项，并按名称稳定追加。 */
+        internal fun appendContributedSkills(
+            own: List<Skill>,
+            contributed: List<Skill>,
+            disabled: Set<String>
+        ): List<Skill> {
+            val taken = own.mapTo(HashSet()) { it.name.lowercase() }
+            return own + contributed
+                .filter { it.name.lowercase() !in disabled && taken.add(it.name.lowercase()) }
+                .sortedBy { it.name.lowercase() }
+        }
 
         /** 仅当目录存在且含 SKILL.md/CLAUDE.md 指令文件时才删除，避免误删非技能目录。 */
         internal fun safeDeleteSkillDir(provider: FileAccessProvider, dirPath: String): Boolean {

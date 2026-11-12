@@ -132,7 +132,7 @@ class SystemPromptProvider @Inject constructor(
             val cached = cachedByKey[key]
             if (cached != null) return cached.ifEmpty { null }
             val entries = try {
-                agentDefinitionRepository.listEnabled()
+                agentDefinitionRepository.listEnabledDefinitions()
             } catch (e: Exception) {
                 FileLogger.w(TAG, "扫描子代理定义失败: ${e.message}", e)
                 return null
@@ -146,8 +146,7 @@ class SystemPromptProvider @Inject constructor(
             // 每行除「名称: 用途」外再标注读/写/命令能力，避免主代理把写任务派给只读子代理；
             // 按当前会话模式计算：PLAN 下子代理继承只读，能力要如实显示，否则主代理会照摘要派错活。
             val content = PromptListBudget.limit(
-                entries.map { entry ->
-                    val definition = entry.definition
+                entries.map { definition ->
                     "- ${definition.name}: ${definition.description.ifBlank { "（无描述）" }}" +
                         "｜${definition.capabilitySummary(ctx.mode)}"
                 },

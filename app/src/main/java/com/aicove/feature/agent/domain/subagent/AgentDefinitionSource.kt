@@ -9,6 +9,15 @@ interface AgentDefinitionSource {
     fun listDefinitions(): List<AgentDefinition>
 }
 
+/** 外部能力向 Agent 贡献的只读子代理定义；实现通过 DI 集合注册。 */
+interface AgentDefinitionContributionSource : AgentDefinitionSource {
+    /** 含已停用来源的定义，供已在运行的子会话恢复自身配置。 */
+    fun listAllDefinitions(): List<AgentDefinition> = listDefinitions()
+
+    /** 来源内容版本；变化时令系统提示词里的可用子代理清单失效。 */
+    val revision: Long get() = 0L
+}
+
 /** 目录扫描：只取顶层 `*.md`，避免把技能目录等无关内容误当 agent 定义。 */
 internal object AgentDefinitionDirectoryScanner {
     private const val TAG = "AgentDefinitionScanner"
