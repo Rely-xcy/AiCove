@@ -306,6 +306,12 @@ android {
 // 测试报告又不作为产物上传——SHORT 就等于「有结论、没来源」（2026-10-03 的跨测试 NPE 就因此
 // 在日志里查不到根因）。INFO/DEBUG 级别本来就是 FULL，这里只把 LIFECYCLE 拉平。
 tasks.withType<Test> {
+    // gradle.properties 里的 org.gradle.jvmargs.test 不是 Gradle 标准属性，不在这里
+    // 显式接上就完全无效——测试 JVM 会退回默认 512m，跑两千多个用例时随机 OOM，
+    // 还会连锁弄坏 Robolectric 的 main looper（表现为不相干的测试报
+    // “main looper can only be controlled from main thread”）。
+    maxHeapSize = "3g"
+    jvmArgs("-XX:MaxMetaspaceSize=512m", "-XX:+UseParallelGC")
     testLogging {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = true
