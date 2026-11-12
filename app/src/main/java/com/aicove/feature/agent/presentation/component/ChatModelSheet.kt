@@ -17,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import com.aicove.core.ui.AdaptiveModalBottomSheet
 import com.aicove.core.ui.AppSwitch
 import com.aicove.core.ui.ShapeClickBox
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -55,6 +57,7 @@ import com.aicove.feature.settings.domain.model.modelMetadataKey
 import com.aicove.feature.settings.presentation.component.ModelLogoIcon
 import com.aicove.feature.settings.presentation.component.ModelSelectionSheet
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * 输入区下行的模型切换图标按钮
@@ -181,63 +184,35 @@ internal fun ReasoningEffortSelector(
 
                 ReasoningHintLines(plan = plan, capability = capability)
 
-                levels.forEach { e ->
-                    val selected = thinkingOn && e == effort
-                    // 想关却关不掉时，把「实际会发的档位」标出来，避免用户以为思考真的停了。
-                    val effectiveWhenOff = !thinkingOn &&
-                        plan.reason == ReasoningPlan.Reason.CANNOT_DISABLE &&
-                        plan.effectiveLevel == e
-                    Row(
+                if (levels.isNotEmpty()) {
+                    val currentIndex = levels.indexOf(shownEffort).coerceAtLeast(0)
+                    Text(
+                        text = levels[currentIndex].withApiLabel(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = Spacing.md)
+                    )
+                    Slider(
+                        value = currentIndex.toFloat(),
+                        onValueChange = { v ->
+                            val idx = v.roundToInt().coerceIn(0, levels.lastIndex)
+                            if (levels[idx] != effort) onChange(levels[idx])
+                        },
+                        valueRange = 0f..levels.lastIndex.coerceAtLeast(1).toFloat(),
+                        steps = (levels.size - 2).coerceAtLeast(0),
+                        enabled = enabled,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            activeTickColor = MaterialTheme.colorScheme.onPrimary,
+                            inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(Radius.sm))
-                            .clickable(enabled = enabled) {
-                                showSheet = false
-                                onChange(e)
-                            }
-                            .padding(horizontal = Spacing.md, vertical = Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            FeatherIcons.Zap,
-                            contentDescription = null,
-                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(Spacing.md))
-                        Text(
-                            text = e.withApiLabel(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (e == capability.defaultLevel) {
-                            Text(
-                                text = stringResource(R.string.chat_reasoning_default_tag),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (effectiveWhenOff) {
-                            Spacer(Modifier.width(Spacing.sm))
-                            Text(
-                                text = stringResource(R.string.chat_reasoning_effective_tag),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        if (selected) {
-                            Spacer(Modifier.width(Spacing.sm))
-                            Icon(
-                                FeatherIcons.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                            .padding(horizontal = Spacing.xs)
+                    )
                 }
             }
         }
