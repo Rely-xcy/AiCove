@@ -496,6 +496,7 @@
     <string name="chat_no_model_selected">未选择模型</string>
     <string name="chat_open_git">打开 Git</string>
     <string name="chat_open_terminal">打开终端</string>
+    <string name="chat_switch_workspace">切换工作区</string>
     <string name="chat_ssh_connected">SSH：已连接</string>
     <string name="chat_ssh_connecting">SSH：连接中…</string>
     <string name="chat_ssh_failed">SSH：连接失败</string>

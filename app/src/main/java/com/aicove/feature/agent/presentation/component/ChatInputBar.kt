@@ -661,8 +661,7 @@ internal fun ChatInputBar(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(46.dp)
-                                    .padding(vertical = 4.dp),
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(

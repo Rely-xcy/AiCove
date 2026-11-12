@@ -496,6 +496,7 @@
     <string name="chat_no_model_selected">No model selected</string>
     <string name="chat_open_git">Open Git</string>
     <string name="chat_open_terminal">Open terminal</string>
+    <string name="chat_switch_workspace">Switch workspace</string>
     <string name="chat_ssh_connected">SSH: Connected</string>
     <string name="chat_ssh_connecting">SSH: Connecting…</string>
     <string name="chat_ssh_failed">SSH: Connection failed</string>

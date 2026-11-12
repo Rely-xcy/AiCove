@@ -28,6 +28,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -150,7 +152,7 @@ internal fun ChatHeader(
                         )
                     }
                 }
-                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全收进底部面板。
+                // 顶栏只留一个入口：新建、切换工作区、终端、Git 都在这个下拉里。
                 var workbenchExpanded by remember { mutableStateOf(false) }
                 IconButton(onClick = { workbenchExpanded = true }) {
                     Icon(
@@ -158,16 +160,43 @@ internal fun ChatHeader(
                         contentDescription = stringResource(R.string.common_more),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (workbenchExpanded) {
-                    WorkbenchSheet(
-                        onDismiss = { workbenchExpanded = false },
-                        onNewChat = onNewChat,
-                        onSwitchWorkspace = onSwitchWorkspace,
-                        onNavigateToTerminal = onNavigateToTerminal,
-                        onNavigateToGit = onNavigateToGit,
-                        terminalActive = terminalActive,
-                        gitActive = gitActive
+                DropdownMenu(
+                    expanded = workbenchExpanded,
+                    onDismissRequest = { workbenchExpanded = false },
+                    shape = RoundedCornerShape(Radius.md),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder)
+                ) {
+                    WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
+                        workbenchExpanded = false
+                        onNewChat()
+                    }
+                    WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
+                        workbenchExpanded = false
+                        onSwitchWorkspace()
+                    }
+                    HorizontalDivider(
+                        color = MaterialTheme.semanticColors.subtleBorder,
+                        modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
                     )
+                    WorkbenchMenuItem(
+                        icon = FeatherIcons.Terminal,
+                        label = stringResource(R.string.chat_open_terminal),
+                        active = terminalActive
+                    ) {
+                        workbenchExpanded = false
+                        onNavigateToTerminal()
+                    }
+                    WorkbenchMenuItem(
+                        icon = FeatherIcons.GitBranch,
+                        label = stringResource(R.string.chat_open_git),
+                        active = gitActive
+                    ) {
+                        workbenchExpanded = false
+                        onNavigateToGit()
+                    }
                 }
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计
@@ -190,92 +219,32 @@ internal fun ChatHeader(
     }
 }
 
-/**
- * 顶栏折叠入口的操作面板。用应用统一的 [AdaptiveModalBottomSheet]（窄屏贴底、宽屏居中），
- * 不另画一套浮层：样式、圆角、拖拽手势和设置页那些面板保持一致。
- */
-@OptIn(ExperimentalMaterial3Api::class)
+/** 下拉菜单里的一行：图标 + 文字，当前停留的页面用品牌色标出（与原来图标按钮的 active 态一致）。 */
 @Composable
-private fun WorkbenchSheet(
-    onDismiss: () -> Unit,
-    onNewChat: () -> Unit,
-    onSwitchWorkspace: () -> Unit,
-    onNavigateToTerminal: () -> Unit,
-    onNavigateToGit: () -> Unit,
-    terminalActive: Boolean,
-    gitActive: Boolean
-) {
-    AdaptiveModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(),
-        containerColor = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = Spacing.xl)
-        ) {
-            WorkbenchSheetItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
-                onDismiss()
-                onNewChat()
-            }
-            WorkbenchSheetItem(FeatherIcons.Folder, stringResource(R.string.workspace_open)) {
-                onDismiss()
-                onSwitchWorkspace()
-            }
-            HorizontalDivider(
-                color = MaterialTheme.semanticColors.subtleBorder,
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-            )
-            WorkbenchSheetItem(
-                icon = FeatherIcons.Terminal,
-                label = stringResource(R.string.chat_open_terminal),
-                active = terminalActive
-            ) {
-                onDismiss()
-                onNavigateToTerminal()
-            }
-            WorkbenchSheetItem(
-                icon = FeatherIcons.GitBranch,
-                label = stringResource(R.string.chat_open_git),
-                active = gitActive
-            ) {
-                onDismiss()
-                onNavigateToGit()
-            }
-        }
-    }
-}
-
-/** 面板里的一行：图标 + 文字，当前停留的页面用品牌色标出（与原来图标按钮的 active 态一致）。 */
-@Composable
-private fun WorkbenchSheetItem(
+private fun WorkbenchMenuItem(
     icon: ImageVector,
     label: String,
     active: Boolean = false,
     onClick: () -> Unit
 ) {
-    Surface(onClick = onClick, color = Color.Transparent) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+        },
+        leadingIcon = {
             Icon(
                 icon,
                 contentDescription = null,
                 tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
                 modifier = Modifier.size(18.dp)
             )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
+        },
+        onClick = onClick
+    )
 }
 
 /** 顶栏工作台入口按钮：大屏右栏开着对应内容时高亮，否则看不出点一下是开还是关。 */
