@@ -618,12 +618,14 @@ internal fun StreamingBubble(
     val renderText = text
     // 与落库助手正文同构：不套容器，直接铺在页面底色上，底部挂「生成中」的点
     Column(modifier = Modifier.fillMaxWidth()) {
-        MarkdownContent(
+        // 用增量渲染：流式期间只重解析已闭合的块，末块纯文本。
+        // 原实现把全文每 24ms 重解析一次，3000 字回复要解析上千次全文，
+        // 真机实测 p99 卡到 1.9 秒。详见 [StreamingMarkdownContent] 的说明。
+        StreamingMarkdownContent(
             text = renderText,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
-            cache = cache,
-            streaming = true
+            cache = cache
         )
         Spacer(Modifier.height(Spacing.xs))
         TypingDots(color = MaterialTheme.colorScheme.primary, dotSize = 5.dp)
