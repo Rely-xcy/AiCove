@@ -76,7 +76,18 @@ jobs:
       # 构建 universal beta（arm64-v8a + x86_64，含两套容器镜像的通用包）。
       # --stacktrace：失败时输出完整调用栈，便于定位 OOM/内存类根因。
       - name: Build universal beta APK
-        run: ./gradlew :app:assembleUniversalBeta --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleUniversalBeta --stacktrace 2>&1 | tee gradle-build.log
+
+      # Kotlin 的报错在 Gradle 的 stdout 里，不在 app/build/ 产物目录下：
+      # 上一步已 tee 到 gradle-build.log，失败时直接读它。
+      - name: Summarize compile errors
+        if: failure()
+        run: |
+          echo "=== Kotlin compile errors ==="
+          grep -E "^e: |error: |Unresolved reference|Cannot access" gradle-build.log | head -60 || true
+          echo "=== end ==="
 
       # 产物重命名为 aicode-universal-beta-<sha7>.apk，短 sha 便于区分每次构建。
       # 同时带上 R8 混淆映射（mapping.txt），供 beta 崩溃报告反混淆。
