@@ -440,6 +440,11 @@ dependencies {
     // Core Android（1.17.0 起提供 NotificationCompat 的实时通知推广接口 setRequestPromotedOngoing）
     implementation("androidx.core:core:1.17.0")
 
+    // 插件运行时：在独立进程的 WebView JS 沙箱里执行插件包内已打包的 handler。
+    implementation("androidx.javascriptengine:javascriptengine:1.1.1")
+    // 把 JavaScriptEngine 的 ListenableFuture 接进协程（await）。
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2")
+
     // 在 Android 12 以下的后台把 APK 内 baseline profile 编译进 ART：12+ 由系统安装时自动处理，
     // 8.0–11 需要它在空闲时安装一次，否则 src/main/baseline-prof.txt 只影响 dex 布局、不预热代码。
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
