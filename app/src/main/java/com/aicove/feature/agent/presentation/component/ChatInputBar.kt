@@ -688,15 +688,7 @@ internal fun ChatInputBar(
                             modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
 
-                        if (workspaceViewModel != null) {
-                            WorkspaceIconButton(
-                                viewModel = workspaceViewModel,
-                                hasRunningSessions = hasRunningSessions,
-                                onSwitchConfirmed = onSwitchWorkspaceConfirmed,
-                                modifier = Modifier.size(36.dp),
-                                iconSize = 20.dp
-                            )
-                        }
+                        // 工作区入口只留在顶栏 ⋯ 菜单里，输入卡不再重复一份。
 
                         // 思考能力与实际请求同源：已知就只列真实档位，未知（中转站改名 / 自定义模型）
                         // 才退回全部档位并由弹层标注「可能不生效」。

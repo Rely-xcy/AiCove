@@ -3,6 +3,7 @@ package com.aicove.feature.agent.presentation.component
 import android.os.Build
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -176,7 +180,27 @@ internal fun ChatHeader(
                             onDismissRequest = { workbenchExpanded = false },
                             properties = PopupProperties(focusable = true)
                         ) {
+                            // 进入动画：从右上角轻微放大 + 淡入。退出保持即时——Popup 常驻
+                            // 才能做退出动画，会留下一个拦截触摸的空白窗口。
+                            var appeared by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) { appeared = true }
+                            val shelfScale by animateFloatAsState(
+                                targetValue = if (appeared) 1f else 0.92f,
+                                animationSpec = tween(160),
+                                label = "shelf-scale"
+                            )
+                            val shelfAlpha by animateFloatAsState(
+                                targetValue = if (appeared) 1f else 0f,
+                                animationSpec = tween(140),
+                                label = "shelf-alpha"
+                            )
                             Surface(
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = shelfScale
+                                    scaleY = shelfScale
+                                    this.alpha = shelfAlpha
+                                    transformOrigin = TransformOrigin(1f, 0f)
+                                },
                                 shape = RoundedCornerShape(18.dp),
                                 color = MaterialTheme.colorScheme.surface,
                                 shadowElevation = 0.dp,
