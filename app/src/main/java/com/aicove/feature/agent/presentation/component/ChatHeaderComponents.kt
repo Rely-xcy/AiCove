@@ -4,7 +4,9 @@ import android.os.Build
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,8 +27,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,10 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.aicove.R
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
@@ -52,6 +56,7 @@ import com.aicove.feature.onboarding.domain.OnboardingStep
 import com.aicove.feature.onboarding.presentation.onboardingTarget
 import com.aicove.feature.settings.presentation.component.ModelLogoIcon
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.Folder
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Menu
@@ -140,7 +145,7 @@ internal fun ChatHeader(
                         )
                     }
                 }
-                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全在菜单里，窄屏不再挤标题。
+                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全收进浮层，窄屏不再挤标题。
                 var workbenchExpanded by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { workbenchExpanded = true }) {
@@ -149,38 +154,15 @@ internal fun ChatHeader(
                             contentDescription = stringResource(R.string.common_more),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    DropdownMenu(
-                        expanded = workbenchExpanded,
-                        onDismissRequest = { workbenchExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_new_session)) },
-                            onClick = {
-                                workbenchExpanded = false
-                                onNewChat()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.workspace_open)) },
-                            onClick = {
-                                workbenchExpanded = false
-                                onSwitchWorkspace()
-                            }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_open_terminal)) },
-                            onClick = {
-                                workbenchExpanded = false
-                                onNavigateToTerminal()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_open_git)) },
-                            onClick = {
-                                workbenchExpanded = false
-                                onNavigateToGit()
-                            }
+                    if (workbenchExpanded) {
+                        WorkbenchShelf(
+                            onDismiss = { workbenchExpanded = false },
+                            onNewChat = onNewChat,
+                            onSwitchWorkspace = onSwitchWorkspace,
+                            onNavigateToTerminal = onNavigateToTerminal,
+                            onNavigateToGit = onNavigateToGit,
+                            terminalActive = terminalActive,
+                            gitActive = gitActive
                         )
                     }
                 }
@@ -202,6 +184,98 @@ internal fun ChatHeader(
                 }
             }
         }
+    }
+}
+
+/**
+ * 顶栏折叠浮层。不用 Material 默认 DropdownMenu：它自带直角、纯白底和一套固定的
+ * 阴影与内边距，跟页面里其它卡片对不上。这里用应用自己的 cardSurface / subtleBorder /
+ * Radius 画一张浮层，展开时才组合，收起时零开销。
+ */
+@Composable
+private fun WorkbenchShelf(
+    onDismiss: () -> Unit,
+    onNewChat: () -> Unit,
+    onSwitchWorkspace: () -> Unit,
+    onNavigateToTerminal: () -> Unit,
+    onNavigateToGit: () -> Unit,
+    terminalActive: Boolean,
+    gitActive: Boolean
+) {
+    Popup(
+        alignment = Alignment.TopEnd,
+        offset = IntOffset(0, with(LocalDensity.current) { Spacing.sm.roundToPx() }),
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true)
+    ) {
+        Surface(
+            modifier = Modifier.width(196.dp),
+            shape = RoundedCornerShape(Radius.md),
+            color = MaterialTheme.semanticColors.cardSurface,
+            border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder),
+            shadowElevation = 8.dp
+        ) {
+            Column(modifier = Modifier.padding(vertical = Spacing.xs)) {
+                ShelfItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
+                    onDismiss()
+                    onNewChat()
+                }
+                ShelfItem(FeatherIcons.Folder, stringResource(R.string.workspace_open)) {
+                    onDismiss()
+                    onSwitchWorkspace()
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.semanticColors.subtleBorder,
+                    modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                )
+                ShelfItem(
+                    icon = FeatherIcons.Terminal,
+                    label = stringResource(R.string.chat_open_terminal),
+                    active = terminalActive
+                ) {
+                    onDismiss()
+                    onNavigateToTerminal()
+                }
+                ShelfItem(
+                    icon = FeatherIcons.GitBranch,
+                    label = stringResource(R.string.chat_open_git),
+                    active = gitActive
+                ) {
+                    onDismiss()
+                    onNavigateToGit()
+                }
+            }
+        }
+    }
+}
+
+/** 浮层里的一行：图标 + 文字，当前停留的页面用品牌色标出，和原来图标按钮的高亮一致。 */
+@Composable
+private fun ShelfItem(
+    icon: ImageVector,
+    label: String,
+    active: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.md, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
