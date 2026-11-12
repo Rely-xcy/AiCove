@@ -154,48 +154,52 @@ internal fun ChatHeader(
                 }
                 // 顶栏只留一个入口：新建、切换工作区、终端、Git 都在这个下拉里。
                 var workbenchExpanded by remember { mutableStateOf(false) }
-                IconButton(onClick = { workbenchExpanded = true }) {
-                    Icon(
-                        FeatherIcons.MoreHorizontal,
-                        contentDescription = stringResource(R.string.common_more),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                DropdownMenu(
-                    expanded = workbenchExpanded,
-                    onDismissRequest = { workbenchExpanded = false },
-                    shape = RoundedCornerShape(Radius.md),
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 8.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder)
-                ) {
-                    WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
-                        workbenchExpanded = false
-                        onNewChat()
+                // 菜单必须和入口包在同一个 Box 里：DropdownMenu 以父组合的位置为锚点，
+                // 直接放在 Row 里会从整行左边展开，跑到屏幕左侧去。
+                Box {
+                    IconButton(onClick = { workbenchExpanded = true }) {
+                        Icon(
+                            FeatherIcons.MoreHorizontal,
+                            contentDescription = stringResource(R.string.common_more),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
-                        workbenchExpanded = false
-                        onSwitchWorkspace()
-                    }
-                    HorizontalDivider(
-                        color = MaterialTheme.semanticColors.subtleBorder,
-                        modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
-                    )
-                    WorkbenchMenuItem(
-                        icon = FeatherIcons.Terminal,
-                        label = stringResource(R.string.chat_open_terminal),
-                        active = terminalActive
+                    DropdownMenu(
+                        expanded = workbenchExpanded,
+                        onDismissRequest = { workbenchExpanded = false },
+                        shape = RoundedCornerShape(Radius.md),
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder)
                     ) {
-                        workbenchExpanded = false
-                        onNavigateToTerminal()
-                    }
-                    WorkbenchMenuItem(
-                        icon = FeatherIcons.GitBranch,
-                        label = stringResource(R.string.chat_open_git),
-                        active = gitActive
-                    ) {
-                        workbenchExpanded = false
-                        onNavigateToGit()
+                        WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
+                            workbenchExpanded = false
+                            onNewChat()
+                        }
+                        WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
+                            workbenchExpanded = false
+                            onSwitchWorkspace()
+                        }
+                        HorizontalDivider(
+                            color = MaterialTheme.semanticColors.subtleBorder,
+                            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                        )
+                        WorkbenchMenuItem(
+                            icon = FeatherIcons.Terminal,
+                            label = stringResource(R.string.chat_open_terminal),
+                            active = terminalActive
+                        ) {
+                            workbenchExpanded = false
+                            onNavigateToTerminal()
+                        }
+                        WorkbenchMenuItem(
+                            icon = FeatherIcons.GitBranch,
+                            label = stringResource(R.string.chat_open_git),
+                            active = gitActive
+                        ) {
+                            workbenchExpanded = false
+                            onNavigateToGit()
+                        }
                     }
                 }
             }
