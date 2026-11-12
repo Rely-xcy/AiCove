@@ -1,4 +1,4 @@
-package com.aicove.feature.workspace.domain
+package com.aicove.feature.plugin.data
 
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.plugin.domain.PluginContent

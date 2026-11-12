@@ -24,7 +24,7 @@ import com.aicove.feature.settings.domain.parser.AdaptiveCardParser
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
 import com.aicove.feature.workspace.data.repository.WorkspaceRepository
 import com.aicove.feature.workspace.domain.ProjectToolItem
-import com.aicove.feature.workspace.domain.ProjectToolsRepository
+import com.aicove.feature.plugin.data.ProjectToolsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
