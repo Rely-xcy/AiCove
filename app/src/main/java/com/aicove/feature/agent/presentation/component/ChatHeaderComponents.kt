@@ -56,6 +56,7 @@ import compose.icons.feathericons.Terminal
 internal fun ChatHeader(
     sessionTitle: String,
     modelName: String?,
+    providerName: String? = null,
     inputTokens: Int,
     outputTokens: Int,
     onOpenDrawer: () -> Unit,
@@ -115,8 +116,15 @@ internal fun ChatHeader(
                         if (!modelName.isNullOrBlank()) {
                             ModelLogoIcon(modelName = modelName, size = 14.dp)
                         }
+                        // 模型名后括号标注提供商；位置不变，只补一个后缀。
+                        val modelLabel = modelName?.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.chat_no_model_selected)
                         Text(
-                            text = modelName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_no_model_selected),
+                            text = if (providerName.isNullOrBlank() || modelName.isNullOrBlank()) {
+                                modelLabel
+                            } else {
+                                "$modelLabel ($providerName)"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

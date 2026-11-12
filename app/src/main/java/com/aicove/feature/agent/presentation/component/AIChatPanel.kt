@@ -2002,6 +2002,7 @@ fun AIChatPanel(
             ChatHeader(
                 sessionTitle = sessionTitle,
                 modelName = activeProvider?.effectiveModel,
+                providerName = activeProvider?.name,
                 inputTokens = sessionInputTokens,
                 outputTokens = sessionOutputTokens,
                 onOpenDrawer = {
