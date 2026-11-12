@@ -28,7 +28,9 @@ internal fun EditMessageDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var text by remember { mutableStateOf(initialText) }
+    // 用 TextFieldValue 重载：删除时 IME 的组合区会指向已删字符，String 重载不清理它，
+    // 紧接着长按选词就会拿越界 offset 构造 TextSelection.Request 而崩溃。
+    val textState = rememberSafeTextFieldValueState(initialText)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -39,8 +41,8 @@ internal fun EditMessageDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Spacer(modifier = Modifier.height(Spacing.xs))
                 AppTextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    value = textState.value,
+                    onValueChange = { new -> textState.value = new.sanitized() },
                     placeholder = stringResource(R.string.chat_edit_dialog_hint),
                     singleLine = false,
                     modifier = Modifier
@@ -54,9 +56,9 @@ internal fun EditMessageDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(text)
+                    onConfirm(textState.value.text)
                 },
-                enabled = text.isNotBlank()
+                enabled = textState.value.text.isNotBlank()
             ) {
                 Text(stringResource(R.string.common_save))
             }
