@@ -850,6 +850,7 @@ private fun CompactionFailureCard(message: AgentUIMessage) {
             }
         }
     }
+}
 
 /**
  * 按 [contentKey] 重建的选择容器。
@@ -869,25 +870,4 @@ private fun StableSelectionContainer(
             content()
         }
     }
-}
-
-/**
- * 按 [contentKey] 重建的选择容器。
- *
- * LazyColumn 复用 item 时，SelectionManager 的状态是跟着槽位走的；文本一旦换成另一条，
- * 长按选词就会拿旧偏移去构造 TextSelection.Request，Android 直接抛
- * IllegalArgumentException（真机崩溃于聊天页，栈顶是 TextSelection$Request$Builder）。
- * 用消息 id 当 key，复用时强制重建选择状态，避免旧偏移指向新文本。
- */
-@Composable
-private fun StableSelectionContainer(
-    contentKey: Any,
-    content: @Composable () -> Unit
-) {
-    key(contentKey) {
-        SelectionContainer {
-            content()
-        }
-    }
-}
 }
