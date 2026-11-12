@@ -38,7 +38,7 @@ import com.aicove.R
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
-import com.aicove.feature.agent.presentation.component.AdaptiveCardView
+import com.aicove.core.ui.adaptive.AdaptiveCardView
 import com.aicove.feature.plugin.domain.PluginWorkspaceTool
 import com.aicove.feature.plugin.domain.ToolRunPhase
 import com.aicove.feature.plugin.domain.ToolRunState

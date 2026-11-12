@@ -1,4 +1,4 @@
-package com.aicove.feature.agent.presentation.component
+package com.aicove.core.ui.adaptive
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -104,6 +104,11 @@ import compose.icons.feathericons.HelpCircle
 
 val LocalCardFormState = compositionLocalOf<MutableMap<String, Any>?> { null }
 val LocalCardOnSubmit = compositionLocalOf<((String, String?, Map<String, Any>) -> Unit)?> { null }
+val LocalAdaptiveMarkdownRenderer = compositionLocalOf<@Composable (String, Color, Modifier) -> Unit> {
+    { text, color, modifier ->
+        Text(text = text, color = color, style = MaterialTheme.typography.bodyMedium, modifier = modifier)
+    }
+}
 
 /**
  * Adaptive Card 原生 Compose 渲染主入口。

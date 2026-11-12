@@ -70,6 +70,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aicove.core.theme.AIEditorTheme
 import com.aicove.core.theme.AppThemePreset
+import com.aicove.core.ui.adaptive.LocalAdaptiveMarkdownRenderer
 import com.aicove.core.ui.BetaWatermark
 import com.aicove.core.ui.ImageSource
 import com.aicove.core.ui.ImageViewerHost
@@ -88,6 +89,7 @@ import com.aicove.feature.agent.presentation.AIAgentViewModel
 import com.aicove.feature.agent.presentation.AgentAttachment
 import com.aicove.feature.agent.presentation.component.AIChatPanel
 import com.aicove.feature.agent.presentation.component.ChatDrawerContent
+import com.aicove.feature.agent.presentation.component.MarkdownContent
 import com.aicove.feature.agent.presentation.component.chatImageLoader
 import com.aicove.feature.agent.presentation.component.openSentAttachment
 import com.aicove.feature.agreement.presentation.AgreementGate
@@ -274,10 +276,15 @@ class MainActivity : ComponentActivity() {
                 preset = AppThemePreset.findById(themePresetId),
                 dynamicColor = dynamicColor
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                CompositionLocalProvider(
+                    LocalAdaptiveMarkdownRenderer provides { text, color, modifier ->
+                        MarkdownContent(text = text, color = color, modifier = modifier)
+                    }
                 ) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
                     // 全局自定义背景图：叠加在所有页面内容之上（水印效果），透明度可调。
                     // 不拦截触摸事件；弹窗（Dialog 独立窗口）不受层级影响。
                     val bgPath by backgroundSettings.imagePathFlow.collectAsStateWithLifecycle(initialValue = null)
@@ -319,6 +326,7 @@ class MainActivity : ComponentActivity() {
                         }
                         // beta 包全局水印，置于最上层，不拦截触摸。
                         BetaWatermark()
+                    }
                     }
                 }
             }

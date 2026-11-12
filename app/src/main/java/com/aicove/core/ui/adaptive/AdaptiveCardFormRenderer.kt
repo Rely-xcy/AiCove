@@ -1,4 +1,4 @@
-package com.aicove.feature.agent.presentation.component
+package com.aicove.core.ui.adaptive
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -357,9 +357,10 @@ internal fun RenderMarkdownBlock(
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
-        MarkdownContent(
-            text = element.content,
-            color = MaterialTheme.colorScheme.onSurface
+        LocalAdaptiveMarkdownRenderer.current(
+            element.content,
+            MaterialTheme.colorScheme.onSurface,
+            Modifier.fillMaxWidth()
         )
     }
 }

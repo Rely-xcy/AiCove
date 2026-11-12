@@ -167,7 +167,7 @@ import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Trash2
 import compose.icons.feathericons.X
 import com.aicove.feature.agent.domain.model.ReasoningEffort
-import com.aicove.feature.agent.presentation.component.AdaptiveCardView
+import com.aicove.core.ui.adaptive.AdaptiveCardView
 import com.aicove.feature.settings.domain.model.ProviderDashboardResult
 import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import androidx.compose.ui.res.stringResource
