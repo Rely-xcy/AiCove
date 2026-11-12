@@ -111,7 +111,7 @@ fun WorkspaceIconButton(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WorkspaceSelectionHost(
+internal fun WorkspaceSelectionHost(
     visible: Boolean,
     onDismiss: () -> Unit,
     viewModel: WorkspaceViewModel,

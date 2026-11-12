@@ -27,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,6 +71,7 @@ internal fun ChatHeader(
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
     onNavigateToBrowser: () -> Unit = {},
+    onSwitchWorkspace: () -> Unit = {},
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
     connectionState: com.aicove.feature.agent.domain.container.ConnectionState? = null,
@@ -138,13 +140,7 @@ internal fun ChatHeader(
                         )
                     }
                 }
-                IconButton(onClick = onNewChat) {
-                    Icon(
-                        FeatherIcons.Plus,
-                        contentDescription = stringResource(R.string.chat_new_session),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                // 工作台入口收进下拉：顶栏只留新建与会话本身，终端 / Git 不再挤在标题旁边。
+                // 顶栏只留一个折叠入口：新建、工作区、终端、Git 全在菜单里，窄屏不再挤标题。
                 var workbenchExpanded by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { workbenchExpanded = true }) {
@@ -157,6 +153,21 @@ internal fun ChatHeader(
                         expanded = workbenchExpanded,
                         onDismissRequest = { workbenchExpanded = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_new_session)) },
+                            onClick = {
+                                workbenchExpanded = false
+                                onNewChat()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.workspace_open)) },
+                            onClick = {
+                                workbenchExpanded = false
+                                onSwitchWorkspace()
+                            }
+                        )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.chat_open_terminal)) },
                             onClick = {

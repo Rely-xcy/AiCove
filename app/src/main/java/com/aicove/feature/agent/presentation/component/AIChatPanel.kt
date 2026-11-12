@@ -110,6 +110,7 @@ import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import com.aicove.feature.settings.domain.model.modelMetadataKey
 import com.aicove.feature.workspace.domain.WorkspacePathMapper
 import com.aicove.feature.workspace.presentation.WorkspaceViewModel
+import com.aicove.feature.workspace.presentation.component.WorkspaceSelectionHost
 import com.aicove.feature.workspace.presentation.remote.HostKeyConfirmDialog
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowDown
@@ -1995,6 +1996,8 @@ fun AIChatPanel(
             onStop = { id -> viewModel.stopAgentSession(id) }
         )
     ) {
+        // 顶栏下拉里「打开工作区」用：面板渲染在这里，顶栏只负责发一个开关信号。
+        var showWorkspaceSheet by remember { mutableStateOf(false) }
         Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -2010,6 +2013,7 @@ fun AIChatPanel(
                     onOpenDrawer()
                 },
                 onNewChat = { viewModel.newSession() },
+                onSwitchWorkspace = { showWorkspaceSheet = true },
                 onNavigateToTerminal = onNavigateToTerminal,
                 onNavigateToGit = onNavigateToGit,
                 onNavigateToBrowser = onNavigateToBrowser,
@@ -2024,6 +2028,15 @@ fun AIChatPanel(
             )
         }
     ) { padding ->
+        if (workspaceViewModel != null) {
+            WorkspaceSelectionHost(
+                visible = showWorkspaceSheet,
+                onDismiss = { showWorkspaceSheet = false },
+                viewModel = workspaceViewModel,
+                hasRunningSessions = { viewModel.hasRunningSessionsInCurrentWorkspace() },
+                onSwitchConfirmed = { viewModel.stopAllAndCloseTerminal() }
+            )
+        }
         Box(
             modifier = modifier
                 .fillMaxSize()
