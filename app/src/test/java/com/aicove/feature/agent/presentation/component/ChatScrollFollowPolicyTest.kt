@@ -64,6 +64,16 @@ class ChatScrollFollowPolicyTest {
     }
 
     @Test
+    fun `滚动或浏览历史时冻结输入层安全区`() {
+        assertFalse(shouldCommitInputBarReserve(false, false, false, false, false))
+        assertFalse(shouldCommitInputBarReserve(true, true, false, false, false))
+        assertFalse(shouldCommitInputBarReserve(true, false, true, false, false))
+        assertFalse(shouldCommitInputBarReserve(true, false, false, true, false))
+        assertFalse(shouldCommitInputBarReserve(true, false, false, false, true))
+        assertTrue(shouldCommitInputBarReserve(true, false, false, false, false))
+    }
+
+    @Test
     fun `不跟随、手势中、已到底这三种情况都不校准`() {
         assertFalse(
             shouldCalibrateToAnchor(

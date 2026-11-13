@@ -4,10 +4,6 @@ import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -109,8 +105,11 @@ import com.aicove.feature.settings.domain.model.ModelMetadata
 import com.aicove.feature.settings.domain.model.modelMetadataKey
 import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import com.aicove.feature.workspace.presentation.WorkspaceViewModel
-import com.aicove.feature.workspace.presentation.component.WorkspaceIconButton
 import com.aicove.core.ui.ExpandableChevronIcon
+import com.aicove.core.ui.smoothFadeEnter
+import com.aicove.core.ui.smoothFadeExit
+import com.aicove.core.ui.smoothPanelEnter
+import com.aicove.core.ui.smoothPanelExit
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.AlertCircle
 import compose.icons.feathericons.ArrowUp
@@ -997,8 +996,8 @@ internal fun ToolPermissionPanel(
 
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 Column {
                     Spacer(Modifier.height(Spacing.sm))
@@ -1087,8 +1086,8 @@ internal fun StatusBanner(state: AgentUIState) {
     AnimatedVisibility(
         visible = state is AgentUIState.Error,
         // 错误横幅是自动弹出的：尺寸一帧到位，不让悬浮层高度逐帧变化（列表留白会跟着逐帧重测）。
-        enter = fadeIn(tween(180)),
-        exit = fadeOut(tween(140))
+        enter = smoothFadeEnter(),
+        exit = smoothFadeExit()
     ) {
         lastError?.let { ErrorBubble(message = it) }
     }
@@ -1156,8 +1155,8 @@ private fun ErrorBubble(message: String) {
             }
             AnimatedVisibility(
                 visible = expanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 Column {
                     Spacer(Modifier.height(Spacing.sm))
@@ -1236,8 +1235,8 @@ internal fun PlanApprovalPanel(
 
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 Column {
                     // 多会话并行时标注这份计划属于哪个会话，避免用户批错对象

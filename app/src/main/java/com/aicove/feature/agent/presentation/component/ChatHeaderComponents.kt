@@ -1,14 +1,19 @@
 package com.aicove.feature.agent.presentation.component
 
 import android.os.Build
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -160,7 +165,24 @@ internal fun ChatHeader(
                 var workbenchExpanded by remember { mutableStateOf(false) }
                 val density = LocalDensity.current
                 Box {
-                    IconButton(onClick = { workbenchExpanded = true }, modifier = Modifier.size(36.dp)) {
+                    val moreBtnInteraction = remember { MutableInteractionSource() }
+                    val moreBtnPressed by moreBtnInteraction.collectIsPressedAsState()
+                    val moreBtnScale by animateFloatAsState(
+                        targetValue = if (moreBtnPressed) 0.92f else 1f,
+                        animationSpec = if (moreBtnPressed) {
+                            tween(durationMillis = 70, easing = FastOutLinearInEasing)
+                        } else {
+                            spring(dampingRatio = 0.76f, stiffness = 520f)
+                        },
+                        label = "more-btn-scale"
+                    )
+                    IconButton(
+                        onClick = { workbenchExpanded = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .graphicsLayer { scaleX = moreBtnScale; scaleY = moreBtnScale },
+                        interactionSource = moreBtnInteraction
+                    ) {
                         Icon(
                             FeatherIcons.MoreHorizontal,
                             contentDescription = stringResource(R.string.common_more),
@@ -180,27 +202,38 @@ internal fun ChatHeader(
                             onDismissRequest = { workbenchExpanded = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            // 进入动画：从右上角轻微放大 + 淡入。退出保持即时——Popup 常驻
-                            // 才能做退出动画，会留下一个拦截触摸的空白窗口。
-                            var appeared by remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) { appeared = true }
+                            var isEntering by remember { mutableStateOf(true) }
+                            LaunchedEffect(Unit) { isEntering = false }
                             val shelfScale by animateFloatAsState(
-                                targetValue = if (appeared) 1f else 0.92f,
-                                animationSpec = tween(160),
+                                targetValue = if (isEntering) 0.92f else 1f,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                                 label = "shelf-scale"
                             )
                             val shelfAlpha by animateFloatAsState(
-                                targetValue = if (appeared) 1f else 0f,
-                                animationSpec = tween(140),
+                                targetValue = if (isEntering) 0f else 1f,
+                                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
                                 label = "shelf-alpha"
                             )
+                            val shelfOffsetX by animateDpAsState(
+                                targetValue = if (isEntering) (-4).dp else 0.dp,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                                label = "shelf-offset-x"
+                            )
+                            val shelfOffsetY by animateDpAsState(
+                                targetValue = if (isEntering) 6.dp else 0.dp,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                                label = "shelf-offset-y"
+                            )
                             Surface(
-                                modifier = Modifier.graphicsLayer {
-                                    scaleX = shelfScale
-                                    scaleY = shelfScale
-                                    this.alpha = shelfAlpha
-                                    transformOrigin = TransformOrigin(1f, 0f)
-                                },
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        scaleX = shelfScale
+                                        scaleY = shelfScale
+                                        this.alpha = shelfAlpha
+                                        translationX = shelfOffsetX.toPx()
+                                        translationY = shelfOffsetY.toPx()
+                                        transformOrigin = TransformOrigin(1f, 0f)
+                                    },
                                 // 用应用语义色而不是 colorScheme.surface：主题预设（暖纸等）
                                 // 推导出的 surface 不一定等于卡片色，直接用会和页面里的卡片脱节。
                                 shape = RoundedCornerShape(18.dp),
@@ -273,14 +306,37 @@ private fun WorkbenchMenuItem(
     active: Boolean = false,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val isPressed by interaction.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = if (isPressed) {
+            tween(durationMillis = 70, easing = FastOutLinearInEasing)
+        } else {
+            spring(dampingRatio = 0.8f, stiffness = 520f)
+        },
+        label = "menu-item-scale"
+    )
+    val pressedBackground by animateColorAsState(
+        targetValue = if (isPressed) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(durationMillis = 100, easing = LinearOutSlowInEasing),
+        label = "menu-item-background"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(pressedBackground)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = null,
                 onClick = onClick
             )
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -94,6 +94,8 @@ import com.aicove.core.ui.LocalImageViewer
 import com.aicove.core.ui.readableContentMaxWidth
 import com.aicove.core.ui.rememberImageViewerState
 import com.aicove.core.ui.rememberViewerDecodeSpec
+import com.aicove.core.ui.smoothFadeEnter
+import com.aicove.core.ui.smoothFadeExit
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.tool.question.UserQuestionAnswer
 import com.aicove.feature.agent.presentation.AgentUIMessage
@@ -1034,18 +1036,19 @@ fun AIChatPanel(
     // 贴底滚动留白：首帧测量前用兜底值（约输入框 + 间距），实测悬浮层高度后改为动态值，
     // 横幅/面板/输入框任何形态下最后一条消息都停在悬浮层上方不被遮挡。
     //
-    // 直接跟随实测高度，**不做「只增不减」**：底栏能展开也能收起，留白只涨不降的话，
-    // 用户展开过一次面板，收起来后最后一条消息下方就永久留一大块空白。
-    // 当初担心「留白变小会把内容往上拽」，但那个跳动的真正来源是列表 item 内的
-    // expandVertically 高度动画（已改为 alpha 淡入淡出），与 contentPadding 无关。
+    // 不采用「只增不减」：那会让面板收起后永久留下大块空白。实测值仍可增减，但只在列表贴底、
+    // 没有用户滚动时提交；浏览历史期间冻结安全区，避免 contentPadding 重测抢走滚动锚点。
     val inputBarBottomReserveDp = 156.dp
     var floatingLayerHeightPx by remember { mutableStateOf(0) }
     // 输入框自身高度：授权面板的定位锚点（面板要紧贴输入框上沿，而不是屏幕底边）。
     var inputBarHeightPx by remember { mutableStateOf(0) }
-    val inputBarReservePx = with(LocalDensity.current) {
+    val measuredInputBarReservePx = with(LocalDensity.current) {
         (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
         else inputBarBottomReserveDp.toPx()).toInt()
     }
+    // 列表安全区不能在用户滑动时跟着悬浮面板逐帧变化：contentPadding 一变，LazyColumn 会重测并
+    // 修正滚动锚点，表现就是「滑着滑着跳一下」。浏览历史时冻结旧值，回到底部后再提交最新实测值。
+    var inputBarReservePx by remember { mutableStateOf(measuredInputBarReservePx) }
     val markdownCache = remember { MarkdownRenderCache() }
     // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
     // key = 分组 key（`toolgroup:<组内首条消息 id>`）或单条消息 id。
@@ -1603,6 +1606,29 @@ fun AIChatPanel(
                 nestedFling = false
                 return Velocity.Zero
             }
+        }
+    }
+
+    // 只在列表正在贴底、且没有手指/惯性滚动时提交最新悬浮层高度。面板在浏览历史期间展开或
+    // 收起只更新 measuredInputBarReservePx，不触碰 LazyColumn 的 contentPadding；用户回底后一次对齐。
+    LaunchedEffect(
+        measuredInputBarReservePx,
+        followBottom,
+        userScrollGesture,
+        pointerDown,
+        nestedFling,
+        listState.isScrollInProgress
+    ) {
+        if (
+            shouldCommitInputBarReserve(
+                followBottom = followBottom,
+                userScrollGesture = userScrollGesture,
+                pointerDown = pointerDown,
+                nestedFling = nestedFling,
+                scrollInProgress = listState.isScrollInProgress
+            )
+        ) {
+            inputBarReservePx = measuredInputBarReservePx
         }
     }
 
@@ -2219,8 +2245,8 @@ fun AIChatPanel(
                 modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
                 // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
                 // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
-                enter = fadeIn(tween(180)),
-                exit = fadeOut(tween(140))
+                enter = smoothFadeEnter(),
+                exit = smoothFadeExit()
             ) {
                 lastUploadingCount?.let { UploadingBanner(count = it, onCancel = { cancelUpload() }) }
             }
@@ -2238,8 +2264,8 @@ fun AIChatPanel(
                     .graphicsLayer { alpha = floatingPanelAlpha },
                 // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
                 // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
-                enter = fadeIn(tween(180)),
-                exit = fadeOut(tween(140))
+                enter = smoothFadeEnter(),
+                exit = smoothFadeExit()
             ) {
                 questionForPanel?.let { question ->
                     // 收起≠取消：pendingQuestion 与 AskUserQuestionManager 的挂起流程不受影响，
@@ -2266,8 +2292,8 @@ fun AIChatPanel(
                 modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
                 // 只做绘制期动画：尺寸第 0 帧就到位，展开时空间先让出（内容不会被盖），
                 // 收起时面板退场完才收尺寸（不留空白），中间不再逐帧晃列表。
-                enter = fadeIn(tween(180)),
-                exit = fadeOut(tween(140))
+                enter = smoothFadeEnter(),
+                exit = smoothFadeExit()
             ) {
                 planForPanel?.let { state ->
                     val planApprovalSessionTitle by viewModel.pendingPlanApprovalSessionTitle

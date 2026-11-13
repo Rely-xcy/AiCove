@@ -1,11 +1,6 @@
 package com.aicove.feature.agent.presentation.component
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
@@ -71,6 +66,8 @@ import com.aicove.core.ui.THUMBNAIL_MAX_EDGE
 import com.aicove.core.ui.decodeSampledBitmap
 import com.aicove.feature.agent.presentation.QueuedRequest
 import com.aicove.core.ui.ExpandableChevronIcon
+import com.aicove.core.ui.smoothPanelEnter
+import com.aicove.core.ui.smoothPanelExit
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Camera
 import compose.icons.feathericons.ChevronDown
@@ -162,8 +159,8 @@ internal fun QueuedRequestPanel(
             }
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 160.dp),

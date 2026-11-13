@@ -1,11 +1,6 @@
 package com.aicove.feature.agent.presentation.component
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,6 +50,8 @@ import androidx.compose.ui.res.stringResource
 import com.aicove.R
 import com.aicove.core.ui.AppTextField
 import com.aicove.core.ui.ExpandableChevronIcon
+import com.aicove.core.ui.smoothPanelEnter
+import com.aicove.core.ui.smoothPanelExit
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronUp
@@ -147,8 +144,8 @@ fun AskUserQuestionPanel(
 
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 Column(
                     modifier = Modifier

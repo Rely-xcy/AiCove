@@ -7,11 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +51,10 @@ import com.aicove.core.ui.adaptive.AdaptiveCardView
 import com.aicove.core.ui.adaptive.AdaptiveCardAction
 import com.aicove.feature.settings.domain.model.ProviderDashboardState
 import com.aicove.core.ui.ExpandableChevronIcon
+import com.aicove.core.ui.smoothFadeEnter
+import com.aicove.core.ui.smoothFadeExit
+import com.aicove.core.ui.smoothPanelEnter
+import com.aicove.core.ui.smoothPanelExit
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.AlertCircle
 import compose.icons.feathericons.ChevronDown
@@ -221,8 +220,8 @@ fun ProviderDashboardBar(
                         AnimatedVisibility(
                             visible = !effectiveExpanded,
                             modifier = Modifier.weight(1f),
-                            enter = fadeIn(tween(180)),
-                            exit = fadeOut(tween(120))
+                            enter = smoothFadeEnter(),
+                            exit = smoothFadeExit()
                         ) {
                             AdaptiveCardView(
                                 card = card,
@@ -253,8 +252,8 @@ fun ProviderDashboardBar(
                     // ── 展开状态内容（平滑自上而下展开、自下而上收起） ──
                     AnimatedVisibility(
                         visible = effectiveExpanded,
-                        enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                        exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                        enter = smoothPanelEnter(),
+                        exit = smoothPanelExit()
                     ) {
                         Column(
                             modifier = Modifier

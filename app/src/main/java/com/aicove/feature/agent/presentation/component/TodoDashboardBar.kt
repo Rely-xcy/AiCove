@@ -1,11 +1,6 @@
 package com.aicove.feature.agent.presentation.component
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +40,8 @@ import com.aicove.core.theme.Spacing
 import com.aicove.feature.agent.domain.model.TodoItem
 import com.aicove.feature.agent.domain.model.TodoStatus
 import com.aicove.core.ui.ExpandableChevronIcon
+import com.aicove.core.ui.smoothPanelEnter
+import com.aicove.core.ui.smoothPanelExit
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.CheckSquare
 import compose.icons.feathericons.ChevronDown
@@ -180,8 +177,8 @@ fun TodoDashboardBar(
             // 展开时展示待办列表（平滑淡入展开、向上卷折淡出）
             AnimatedVisibility(
                 visible = effectiveExpanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                enter = smoothPanelEnter(),
+                exit = smoothPanelExit()
             ) {
                 Column {
                     Spacer(Modifier.height(Spacing.xs))

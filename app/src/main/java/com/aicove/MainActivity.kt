@@ -1277,31 +1277,52 @@ private val OPAQUE_URL_SCHEME = Regex(
 
 private val TRAILING_LINE = Regex("^(.*):(\\d+)$")
 
-/** 在屏幕右半部分向左滑打开插件工具抽屉，避开系统最右侧返回手势热区。 */
+/** 从右侧内缘明确左滑才打开插件工具抽屉；普通纵向滚动和系统返回边缘均不抢。 */
 private fun Modifier.openRightDrawerOnSwipe(
     enabled: Boolean,
     onOpen: () -> Unit
 ): Modifier = if (!enabled) this else pointerInput(Unit) {
-    val threshold = 56.dp.toPx()
+    val openThreshold = 88.dp.toPx()
+    val verticalAbortThreshold = 48.dp.toPx()
+    val rightwardAbortThreshold = 24.dp.toPx()
+    val systemEdgeExclusion = 20.dp.toPx()
+    val activationWidth = minOf(112.dp.toPx(), size.width * 0.28f)
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
-        if (down.position.x < size.width * 0.5f) return@awaitEachGesture
+        if (!isRightDrawerGestureStart(down.position.x, size.width.toFloat(), activationWidth, systemEdgeExclusion)) {
+            return@awaitEachGesture
+        }
         var horizontal = 0f
         var vertical = 0f
         while (true) {
             val event = awaitPointerEvent()
             val change = event.changes.firstOrNull { it.id == down.id } ?: break
-            if (change.changedToUpIgnoreConsumed()) break
+            if (change.changedToUpIgnoreConsumed() || change.isConsumed) break
             val delta = change.position - change.previousPosition
             horizontal += delta.x
             vertical += delta.y
-            if (horizontal <= -threshold && abs(horizontal) > abs(vertical) * 1.5f) {
+            if (horizontal >= rightwardAbortThreshold) break
+            if (abs(vertical) >= verticalAbortThreshold && abs(vertical) > abs(horizontal)) break
+            if (shouldOpenRightDrawerGesture(horizontal, vertical, openThreshold)) {
                 onOpen()
                 break
             }
         }
     }
 }
+
+internal fun isRightDrawerGestureStart(
+    downX: Float,
+    width: Float,
+    activationWidth: Float,
+    systemEdgeExclusion: Float
+): Boolean = downX in (width - activationWidth)..(width - systemEdgeExclusion)
+
+internal fun shouldOpenRightDrawerGesture(
+    horizontal: Float,
+    vertical: Float,
+    threshold: Float
+): Boolean = horizontal <= -threshold && abs(horizontal) > abs(vertical) * 2f
 
 /** 文件树里点击即在内置查看器预览的图片格式（与 sendFile 的图片判定一致）。 */
 private val PREVIEWABLE_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")

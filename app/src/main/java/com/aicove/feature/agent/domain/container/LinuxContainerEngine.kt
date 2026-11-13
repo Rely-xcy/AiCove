@@ -92,6 +92,9 @@ class LinuxContainerEngine @Inject constructor(
      */
     private val initScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 已在本进程输出过快路径诊断的 profile；每次开终端不再重复抄 provision.log 尾部。 */
+    private val fastDiagnosticsLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /** 当前在途的初始化 job（受 [initMutex] 保护），完成后置 null。 */
     private var initJob: Job? = null
 
@@ -521,11 +524,13 @@ class LinuxContainerEngine @Inject constructor(
     override suspend fun ensureInstalled() {
         val profile = currentProfile
         val startedAt = System.currentTimeMillis()
-        FileLogger.i(
-            TAG,
-            "ensureInstalled 开始：profile=${profile.id}(${profile.name}) mode=${profile.mode} " +
-                "已安装=${containerInstaller.isInstalledFor(profile)}"
-        )
+        val installedAtEntry = containerInstaller.isInstalledFor(profile)
+        if (!installedAtEntry) {
+            FileLogger.i(
+                TAG,
+                "ensureInstalled 开始：profile=${profile.id}(${profile.name}) mode=${profile.mode} 已安装=false"
+            )
+        }
         // 每次进入终端页前确保提取最新的内置文档
         containerInstaller.extractDocs()
         if (containerInstaller.isInstalledFor(profile)) {
@@ -534,8 +539,9 @@ class LinuxContainerEngine @Inject constructor(
             _initProgress.value = ContainerInitState.Ready
             refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
-            FileLogger.i(TAG, "ensureInstalled 完成（快路径，耗时 ${System.currentTimeMillis() - startedAt}ms）")
-            logContainerDiagnostics("ensureInstalled 快路径")
+            if (fastDiagnosticsLogged.add(profile.id)) {
+                logContainerDiagnostics("ensureInstalled 快路径（本进程首次）")
+            }
             return
         }
         // 启动或复用后台初始化 job；initMutex 只保护 job 的创建/复用，真正的耗时工作在 initScope 里跑。

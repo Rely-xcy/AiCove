@@ -15,6 +15,19 @@ PROVISION_VERSION="provision-script-v9"
 PROVISION_SKIPPED="provision-script-skipped"
 MARKER="/.provisioned"
 
+# ── 无日志快路径：交互终端每次启动都会调用本脚本。已完成/已跳过时只需修补宿主补充组，
+# 不加载安装库、不探测包管理器，也不再向 provision.log 追加「启动/跳过」两行。
+# `aicode --env` 必须绕过这条快路径，用户随时都能重新打开环境安装菜单。──
+sed -i '/^gid_/d' /etc/group 2>/dev/null
+for g in $(id -G 2>/dev/null); do
+    grep -q ":x:$g:" /etc/group 2>/dev/null || echo "gid_$g:x:$g:" >> /etc/group 2>/dev/null
+done
+if [ "$1" != "--env" ] && [ -f "$MARKER" ]; then
+    state=$(cat "$MARKER" 2>/dev/null)
+    [ "$state" = "$PROVISION_VERSION" ] && exit 0
+    [ "$state" = "$PROVISION_SKIPPED" ] && exit 0
+fi
+
 # ── 载入公共库（包名映射/换源/场景等）。按脚本自身所在目录定位：生产脚本在 /root/.aicode/provision.sh、
 # 库在 /root/.aicode/lib/；工作区草稿副本（aicode-env/）结构相同，故同一份脚本两处都能跑。
 # 缺失时不阻塞：提示重启 App 重新提取后重进终端。──
@@ -131,23 +144,6 @@ fi
 
 # ══ 入口 1：首次进入终端的初始化流程 ══
 plog "provision.sh 启动：version=$PROVISION_VERSION HOME=$HOME uid=$(id -u 2>/dev/null) PATH=$PATH"
-
-# ── 宿主 supplementary gid 修复：proot 会把宿主进程的补充组（Android AID 3003 inet、
-# 9997 everybody、App 自身 uid 派生 gid 等）透传进容器，/etc/group 查不到名字会让
-# groups 等命令报警（cannot find name for group ID xxx）。幂等补行：gid_ 命名空间先清再补
-# 防历史残留；位于 MARKER 检查之前，每次进终端都执行（已配置设备同样生效），gid 变化自动跟上。
-# 全部静默失败，不阻塞进入 shell。
-sed -i '/^gid_/d' /etc/group 2>/dev/null
-for g in $(id -G 2>/dev/null); do
-    grep -q ":x:$g:" /etc/group 2>/dev/null || echo "gid_$g:x:$g:" >> /etc/group 2>/dev/null
-done
-
-# 已按当前版本完成或用户选择手动安装（跳过）则直接退出
-if [ -f "$MARKER" ]; then
-    state=$(cat "$MARKER" 2>/dev/null)
-    if [ "$state" = "$PROVISION_VERSION" ]; then plog "标记已是 $PROVISION_VERSION，跳过菜单"; exit 0; fi
-    if [ "$state" = "$PROVISION_SKIPPED" ]; then plog "用户曾选择手动安装，跳过菜单"; exit 0; fi
-fi
 
 plog "显示初始化菜单：PMGR=${PMGR:-未识别}"
 

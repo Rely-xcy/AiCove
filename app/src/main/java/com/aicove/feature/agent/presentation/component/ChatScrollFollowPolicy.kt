@@ -24,6 +24,18 @@ internal fun shouldCalibrateToAnchor(
 ): Boolean = followBottom && !userScrollGesture && !pointerDown && canScrollForward
 
 /**
+ * 悬浮输入层实测高度能否提交给 LazyColumn 的底部安全区。
+ * 用户浏览历史或任何滚动仍在进行时必须冻结；否则 contentPadding 重测会修正锚点并造成跳动。
+ */
+internal fun shouldCommitInputBarReserve(
+    followBottom: Boolean,
+    userScrollGesture: Boolean,
+    pointerDown: Boolean,
+    nestedFling: Boolean,
+    scrollInProgress: Boolean
+): Boolean = followBottom && !userScrollGesture && !pointerDown && !nestedFling && !scrollInProgress
+
+/**
  * 是否真的停在底部：最后一项的底部必须落在安全区上下界内。
  *
  * 只卡上界（`bottom <= safeBottom + tolerance`）会把「最后一项还在屏幕上」误判成在底部：
