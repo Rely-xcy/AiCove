@@ -30,7 +30,7 @@
     <string name="settings_subagent_tier_unconfigured">Not configured</string>
     <!-- Subagent dispatch card -->
     <string name="subagent_dispatch_title">Subagent Tasks</string>
-    <string name="subagent_dispatch_count">%1$d tasks dispatched</string>
+    <string name="subagent_dispatch_count">%1$d tasks</string>
     <string name="subagent_card_default_agent">Subagent</string>
     <string name="subagent_card_status_dispatched">Dispatched</string>
     <string name="subagent_card_status_running">Running</string>

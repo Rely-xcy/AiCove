@@ -74,6 +74,30 @@ class ChatScrollFollowPolicyTest {
     }
 
     @Test
+    fun `离开底部时收工的那一轮保持展开`() {
+        assertTrue(
+            "用户正在翻历史，此时把跑到一半的那一轮收起来会一次性删掉几十个 item",
+            shouldHoldTurnExpanded(
+                previousActiveTurnKey = "turn:u1",
+                activeTurnKey = null,
+                followBottom = false
+            )
+        )
+        assertFalse(
+            "人在底部收工则照常收起，校准循环会把视口带到新锚点",
+            shouldHoldTurnExpanded("turn:u1", null, followBottom = true)
+        )
+        assertFalse(
+            "已经收起的旧轮不能因为用户往上滑就重新展开——同样是结构突变",
+            shouldHoldTurnExpanded(previousActiveTurnKey = null, activeTurnKey = null, followBottom = false)
+        )
+        assertFalse(
+            "轮次仍在跑，本来就展开，不需要额外挂住",
+            shouldHoldTurnExpanded("turn:u1", "turn:u1", followBottom = false)
+        )
+    }
+
+    @Test
     fun `不跟随、手势中、已到底这三种情况都不校准`() {
         assertFalse(
             shouldCalibrateToAnchor(

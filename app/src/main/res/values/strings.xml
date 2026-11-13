@@ -30,7 +30,7 @@
     <string name="settings_subagent_tier_unconfigured">未配置</string>
     <!-- 子代理派发卡片 -->
     <string name="subagent_dispatch_title">子代理任务</string>
-    <string name="subagent_dispatch_count">已派发 %1$d 个任务</string>
+    <string name="subagent_dispatch_count">%1$d 个任务</string>
     <string name="subagent_card_default_agent">子代理</string>
     <string name="subagent_card_status_dispatched">已派发</string>
     <string name="subagent_card_status_running">运行中</string>

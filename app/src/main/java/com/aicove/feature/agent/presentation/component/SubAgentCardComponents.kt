@@ -6,9 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -27,10 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aicove.R
 import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
@@ -184,11 +187,11 @@ internal fun parseSubAgentDispatch(argsJson: String?, content: String?): ParsedS
 }
 
 /**
- * 子代理派发卡片（结构对标网络搜索结果卡片）：
+ * 子代理派发卡片：一张卡承载全部子任务，任务之间用细分割线分开。
  *
- * 顶部概览 Summary 展示图标、标题、数量统计与「已派发」状态药丸；
- * 下方平铺各子代理任务卡片项（01, 02...），仅展示发出时的状态（代理名称、模型/档位、指令描述与告警），
- * 点击任意子任务项直接进入对应子会话。
+ * 每条任务：状态色点 + 代理名 + 状态文字，下面是任务描述；已结束时用左侧竖线
+ * 引出结果摘要，再跟一行档位/改动文件数。点击任务行进入对应子会话。
+ * 单项派发不重复渲染标题行。
  */
 @Composable
 internal fun SubAgentDispatchCard(dispatch: ParsedSubAgentDispatch) {
@@ -198,189 +201,186 @@ internal fun SubAgentDispatchCard(dispatch: ParsedSubAgentDispatch) {
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
-        // 1. 顶部 Summary（参考 WebSearchSummary）
-        SubAgentDispatchSummary(count = items.size)
-
-        // 2. 全局警告（如有）
         dispatch.globalWarning?.takeIf { items.size > 1 }?.let { warning ->
             SubAgentWarningBanner(warning)
         }
 
-        // 3. 任务卡片列表（参考 WebSearchResultItem）
-        items.forEachIndexed { index, item ->
-            SubAgentDispatchItemCard(
-                index = index + 1,
-                item = item,
-                liveState = item.subSessionId?.let { host?.states?.get(it) },
-                onOpen = { sessionId -> host?.onOpen?.invoke(sessionId) }
-            )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(Radius.mdLarge),
+            color = MaterialTheme.semanticColors.cardSurface,
+            border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder)
+        ) {
+            Column {
+                if (items.size > 1) {
+                    SubAgentDispatchSummary(count = items.size)
+                }
+                items.forEachIndexed { index, item ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = Spacing.md),
+                            thickness = 1.dp,
+                            color = MaterialTheme.semanticColors.subtleBorder.copy(alpha = 0.7f)
+                        )
+                    }
+                    SubAgentDispatchItem(
+                        item = item,
+                        liveState = item.subSessionId?.let { host?.states?.get(it) },
+                        onOpen = { sessionId -> host?.onOpen?.invoke(sessionId) }
+                    )
+                }
+            }
         }
     }
 }
 
-/** 顶部 Summary：图标 + 标题 + 数量统计 + 派发状态。 */
+/** 批量派发的标题行：小图标 + 标题 + 尾部任务数，不再占用一整块药丸。 */
 @Composable
 private fun SubAgentDispatchSummary(count: Int) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.md, end = Spacing.md, top = Spacing.sm, bottom = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(Radius.sm))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = FeatherIcons.Cpu,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(17.dp)
-            )
-        }
-        Spacer(Modifier.width(Spacing.sm))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.subagent_dispatch_title),
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = stringResource(R.string.subagent_dispatch_count, count),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        SubAgentDispatchedChip()
+        Icon(
+            imageVector = FeatherIcons.Cpu,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(13.dp)
+        )
+        Spacer(Modifier.width(Spacing.xs + 2.dp))
+        Text(
+            text = stringResource(R.string.subagent_dispatch_title),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = stringResource(R.string.subagent_dispatch_count, count),
+            color = MaterialTheme.semanticColors.subtleText,
+            style = MaterialTheme.typography.labelSmall
+        )
     }
 }
 
 /**
- * 单个子代理任务卡片项：序号（01, 02...）+ 身份/模型 + 描述 + 跳转箭头。
+ * 单条子代理任务。
  *
  * [liveState] 来自 ViewModel 的实时状态（按子会话 id 索引）：本进程内派发的子代理会随
- * 生命周期刷新状态药丸并展示结果摘要；为 null（历史消息回放、进程重启后）时退回静态
- * 「已派发」展示，不会渲染假的「运行中」。
+ * 生命周期刷新状态，并展示结果摘要；为 null（历史消息回放、进程重启后）时只显示「已派发」，
+ * 不会渲染假的「运行中」。
  */
 @Composable
-private fun SubAgentDispatchItemCard(
-    index: Int,
+private fun SubAgentDispatchItem(
     item: ParsedSubAgentDispatchItem,
     liveState: SubAgentCardState?,
     onOpen: (String) -> Unit
 ) {
-    val hasSession = item.subSessionId != null
+    val sessionId = item.subSessionId
+    val statusColor = subAgentStatusColor(liveState?.status)
+    val meta = listOfNotNull(
+        modelBadge(item.tier, item.model),
+        liveState?.changedFiles?.takeIf { it.isNotEmpty() }
+            ?.let { files -> stringResource(R.string.subagent_card_changed_files, files.size) },
+    )
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.sm),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (sessionId != null) {
+                    Modifier.clickable { onOpen(sessionId) }
+                } else Modifier
+            )
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .then(
-                    if (hasSession) {
-                        Modifier.clickable { onOpen(item.subSessionId!!) }
-                    } else Modifier
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(statusColor)
+            )
+            Spacer(Modifier.width(Spacing.xs + 2.dp))
+            Text(
+                text = item.agentName ?: stringResource(R.string.subagent_card_default_agent),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                text = subAgentStatusLabel(liveState?.status),
+                color = statusColor,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium
+            )
+            if (sessionId != null) {
+                Spacer(Modifier.width(Spacing.xs / 2))
+                Icon(
+                    imageVector = FeatherIcons.ChevronRight,
+                    contentDescription = stringResource(R.string.subagent_card_open),
+                    tint = MaterialTheme.semanticColors.subtleText.copy(alpha = 0.7f),
+                    modifier = Modifier.size(13.dp)
                 )
-                .padding(Spacing.sm),
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
-                // 序号：01, 02...（对标网络搜索）
-                Text(
-                    text = index.toString().padStart(2, '0'),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                    fontWeight = FontWeight.SemiBold
+            }
+        }
+
+        if (item.description.isNotBlank()) {
+            Text(
+                text = item.description,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // 结果与「任务描述」分开：左侧细竖线表示这是产出，不是又一条指令。
+        liveState?.excerpt?.takeIf { it.isNotBlank() }?.let { excerpt ->
+            Row(
+                modifier = Modifier
+                    .height(IntrinsicSize.Min)
+                    .padding(top = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(statusColor.copy(alpha = 0.45f))
                 )
                 Spacer(Modifier.width(Spacing.sm))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = item.agentName ?: stringResource(R.string.subagent_card_default_agent),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        modelBadge(item.tier, item.model)?.let { badge ->
-                            Spacer(Modifier.width(Spacing.xs))
-                            Surface(
-                                shape = RoundedCornerShape(Radius.xs),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            ) {
-                                Text(
-                                    text = badge,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        SubAgentStatusChip(liveState?.status)
-                        if (hasSession) {
-                            Spacer(Modifier.width(Spacing.xs))
-                            Icon(
-                                imageVector = FeatherIcons.ChevronRight,
-                                contentDescription = stringResource(R.string.subagent_card_open),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    if (item.description.isNotBlank()) {
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = item.description,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // 完成后的结果摘要（与完成通知同一份）：多数场景无需再进子会话即可看到结论
-                    liveState?.excerpt?.takeIf { it.isNotBlank() }?.let { excerpt ->
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = excerpt,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    liveState?.changedFiles?.takeIf { it.isNotEmpty() }?.let { files ->
-                        Text(
-                            text = stringResource(R.string.subagent_card_changed_files, files.size),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    item.warning?.let { warning ->
-                        Spacer(Modifier.height(Spacing.xs / 2))
-                        SubAgentWarningBanner(warning)
-                    }
-                }
+                Text(
+                    text = excerpt,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
+        }
+
+        if (meta.isNotEmpty()) {
+            Text(
+                text = meta.joinToString(" · "),
+                color = MaterialTheme.semanticColors.subtleText,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        item.warning?.let { warning ->
+            SubAgentWarningBanner(warning)
         }
     }
 }
@@ -398,70 +398,27 @@ private fun SubAgentWarningBanner(warning: String) {
     )
 }
 
-/** 发出时的状态药丸：指示子代理任务已成功派发。 */
+/** 状态色：运行中走品牌色，完成走语义成功色，失败走错误色，其余收敛为次级文字色。 */
 @Composable
-private fun SubAgentDispatchedChip() {
-    SubAgentStatusPill(
-        label = stringResource(R.string.subagent_card_status_dispatched),
-        color = MaterialTheme.colorScheme.primary
-    )
+private fun subAgentStatusColor(status: SubAgentCardStatus?): Color = when (status) {
+    null -> MaterialTheme.semanticColors.subtleText
+    SubAgentCardStatus.RUNNING -> MaterialTheme.colorScheme.primary
+    SubAgentCardStatus.COMPLETED -> MaterialTheme.semanticColors.success
+    SubAgentCardStatus.FAILED -> MaterialTheme.colorScheme.error
+    SubAgentCardStatus.STOPPED -> MaterialTheme.semanticColors.subtleText
 }
 
 /**
- * 单项实时状态药丸：随子代理生命周期刷新（运行中/已完成/失败/已停止）。
- * [status] 为 null——历史消息回放、进程重启后拿不到实时状态——退回静态「已派发」，
- * 不渲染可能失真的「运行中」。
+ * 状态文字。[status] 为 null——历史消息回放、进程重启后拿不到实时状态——
+ * 退回静态「已派发」，不渲染可能失真的「运行中」。
  */
 @Composable
-private fun SubAgentStatusChip(status: SubAgentCardStatus?) {
-    when (status) {
-        null -> SubAgentDispatchedChip()
-        SubAgentCardStatus.RUNNING -> SubAgentStatusPill(
-            label = stringResource(R.string.subagent_card_status_running),
-            color = MaterialTheme.colorScheme.primary
-        )
-        SubAgentCardStatus.COMPLETED -> SubAgentStatusPill(
-            label = stringResource(R.string.subagent_card_status_completed),
-            color = MaterialTheme.semanticColors.success
-        )
-        SubAgentCardStatus.FAILED -> SubAgentStatusPill(
-            label = stringResource(R.string.subagent_card_status_failed),
-            color = MaterialTheme.colorScheme.error
-        )
-        SubAgentCardStatus.STOPPED -> SubAgentStatusPill(
-            label = stringResource(R.string.subagent_card_status_stopped),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-/** 状态药丸通用形制：色点 + 文本，[color] 决定整体色调。 */
-@Composable
-private fun SubAgentStatusPill(label: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(Radius.pill),
-        color = color.copy(alpha = 0.08f),
-        border = BorderStroke(0.5.dp, color.copy(alpha = 0.25f))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(5.dp)
-                    .clip(CircleShape)
-                    .background(color)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = color,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
+private fun subAgentStatusLabel(status: SubAgentCardStatus?): String = when (status) {
+    null -> stringResource(R.string.subagent_card_status_dispatched)
+    SubAgentCardStatus.RUNNING -> stringResource(R.string.subagent_card_status_running)
+    SubAgentCardStatus.COMPLETED -> stringResource(R.string.subagent_card_status_completed)
+    SubAgentCardStatus.FAILED -> stringResource(R.string.subagent_card_status_failed)
+    SubAgentCardStatus.STOPPED -> stringResource(R.string.subagent_card_status_stopped)
 }
 
 /** 档位 + 模型：档位是「轻量/均衡/强力」，模型是实际落地的 model id；inherit 时不显示模型。 */

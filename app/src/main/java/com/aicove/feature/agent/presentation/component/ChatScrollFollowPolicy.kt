@@ -36,6 +36,23 @@ internal fun shouldCommitInputBarReserve(
 ): Boolean = followBottom && !userScrollGesture && !pointerDown && !nestedFling && !scrollInProgress
 
 /**
+ * 刚跑完的那一轮要不要强行保持展开。
+ *
+ * 运行中的轮默认展开，收工的瞬间 `expanded` 会从 true 翻成 false：这一轮的全部过程项
+ * 都是顶层 LazyColumn item，一次性消失几十个。LazyColumn 只能按索引保位，正在看这一轮
+ * 的用户会看到视口整体跳走。所以只在「收工那一刻用户已经离开底部」时挂住展开态；
+ * 在底部收工则照常收起（校准循环会把视口带到新锚点）。
+ *
+ * 必须看「上一帧的 activeTurnKey」而不是「当前是否在底部」：只看后者的话，用户事后
+ * 往上滑历史会让已经收起的轮重新展开，同样是一次结构突变。
+ */
+internal fun shouldHoldTurnExpanded(
+    previousActiveTurnKey: String?,
+    activeTurnKey: String?,
+    followBottom: Boolean
+): Boolean = previousActiveTurnKey != null && activeTurnKey == null && !followBottom
+
+/**
  * 是否真的停在底部：最后一项的底部必须落在安全区上下界内。
  *
  * 只卡上界（`bottom <= safeBottom + tolerance`）会把「最后一项还在屏幕上」误判成在底部：

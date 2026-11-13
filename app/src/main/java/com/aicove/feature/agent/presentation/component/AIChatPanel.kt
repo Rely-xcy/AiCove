@@ -1023,6 +1023,9 @@ fun AIChatPanel(
         if (kept.size != pendingUserMessages.size) pendingUserMessages = kept
     }
     val listState = rememberLazyListState()
+    // 贴底跟随开关。声明在这里（而不是滚动逻辑旁边）是因为列表结构构建也要读它：
+    // 用户离开底部时不能把正在看的那一轮收起来，否则 item 骤减会让视口跳走。
+    var followBottom by rememberSaveable { mutableStateOf(true) }
     // 消息未就绪时的加载提示：本地读库通常几十毫秒，立刻显示反而闪一下，等一小会儿还没就绪才提示。
     var showMessagesLoading by remember(currentSessionId) { mutableStateOf(false) }
     LaunchedEffect(currentSessionId, messagesReady) {
@@ -1106,15 +1109,36 @@ fun AIChatPanel(
                 ?.let { message -> stableTurnKeys[message.id] ?: turnKeyOf(message.id) }
         }
     }
+    // 运行中的那一轮默认展开，收工后默认收起——收起会一次性移除几十个顶层 item。
+    // 用户正翻历史时这么干，LazyColumn 只能按索引保位，视口就跟着跳走；因此离开底部期间
+    // 把刚跑完的那一轮按「手动展开」挂住，回到底部再恢复默认收起。
+    // 对比上一帧的 activeTurnKey 才能只挂「收工时就不在底部」的那一轮：否则用户事后
+    // 往上滑历史，已收起的好几轮会被重新展开。
+    var heldExpandedTurnKey by remember(currentSessionId) { mutableStateOf<String?>(null) }
+    val previousActiveTurnKey = remember(currentSessionId) { mutableStateOf<String?>(null) }
+    val previousActive = previousActiveTurnKey.value
+    if (previousActive != activeTurnKey) {
+        if (shouldHoldTurnExpanded(previousActive, activeTurnKey, followBottom)) {
+            heldExpandedTurnKey = previousActive
+        }
+        previousActiveTurnKey.value = activeTurnKey
+    }
+    if (followBottom && heldExpandedTurnKey != null) heldExpandedTurnKey = null
+    val turnOverridesForBuild = remember(heldExpandedTurnKey, turnOverrideSnapshot) {
+        heldExpandedTurnKey
+            ?.takeIf { !turnOverrideSnapshot.containsKey(it) }
+            ?.let { turnOverrideSnapshot + (it to true) }
+            ?: turnOverrideSnapshot
+    }
     // 长会话里重建整张列表要遍历全部消息（拆轮、分组、拆块），在主线程上做会卡住每次落库与补载历史。
     // 超过阈值后改在后台算，算完前继续显示上一版（LazyColumn 与它的条数一直自洽）；
     // 切换会话后的首版仍同步算，避免短暂显示上一个会话的内容。
-    val chatItemsKey = remember(messages, toolGroupOverrideSnapshot, turnOverrideSnapshot, activeTurnKey, currentSessionId, stableTurnKeys) { Any() }
+    val chatItemsKey = remember(messages, toolGroupOverrideSnapshot, turnOverridesForBuild, activeTurnKey, currentSessionId, stableTurnKeys) { Any() }
     val buildItems = {
         flattenChatProcesses(buildChatItems(
             messages = messages,
             groupOverrides = toolGroupOverrideSnapshot,
-            turnOverrides = turnOverrideSnapshot,
+            turnOverrides = turnOverridesForBuild,
             activeTurnKey = activeTurnKey,
             sessionId = currentSessionId,
             turnKeys = stableTurnKeys,
@@ -1561,7 +1585,6 @@ fun AIChatPanel(
     // 被 dispose。用普通 remember 的话返回时 positionedSession 归 null（当成换了会话重新贴底）、
     // followBottom 归 true（校准循环把恢复出的位置拉回底部），浏览历史的位置就丢了。
     var positionedSession by rememberSaveable { mutableStateOf<String?>(null) }
-    var followBottom by rememberSaveable { mutableStateOf(true) }
     var userScrollGesture by remember { mutableStateOf(false) }
     var pointerDown by remember { mutableStateOf(false) }
     var nestedFling by remember { mutableStateOf(false) }
