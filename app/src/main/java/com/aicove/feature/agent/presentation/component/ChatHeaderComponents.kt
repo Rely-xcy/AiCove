@@ -3,7 +3,6 @@ package com.aicove.feature.agent.presentation.component
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
@@ -169,11 +168,11 @@ internal fun ChatHeader(
                     val moreBtnInteraction = remember { MutableInteractionSource() }
                     val moreBtnPressed by moreBtnInteraction.collectIsPressedAsState()
                     val moreBtnScale by animateFloatAsState(
-                        targetValue = if (moreBtnPressed) 0.94f else 1f,
+                        targetValue = if (moreBtnPressed) 0.92f else 1f,
                         animationSpec = if (moreBtnPressed) {
-                            tween(durationMillis = 45, easing = FastOutLinearInEasing)
+                            tween(durationMillis = 70, easing = FastOutLinearInEasing)
                         } else {
-                            spring(dampingRatio = 0.72f, stiffness = 900f)
+                            spring(dampingRatio = 0.76f, stiffness = 520f)
                         },
                         label = "more-btn-scale"
                     )
@@ -206,23 +205,23 @@ internal fun ChatHeader(
                             var isEntering by remember { mutableStateOf(true) }
                             LaunchedEffect(Unit) { isEntering = false }
                             val shelfScale by animateFloatAsState(
-                                targetValue = if (isEntering) 0.95f else 1f,
-                                animationSpec = spring(dampingRatio = 0.7f, stiffness = 900f),
+                                targetValue = if (isEntering) 0.92f else 1f,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                                 label = "shelf-scale"
                             )
                             val shelfAlpha by animateFloatAsState(
                                 targetValue = if (isEntering) 0f else 1f,
-                                animationSpec = tween(durationMillis = 65, easing = LinearOutSlowInEasing),
+                                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
                                 label = "shelf-alpha"
                             )
                             val shelfOffsetX by animateDpAsState(
-                                targetValue = if (isEntering) 4.dp else 0.dp,
-                                animationSpec = spring(dampingRatio = 0.72f, stiffness = 1_000f),
+                                targetValue = if (isEntering) (-4).dp else 0.dp,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                                 label = "shelf-offset-x"
                             )
                             val shelfOffsetY by animateDpAsState(
-                                targetValue = if (isEntering) (-4).dp else 0.dp,
-                                animationSpec = spring(dampingRatio = 0.72f, stiffness = 1_000f),
+                                targetValue = if (isEntering) 6.dp else 0.dp,
+                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                                 label = "shelf-offset-y"
                             )
                             Surface(
@@ -244,19 +243,11 @@ internal fun ChatHeader(
                                 tonalElevation = 0.dp
                             ) {
                                 Column(modifier = Modifier.width(168.dp).padding(vertical = 4.dp)) {
-                                    WorkbenchMenuItem(
-                                        icon = FeatherIcons.Plus,
-                                        label = stringResource(R.string.chat_new_session),
-                                        entryDelayMillis = 0
-                                    ) {
+                                    WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
                                         workbenchExpanded = false
                                         onNewChat()
                                     }
-                                    WorkbenchMenuItem(
-                                        icon = FeatherIcons.Folder,
-                                        label = stringResource(R.string.chat_switch_workspace),
-                                        entryDelayMillis = 16
-                                    ) {
+                                    WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
                                         workbenchExpanded = false
                                         onSwitchWorkspace()
                                     }
@@ -268,8 +259,7 @@ internal fun ChatHeader(
                                     WorkbenchMenuItem(
                                         icon = FeatherIcons.Terminal,
                                         label = stringResource(R.string.chat_open_terminal),
-                                        active = terminalActive,
-                                        entryDelayMillis = 32
+                                        active = terminalActive
                                     ) {
                                         workbenchExpanded = false
                                         onNavigateToTerminal()
@@ -277,8 +267,7 @@ internal fun ChatHeader(
                                     WorkbenchMenuItem(
                                         icon = FeatherIcons.GitBranch,
                                         label = stringResource(R.string.chat_open_git),
-                                        active = gitActive,
-                                        entryDelayMillis = 48
+                                        active = gitActive
                                     ) {
                                         workbenchExpanded = false
                                         onNavigateToGit()
@@ -315,37 +304,16 @@ private fun WorkbenchMenuItem(
     icon: ImageVector,
     label: String,
     active: Boolean = false,
-    entryDelayMillis: Int,
     onClick: () -> Unit
 ) {
-    var isEntering by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { isEntering = false }
-    val entryAlpha by animateFloatAsState(
-        targetValue = if (isEntering) 0f else 1f,
-        animationSpec = tween(
-            durationMillis = 70,
-            delayMillis = entryDelayMillis,
-            easing = LinearOutSlowInEasing
-        ),
-        label = "menu-item-entry-alpha"
-    )
-    val entryOffsetX by animateDpAsState(
-        targetValue = if (isEntering) 8.dp else 0.dp,
-        animationSpec = tween(
-            durationMillis = 90,
-            delayMillis = entryDelayMillis,
-            easing = FastOutSlowInEasing
-        ),
-        label = "menu-item-entry-offset"
-    )
     val interaction = remember { MutableInteractionSource() }
     val isPressed by interaction.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1f,
+        targetValue = if (isPressed) 0.97f else 1f,
         animationSpec = if (isPressed) {
-            tween(durationMillis = 45, easing = FastOutLinearInEasing)
+            tween(durationMillis = 70, easing = FastOutLinearInEasing)
         } else {
-            spring(dampingRatio = 0.72f, stiffness = 900f)
+            spring(dampingRatio = 0.8f, stiffness = 520f)
         },
         label = "menu-item-scale"
     )
@@ -355,7 +323,7 @@ private fun WorkbenchMenuItem(
         } else {
             Color.Transparent
         },
-        animationSpec = tween(durationMillis = 55, easing = LinearOutSlowInEasing),
+        animationSpec = tween(durationMillis = 100, easing = LinearOutSlowInEasing),
         label = "menu-item-background"
     )
     Row(
@@ -368,12 +336,7 @@ private fun WorkbenchMenuItem(
                 indication = null,
                 onClick = onClick
             )
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-                alpha = entryAlpha
-                translationX = entryOffsetX.toPx()
-            }
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
