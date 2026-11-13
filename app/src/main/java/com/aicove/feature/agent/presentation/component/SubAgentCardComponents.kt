@@ -277,23 +277,21 @@ private fun SubAgentDispatchItemCard(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.pill),
+        shape = RoundedCornerShape(Radius.sm),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
-            modifier = Modifier.then(
-                if (hasSession) {
-                    Modifier.clickable { onOpen(item.subSessionId!!) }
-                } else Modifier
-            )
+            modifier = Modifier
+                .then(
+                    if (hasSession) {
+                        Modifier.clickable { onOpen(item.subSessionId!!) }
+                    } else Modifier
+                )
+                .padding(Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.Top) {
                 // 序号：01, 02...（对标网络搜索）
                 Text(
                     text = index.toString().padStart(2, '0'),
@@ -343,6 +341,38 @@ private fun SubAgentDispatchItemCard(
                                 modifier = Modifier.size(16.dp)
                             )
                         }
+                    }
+
+                    if (item.description.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = item.description,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // 完成后的结果摘要（与完成通知同一份）：多数场景无需再进子会话即可看到结论
+                    liveState?.excerpt?.takeIf { it.isNotBlank() }?.let { excerpt ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = excerpt,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    liveState?.changedFiles?.takeIf { it.isNotEmpty() }?.let { files ->
+                        Text(
+                            text = stringResource(R.string.subagent_card_changed_files, files.size),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     item.warning?.let { warning ->
