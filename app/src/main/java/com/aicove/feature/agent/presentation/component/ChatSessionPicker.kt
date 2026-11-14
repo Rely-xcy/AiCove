@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,10 +76,7 @@ fun ChatSessionRow(
             // 否则行宽一整条的反馈是直角横带，与下方圆角卡片脱节。
             .clip(cardShape)
             .background(
-                when {
-                    pinned -> MaterialTheme.colorScheme.primaryContainer
-                    else -> MaterialTheme.semanticColors.cardSurface
-                }
+                if (pinned) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
             )
             .combinedClickable(
                 onClick = onClick,
