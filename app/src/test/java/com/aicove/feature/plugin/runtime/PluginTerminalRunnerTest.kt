@@ -70,7 +70,7 @@ class PluginTerminalRunnerTest {
         try {
             runner.poll("other.plugin", "term-1", 0)
         } catch (e: PluginTerminalException) {
-            rejected = e.code == "TAB_FORBIDDEN"
+            rejected = e.code == "TAB_NOT_OWNED"
         }
         assertTrue(rejected)
     }
