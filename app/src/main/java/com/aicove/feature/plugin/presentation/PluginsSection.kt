@@ -449,7 +449,7 @@ internal fun PluginDetailSection(
     dependencyState: PluginDependencyUiState? = null,
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
-    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    shizukuState: ShizukuState = ShizukuState.NOT_RUNNING,
     onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
@@ -567,7 +567,7 @@ private fun PluginNativeConfigContent(
     dependencyState: PluginDependencyUiState? = null,
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
-    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    shizukuState: ShizukuState = ShizukuState.NOT_RUNNING,
     onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
@@ -1022,7 +1022,6 @@ private fun PluginDeveloperSection(
 }
 
 private fun ShizukuState.statusLabelRes(): Int = when (this) {
-    ShizukuState.NOT_INSTALLED -> R.string.settings_shizuku_status_not_installed
     ShizukuState.NOT_RUNNING -> R.string.settings_shizuku_status_not_running
     ShizukuState.PERMISSION_DENIED -> R.string.settings_shizuku_status_denied
     ShizukuState.READY -> R.string.settings_shizuku_status_ready

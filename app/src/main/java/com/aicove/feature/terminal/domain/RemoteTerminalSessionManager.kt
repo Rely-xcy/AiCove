@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -137,7 +138,7 @@ class RemoteTerminalSessionManager @Inject constructor(
 
     /** 插件命令标签：执行完命令后退出 shell，标签保留为 Finished，由插件关闭。 */
     override suspend fun startPluginCommand(command: String, title: String?, pluginId: String): String {
-        if (!ensureRemote()) throw IllegalStateException("非远程模式或 SSH 未连接")
+        remoteUnavailableReason()?.let { throw IllegalStateException(it) }
         val id = openShellTab(
             command, isBackground = true, notify = false, title = title,
             sourceSessionId = null, ownerPluginId = pluginId, exitOnFinish = true

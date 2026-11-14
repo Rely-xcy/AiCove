@@ -214,7 +214,7 @@ private fun ToolListItemRow(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = resolveToolIcon(item.iconName),
+                    imageVector = resolveToolIcon(item.icon),
                     contentDescription = null,
                     tint = iconColor,
                     modifier = Modifier.size(22.dp)
@@ -225,7 +225,7 @@ private fun ToolListItemRow(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.name,
+                    text = item.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
