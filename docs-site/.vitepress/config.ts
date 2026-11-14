@@ -149,6 +149,8 @@ export default defineConfig({
           text: '扩展能力',
           items: [
             { text: 'MCP 服务器', link: '/guide/mcp' },
+            { text: '插件', link: '/guide/plugins' },
+            { text: '插件开发', link: '/advanced/plugin-development' },
             { text: '技能', link: '/guide/skills' },
             { text: '子代理', link: '/guide/subagent' },
             { text: 'Shizuku 工具', link: '/guide/shizuku' },
