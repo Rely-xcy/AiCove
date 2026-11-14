@@ -1169,6 +1169,9 @@ fun AIChatPanel(
             .takeLast(MARKDOWN_WARM_MAX_ENTRIES)
             .asReversed()
     }
+    LaunchedEffect(currentSessionId, markdownWarmQueue) {
+        warmMarkdownCache(markdownWarmQueue, markdownCache)
+    }
     // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方。
     // 正在跑的那一轮（以及运行期间出现的后续轮）不给结论：耗时与用量都要等本轮收工才成立。
     // 按轮首用户行 id 传入（与 activeTurnKey 同一个运行时真值），插话才顶不掉它。
@@ -2236,8 +2239,6 @@ fun AIChatPanel(
                             }
                         }
                     }
-                    // 预热会占用主线程做 MarkdownPreprocessor 预处理，长会话里逐条空转同样拖帧；
-                    // 24 版 beta 实测卡顿，停用。保留缓存容量（200）来减少回翻时的重新解析。
                 }
             }
             } // 内容层结束

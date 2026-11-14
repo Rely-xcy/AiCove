@@ -62,6 +62,7 @@ import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownDimens
 import com.mikepenz.markdown.model.markdownPadding
+import com.mikepenz.markdown.model.parseMarkdownFlow
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.mikepenz.markdown.model.State as MarkdownParseState
 import dev.snipme.highlights.Highlights
@@ -70,6 +71,7 @@ import dev.snipme.highlights.model.ColorHighlight
 import dev.snipme.highlights.model.SyntaxLanguage
 import dev.snipme.highlights.model.SyntaxThemes
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 // 代码块与行内代码共用字体。系统等宽（FontFamily.Monospace）缺下标字形且不回落，
@@ -103,8 +105,9 @@ internal fun shouldParseImmediately(streaming: Boolean, textLength: Int): Boolea
 
 internal class MarkdownRenderCache(
     // 200 条：一屏可见约 8-12 条（超长正文按 2000 字符分块后条目更多），上下翻十几屏就到了两百上下。
-    // 容量只决定「滑入视口要不要再解析一次」的成本：未命中也不再改布局（见 MarkdownLiveBlock 的
-    // immediate），所以安全阈值远比以前宽。取 200 是沿用 28814c99 的实测结论（80 条时多屏回翻会集体
+    // 容量只决定「滑入视口要不要再解析一次」的成本：未命中时定稿正文首帧就同步解析出终态高度
+    // （见 [shouldParseImmediately]），不会再出现「先按裸文本排一版再改高度」；超长单块退回异步。
+    // 取 200 是沿用 28814c99 的实测结论（80 条时多屏回翻会集体
     // 失效、集体重解析）；该值后来在 36c49854 被改回 80，但那次提交没给理由。
     private val maxEntries: Int = 200
 ) {
@@ -118,7 +121,11 @@ internal class MarkdownRenderCache(
         }
     }
 
-    fun get(text: String): MarkdownParseState.Success? = parsedStates[text]
+    // 后台预热（[warmMarkdownCache]）在 Dispatchers.Default 上写缓存，渲染路径在主线程读，
+    // LinkedHashMap 非线程安全：不加锁会在并发 get/put 时抛 ConcurrentModificationException。
+    private val lock = Any()
+
+    fun get(text: String): MarkdownParseState.Success? = synchronized(lock) { parsedStates[text] }
 
     /**
      * 在缓存中寻找是 [text] 前缀的最长解析态。
@@ -128,23 +135,26 @@ internal class MarkdownRenderCache(
      * 前缀不足 [MIN_PREFIX_CHARS] 时不用：缓存是全局 LRU，短前缀很容易是另一条消息的开头
      * （如「好的」与「好的，我来…」），会把别人的内容当成本条的历史渲染出来。
      */
-    fun getBestPrefix(text: String): MarkdownParseState.Success? {
-        val exact = get(text)
-        if (exact != null) return exact
-        var bestMatch: MarkdownParseState.Success? = null
-        var bestLength = 0
-        for ((key, value) in parsedStates) {
-            if (key.length < MIN_PREFIX_CHARS) continue
-            if (key.length in (bestLength + 1)..text.length && text.startsWith(key)) {
-                bestMatch = value
-                bestLength = key.length
+    fun getBestPrefix(text: String): MarkdownParseState.Success? = synchronized(lock) {
+        val exact = parsedStates[text]
+        if (exact != null) {
+            exact
+        } else {
+            var bestMatch: MarkdownParseState.Success? = null
+            var bestLength = 0
+            for ((key, value) in parsedStates) {
+                if (key.length < MIN_PREFIX_CHARS) continue
+                if (key.length in (bestLength + 1)..text.length && text.startsWith(key)) {
+                    bestMatch = value
+                    bestLength = key.length
+                }
             }
+            bestMatch
         }
-        return bestMatch
     }
 
     fun put(state: MarkdownParseState.Success) {
-        parsedStates[state.content] = state
+        synchronized(lock) { parsedStates[state.content] = state }
     }
 
     private companion object {
@@ -237,8 +247,10 @@ internal fun MarkdownContent(
     /** 文本是否仍在流式增长：流式内容每帧都变，不能走缓存直出，也不写缓存以免挤爆 LRU。 */
     streaming: Boolean = false,
     /** 首帧是否允许同步解析以锁定终态高度（见 [shouldParseImmediately]）。
-     *  流式容器里的块传 false：整条消息仍在增长，把主线程解析挤进流式的帧预算没有意义。 */
-    syncFirstFrame: Boolean = true
+     *  默认 false：不在 LazyColumn item 里、或不在滚动中的渲染（设置页、弹窗、自适应卡片）
+     *  没有「首帧高度变一次就把下方内容整体推走」的问题，不该为主线程解析付钱。
+     *  聊天列表里的定稿正文显式传 true；流式容器里的块必须传 false。 */
+    syncFirstFrame: Boolean = false
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val semantic = MaterialTheme.semanticColors
@@ -359,44 +371,38 @@ internal fun MarkdownContent(
 }
 
 /**
- * 后台预热：把已定稿的正文按顺序逐条解析进 [cache]，不产生 UI、不参与布局。
+ * 后台预热：把已定稿的正文按顺序解析进 [cache]，不产生 UI、不参与布局。
  *
- * 未命中缓存时定稿消息走同步解析（[MarkdownLiveBlock] 的 `immediate`），换来「首帧即终态高度」；
- * 而同步解析跑在主线程。预热把这份工作挤到 Dispatchers.Default：会话打开后先把最近窗口的正文
- * 解析好，主线程只在「还没轮到那条」时才付费。
+ * 定稿正文未命中缓存时首帧同步解析（[shouldParseImmediately]）以锁定终态高度，代价是主线程付解析钱。
+ * 预热把这笔钱挤到 [Dispatchers.Default]：会话打开后先把最近窗口的正文解析好，真正落到同步路径的很少。
  *
- * 串行推进：一次只挂一个解析状态机，完一条再喂下一条，会话里有几百条消息也不会挂几百个。
- * 队列会随消息增长重建，所以已是缓存的直接跳过；进度按 [resetKey]（会话 id）保留。
+ * 为什么是挂起函数而不是 composable：上一版预热是个 composable，每喂一条就重组一次、还要在主线程跑
+ * [MarkdownPreprocessor]，长会话里几百次空转直接拖帧（24 版 beta 实测卡顿，因此一直没接上）。
+ * 这里改成挂起函数：调用方用 `LaunchedEffect(queue, sessionId) { warmMarkdownCache(...) }` 挂一次即可，
+ * 全程不碰组合，[maxEntries] 与 [budgetMillis] 双重封顶，超时或换会话就停。
+ *
+ * 调用方需自行保证：队列里放的是渲染时真正查缓存的键（长文是 [splitLongContent] 的切片，不是整条正文）。
  */
-@Composable
-internal fun MarkdownParseWarmer(
+internal suspend fun warmMarkdownCache(
     queue: List<String>,
     cache: MarkdownRenderCache,
-    resetKey: Any?,
+    maxEntries: Int = 200,
+    budgetMillis: Long = 1_500L,
 ) {
-    // 进度按会话保存：队列随消息增长会重建，从头再走一遍虽然会跳过已缓存的，但每条都要一次重组，
-    // 长会话里就是几百次空转。换会话才归零。
-    var index by remember(resetKey) { mutableStateOf(0) }
-    if (index >= queue.size) return
-    val raw = queue[index]
-    // 预处理放主线程：MarkdownPreprocessor 的结果缓存是普通 LinkedHashMap（非线程安全），
-    // 渲染路径就在主线程调它；异线程调会与主线程竞争。解析（真正的大头）仍然在后台。
-    val text = remember(raw) { MarkdownPreprocessor.process(raw) }
-    if (text.isEmpty()) {
-        LaunchedEffect(text) { index++ }
-        return
-    }
-    if (cache.get(text) != null) {
-        LaunchedEffect(text) { index++ }
-        return
-    }
-    // retainState = false：换文本就回 Loading，跟 state 变化推进队列。
-    val state = rememberMarkdownState(content = text, retainState = false)
-    val current by state.state.collectAsState()
-    LaunchedEffect(current) {
-        val settled = current
+    if (queue.isEmpty() || maxEntries <= 0) return
+    val deadline = System.nanoTime() + budgetMillis * 1_000_000L
+    var warmed = 0
+    for (raw in queue.take(maxEntries)) {
+        if (warmed >= maxEntries || System.nanoTime() > deadline) break
+        // 预处理（含数学公式编码）也放后台：它是纯函数，结果缓存内部已加锁。
+        val text = withContext(Dispatchers.Default) { MarkdownPreprocessor.process(raw) }
+        if (text.isEmpty() || cache.get(text) != null) continue
+        // 只等第一个终态：库的 flow 末尾是 emitAll(state)，而 StateFlow 永不结束，
+        // 直接 collect 会把整个预热协程挂死。
+        val settled = parseMarkdownFlow(content = text)
+            .first { it !is MarkdownParseState.Loading }
         if (settled is MarkdownParseState.Success) cache.put(settled)
-        if (settled !is MarkdownParseState.Loading) index++
+        warmed++
     }
 }
 
@@ -627,7 +633,7 @@ private fun MarkdownLiveBlock(
      *
      * 定稿消息传 true：占位（裸文本）与排版后的高度差得远——表格、代码块、图片都会换行高，
      * 先按占位排一版再换回去，就是「消息滑入视口时内容整体位移一下」。同步解析让第一帧就是
-     * 终态高度，代价是这个 item 首次出现时解析跑在主线程上；预热（MarkdownParseWarmer）会
+     * 终态高度，代价是这个 item 首次出现时解析跑在主线程上；预热（[warmMarkdownCache]）会
      * 把大部分未命中提前吃掉，真正落到这里的很少。取值由 [shouldParseImmediately] 统一决定：
      * 超长单块（无法按块拆分的巨型代码块/表格）退回异步，避免一次同步解析就拉爆帧时间。
      *

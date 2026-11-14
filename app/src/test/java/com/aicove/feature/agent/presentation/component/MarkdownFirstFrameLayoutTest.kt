@@ -1,6 +1,8 @@
 package com.aicove.feature.agent.presentation.component
 
+import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
+import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
@@ -68,6 +70,17 @@ class MarkdownFirstFrameLayoutTest {
         }
     }
 
+    /** 递归收集 AST 里的所有节点类型（表格/代码围栏可能嵌在子节点里，只看顶层会漏）。 */
+    private fun collectTypes(node: ASTNode): Set<IElementType> {
+        val out = mutableSetOf<IElementType>()
+        fun walk(n: ASTNode) {
+            out += n.type
+            n.children.forEach(::walk)
+        }
+        walk(node)
+        return out
+    }
+
     @Test
     fun `同一段正文同步解析当场得到终态结构`() {
         // 对应 immediate = true 的实际效果：库在 remember 里直接 parseBlocking()，
@@ -83,8 +96,7 @@ class MarkdownFirstFrameLayoutTest {
             ```
         """.trimIndent()
 
-        val root = parser.buildMarkdownTreeFromString(text)
-        val types = root.children.map { it.type }
+        val types = collectTypes(parser.buildMarkdownTreeFromString(text))
 
         assertTrue(
             "表格必须当场解析成 TABLE 节点；拿不到就说明首帧只能按裸文本排版，高度会突变",
@@ -97,23 +109,25 @@ class MarkdownFirstFrameLayoutTest {
     }
 
     @Test
-    fun `拆块保证同步解析成本有界`() {
-        // 「首帧同步解析」的成本上限完全取决于单块长度：长文已被拆成有界 chunk，
-        // 代码围栏保持整块（[splitLongContent] 明确不拆），所以单块仍可能很长——
-        // 这类块会因超出 [MARKDOWN_SYNC_PARSE_MAX_CHARS] 退回异步，不会拖死主线程。
-        val long = buildString {
-            repeat(30) { idx ->
-                append("第 ").append(idx).append(" 段正文，带 **加粗** 与 `行内代码`，用来撑到需要拆块的长度。\n")
-                append("这一行是同一段的第二行，内容足够长以产生可观的字符数。\n\n")
-            }
+    fun `巨型代码块保持整块且因此退回异步`() {
+        // 首帧同步解析的成本上界依赖「单块不长」，而 [splitLongContent] 明确不拆代码围栏：
+        // 一个几万字符的代码块会原样作为单块，超出 [MARKDOWN_SYNC_PARSE_MAX_CHARS] 后退回异步。
+        // 这条钉住两侧的约定——拆块不破坏围栏，策略也不会对超大单块同步解析。
+        val longCode = buildString {
+            appendLine("```kotlin")
+            repeat(400) { i -> appendLine("val v$i = \"一段足够长的代码行，用来把围栏撑到几万字符 $i\"") }
+            appendLine("```")
         }
-        val chunks = splitLongContent(long)
-        assertTrue("长文必须拆成多块", chunks.size > 1)
-        chunks.forEach { chunk ->
-            assertTrue(
-                "单块长度 ${chunk.length} 超出拆块预算，首帧同步解析的成本就失去上界",
-                chunk.length <= 1_300
-            )
-        }
+        assertTrue("用例本身要超过同步预算", longCode.length > MARKDOWN_SYNC_PARSE_MAX_CHARS)
+
+        val chunks = splitLongContent(longCode)
+        assertFalse(
+            "代码围栏必须整块保留，不能被拆成多个不带围栏的碎片",
+            chunks.size > 1
+        )
+        assertFalse(
+            "超大单块必须退回异步，否则一次同步解析就能拉爆帧时间",
+            shouldParseImmediately(streaming = false, textLength = chunks.first().length)
+        )
     }
 }

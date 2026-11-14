@@ -425,6 +425,9 @@ internal fun AgentMessageItem(
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.fillMaxWidth(),
                                         cache = markdownCache,
+                                        // 定稿正文：首帧必须就是终态高度，否则滑入视口时先排裸文本再换成
+                                        // 表格/代码块，item 高度突变 → 下方内容整体位移（纯滑动也跳）。
+                                        syncFirstFrame = true,
                                     )
                                 }
                             }
@@ -780,7 +783,9 @@ private fun CompactionSummaryCard(message: AgentUIMessage, markdownCache: Markdo
                     text = message.content,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
-                    cache = markdownCache
+                    cache = markdownCache,
+                    // 同样在聊天 LazyColumn 的 item 里：展开后首帧就必须是终态高度。
+                    syncFirstFrame = true
                 )
             }
         }
