@@ -108,7 +108,7 @@ internal fun ChatModeMenu(
                 AppTextField(
                     value = goalText,
                     onValueChange = { goalText = it },
-                    placeholder = { Text(stringResource(R.string.chat_managed_goal_hint)) },
+                    placeholder = stringResource(R.string.chat_managed_goal_hint),
                     colors = dialogTextFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
