@@ -96,7 +96,7 @@ class PluginHookResultTransformTest {
         val parsed = Json.parseToJsonElement(result).jsonObject
 
         assertEquals("success", parsed["status"]?.jsonPrimitive?.content)
-        assertEquals(5L, parsed["data"]?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull)
+        assertEquals(5L, parsed["data"]?.jsonObject?.get("files")?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull)
         assertEquals("done", parsed["data"]?.jsonObject?.get("message")?.jsonPrimitive?.content)
     }
 }

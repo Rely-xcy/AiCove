@@ -137,6 +137,7 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             },
             slashCommandRegistry = mockk {
                 coEvery { refresh() } just runs
+                every { resolve(any()) } returns null
             },
             fileMentionRepository = mockk(relaxed = true),
             checkpointManager = mockk(relaxed = true),

@@ -1,7 +1,9 @@
 package com.aicove.feature.plugin.runtime
 
 import com.aicove.feature.plugin.domain.InstalledPlugin
+import com.aicove.feature.plugin.domain.PluginContent
 import com.aicove.feature.plugin.domain.PluginManager
+import com.aicove.feature.plugin.domain.PluginRuntime
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
 import com.aicove.feature.terminal.domain.TerminalTabStatus
 import io.mockk.coEvery
@@ -37,7 +39,16 @@ class PluginTerminalRunnerTest {
     private fun activePlugin(pluginId: String): InstalledPlugin = mockk {
         every { id } returns pluginId
         every { isActive } returns true
+        every { content } returns PluginContent(runtime = runtimeStub(pluginId))
     }
+
+    private fun runtimeStub(pluginId: String): PluginRuntime = PluginRuntime(
+        pluginId = pluginId,
+        type = "javascript",
+        installDir = java.io.File("/tmp/$pluginId"),
+        entryFile = java.io.File("/tmp/$pluginId/main.js"),
+        command = listOf("node", "main.js")
+    )
 
     private fun runner(provider: TerminalSessionProvider, vararg plugins: InstalledPlugin): PluginTerminalRunner {
         val manager = mockk<PluginManager>(relaxed = true)
