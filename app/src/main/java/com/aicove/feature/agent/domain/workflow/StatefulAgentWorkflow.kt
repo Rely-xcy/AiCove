@@ -1291,6 +1291,7 @@ class StatefulAgentWorkflow @Inject constructor(
                                         mode = currentContext.mode.name,
                                         scope = hookScope,
                                         agentName = hookAgentName,
+                                        arguments = JsonObject(toolCall.arguments),
                                         result = data
                                     )
                                     transform.data?.let { replaced ->

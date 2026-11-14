@@ -264,6 +264,7 @@ class AIEditorApp : Application(), Configuration.Provider {
     private var remoteSupervisorScope: CoroutineScope? = null
 
     override fun onCreate() {
+        com.aicove.core.ui.configureComposeSelection()
         if (isCrashProcess(this)) {
             // 崩溃错误页运行在独立 :crash 进程中。
             // 坚决不执行 super.onCreate()（避免触发 Hilt 的 @Inject 字段注入与隐式业务类加载），

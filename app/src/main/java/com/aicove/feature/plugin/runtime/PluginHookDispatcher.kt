@@ -276,13 +276,14 @@ class PluginHookDispatcher @Inject constructor(
         mode: String,
         scope: String,
         agentName: String?,
-        data: JsonElement
+        arguments: JsonObject,
+        result: JsonElement
     ): ToolAfterHookResult {
         if (sessionId == null) return ToolAfterHookResult()
         val targets = hooksFor(PluginHookEvents.AGENT_TOOL_AFTER, PluginHookModes.TRANSFORM)
         if (targets.isEmpty()) return ToolAfterHookResult()
         val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
-        var current = data
+        var current = result
         var changed = false
         for ((version, hook) in targets) {
             val remaining = deadline - System.currentTimeMillis()

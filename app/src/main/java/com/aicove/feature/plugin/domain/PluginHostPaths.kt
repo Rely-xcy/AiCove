@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /** 插件访问宿主文件时的稳定错误码；页面桥与插件进程都按这里的 code 判断。 */
@@ -205,8 +206,8 @@ class PluginHostPaths(
         }
     }
 
-    private fun containerPath(aicodeDir: File, relative: String): String =
-        aicodeDir.resolve(relative).canonicalPath
+    private fun containerPath(root: String, relative: String): String =
+        if (relative.isEmpty()) root else "${root.trimEnd('/')}/$relative"
 
     private fun inside(base: File, relative: String): File {
         val file = File(base, relative)
@@ -269,6 +270,7 @@ class PluginHostPaths(
     companion object {
         const val WORKSPACE_ROOT = "~/workspace"
         const val MAX_PATH_LENGTH = 200
+        const val MAX_PATH_DEPTH = 8
         const val MAX_READ_BYTES = 512L * 1024
         const val MAX_WRITE_BYTES = 1024L * 1024
         const val MAX_LIST_ENTRIES = 500

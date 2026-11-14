@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
@@ -53,9 +54,6 @@ object PluginManifestParser {
     private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
-    private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
-    private val HOOK_KEYS = setOf("id", "event", "handler")
-    private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -65,7 +63,10 @@ object PluginManifestParser {
 
     private const val MAX_NAME = 80
     private const val MAX_DESCRIPTION = 600
-    private const val MAX_REASON = 300
+    private const val MAX_COMMAND_PARTS = 16
+    private const val MAX_COMMAND_PART_CHARS = 200
+    private const val MAX_PROVIDER_URL = 2048
+    private const val MAX_SHIZUKU_PURPOSE = 200
     private const val MAX_LICENSE = 100
     private const val MAX_REPOSITORY = 300
     private const val MAX_LOCALES = 16
@@ -343,10 +344,7 @@ object PluginManifestParser {
             PluginRuntimeTypes.PYTHON -> entry.endsWith(".py", true)
             else -> false
         }
-            val array = raw as? JsonArray ?: return null.also { invalid(path) }
-            if (array.isEmpty() || array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
-            val ids = array.map { it.stringOrNull() }
-            if (ids.any { it == null || !LOCAL_ID.matches(it) }) return null.also { invalid(path) }
+
         private class Contributes(
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
@@ -366,7 +364,8 @@ object PluginManifestParser {
             var ok = true
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
-                    it != "tools" && it != "hooks" && it != "mcp" && it != "configPage"
+                    it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
+                    it != "shizuku" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false

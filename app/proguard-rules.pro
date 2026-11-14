@@ -8,6 +8,11 @@
 -keepattributes InnerClasses
 -keepattributes SourceFile,LineNumberTable        # 保留崩溃栈行号
 
+# Compose 的智能选词越界发生在内部协程，发布包同样禁用该路径。
+-assumevalues class androidx.compose.foundation.ComposeFoundationFlags {
+    public static boolean isSmartSelectionEnabled return false;
+}
+
 # ---- Retrofit + OkHttp ----
 # Retrofit 通过反射读取 API 接口方法的注解，必须保留接口与签名。
 -keep,allowobfuscation,allowshrinking interface retrofit2.Call
