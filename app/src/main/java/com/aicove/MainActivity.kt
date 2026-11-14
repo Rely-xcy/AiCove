@@ -19,6 +19,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,6 +56,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.LayoutDirection
@@ -389,6 +393,14 @@ fun AppNavigation(
     // 用于判断当前路由：仅在聊天页允许 Drawer 手势。
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+
+    // 键盘弹起时禁止左栏边缘右滑：输入框展开后屏幕左缘也在输入区内，
+    // 打字时误碰就会把聊天历史拉出来，而这显然不是用户想要的。
+    val imeInsets = WindowInsets.ime
+    val density = LocalDensity.current
+    val imeVisible by remember(imeInsets, density) {
+        derivedStateOf { imeInsets.getBottom(density) > 0 }
+    }
 
     // 记录当前路由到全局，崩溃报告用它定位崩溃页面。
     LaunchedEffect(currentRoute) {
@@ -1095,8 +1107,8 @@ fun AppNavigation(
     } else {
         ModalNavigationDrawer(
             drawerState = drawerState,
-            // 仅在聊天页启用手势滑出；其他页面禁止（但已打开时始终可关闭）。
-            gesturesEnabled = currentRoute == "chat" || drawerState.isOpen,
+            // 仅在聊天页且键盘未弹起时启用手势滑出；其他页面禁止（但已打开时始终可关闭）。
+            gesturesEnabled = (currentRoute == "chat" && !imeVisible) || drawerState.isOpen,
             drawerContent = {
                 ModalDrawerSheet(
                     drawerShape = RectangleShape,

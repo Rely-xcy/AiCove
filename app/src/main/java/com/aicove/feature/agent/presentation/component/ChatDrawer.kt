@@ -603,9 +603,8 @@ private fun SessionListContent(
             restore = { it.toSet() }
         )
     ) { mutableStateOf(emptySet<String>()) }
-    // 当前工作区总是展开；其他工作区的展开状态完全由用户手动控制，
-    // 不因切换会话/工作区被动撑开（否则用户收起的分组会自己又弹回来）。
-    val effectiveExpandedWorkspaces = expandedWorkspaces + listOfNotNull(currentWorkspacePath)
+    // 当前工作区默认展开一次，用户手动收起后保持收起。
+    LaunchedEffect(currentWorkspacePath) { expandedWorkspaces += listOfNotNull(currentWorkspacePath) }
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize()
@@ -613,7 +612,7 @@ private fun SessionListContent(
         // 每个分组占一个 item、组内 forEach 全量渲染会让 LazyColumn 失去惰性：
         // 「最近 30 天」这种分组有上百个会话时，一个 item 就要组合上百行。分组头与会话各自成 item。
         workspaceGroups.forEach { workspace ->
-            val workspaceExpanded = workspace.workspacePath in effectiveExpandedWorkspaces
+            val workspaceExpanded = workspace.workspacePath in expandedWorkspaces
             item(key = "workspace:${workspace.workspacePath}", contentType = "workspace-header") {
                 CollapsibleGroupHeader(
                     text = workspaceNames[workspace.workspacePath]

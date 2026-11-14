@@ -301,7 +301,9 @@ private fun deriveSemanticColors(seed: AppThemeSeed, dark: Boolean): AppSemantic
         diffRemoveBg = error.copy(alpha = overlayAlpha),
         subtleText = lerp(seed.onSurfaceVariant, seed.surface, 0.25f),
         subtleBorder = seed.outlineVariant,
-        cardSurface = seed.surface,
+        // 卡片不能直接用 surface：暖纸主题的 surface 是纯白，衬在 #F5F3EC 的页面底上
+        // 会变成“白块 + 纸底”两块分明。向页面底混一点，保持可辨的层次而不是突兀的白。
+        cardSurface = lerp(seed.surface, seed.background, if (dark) 0f else 0.55f),
         pageBackground = seed.background,
         mutedSurface = seed.surfaceVariant,
         capsuleSurface = lerp(seed.surfaceVariant, seed.onSurface, 0.07f),
