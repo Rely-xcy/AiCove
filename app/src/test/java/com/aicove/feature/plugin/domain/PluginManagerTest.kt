@@ -17,16 +17,6 @@ class PluginManagerTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    @get:Rule
-    val dumpUncaught = object : org.junit.rules.TestWatcher() {
-        override fun starting(description: org.junit.runner.Description) {
-            Thread.setDefaultUncaughtExceptionHandler { _, e ->
-                System.err.println("UNCAUGHT_IN_TEST: ${e.javaClass.name}: ${e.message}")
-                e.printStackTrace()
-            }
-        }
-    }
-
     private lateinit var root: File
     private lateinit var manager: PluginManager
     private var now = 1_000L
