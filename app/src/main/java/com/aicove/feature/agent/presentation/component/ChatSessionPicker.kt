@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
 import com.aicove.feature.agent.domain.model.ChatSession
@@ -62,7 +63,9 @@ fun ChatSessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(10.dp))
+            // 圆角必须先于 combinedClickable：按住时的涟漪与置顶底色都靠这层裁剪，
+            // 否则行宽一整条的反馈是直角横带，与下方圆角卡片脱节。
+            .clip(RoundedCornerShape(Radius.md))
             .background(if (pinned) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
             .combinedClickable(
                 onClick = onClick,

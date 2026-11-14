@@ -34,8 +34,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import com.aicove.core.ui.ChevronRotationStyle
-import com.aicove.core.ui.ExpandableChevronIcon
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
@@ -74,35 +72,6 @@ import compose.icons.feathericons.X
 @Composable
 internal fun settingsLightMode(): Boolean =
     MaterialTheme.colorScheme.background.luminance() > 0.5f
-
-/** 可折叠分组标题：点击展开/收起，右侧 chevron 指示状态。与工具授权页的分组一致。 */
-@Composable
-internal fun CollapsibleGroupHeader(
-    text: String,
-    expanded: Boolean,
-    onToggle: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(start = Spacing.md, end = Spacing.sm, top = Spacing.sm, bottom = Spacing.xs),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
-        )
-        ExpandableChevronIcon(
-            expanded = expanded,
-            style = ChevronRotationStyle.RIGHT_DOWN,
-            size = 16.dp,
-            tint = MaterialTheme.semanticColors.subtleText
-        )
-    }
-}
 
 /** 设置页背景：统一使用语义定义的 pageBackground。 */
 @Composable

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_mode_managed">Managed</string>
+    <string name="chat_managed_goal_hint">Describe the goal; the AI will keep working toward it</string>
+    <string name="chat_managed_start">Start</string>
+</resources>

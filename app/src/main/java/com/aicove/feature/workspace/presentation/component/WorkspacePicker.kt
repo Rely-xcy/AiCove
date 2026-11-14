@@ -123,7 +123,6 @@ internal fun WorkspaceSelectionHost(
     val isLocalMode by viewModel.isLocalMode.collectAsStateWithLifecycle()
     val addError by viewModel.addError.collectAsStateWithLifecycle()
     val externalWarningDismissed by viewModel.externalWarningDismissed.collectAsStateWithLifecycle()
-    val deleteExternalWorkspaceSessions by viewModel.deleteExternalWorkspaceSessions.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pendingWorkspaceSelect by remember { mutableStateOf<Workspace?>(null) }
     var showExternalWarning by remember { mutableStateOf(false) }
@@ -193,7 +192,6 @@ internal fun WorkspaceSelectionHost(
             },
             onDelete = { viewModel.deleteWorkspace(it.name) },
             onStopCurrentSessions = onSwitchConfirmed,
-            deleteExternalWorkspaceSessions = deleteExternalWorkspaceSessions,
             onDismiss = onDismiss
         )
     }
@@ -288,7 +286,6 @@ private fun WorkspaceSheet(
     onCreate: (String) -> Unit,
     onDelete: (Workspace) -> Unit,
     onStopCurrentSessions: () -> Unit,
-    deleteExternalWorkspaceSessions: Boolean,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -381,11 +378,7 @@ private fun WorkspaceSheet(
             text = {
                 Text(
                     if (ws.type == WorkspaceType.EXTERNAL_LOCAL) {
-                        stringResource(
-                            if (deleteExternalWorkspaceSessions) R.string.workspace_external_remove_confirm_sessions
-                            else R.string.workspace_external_remove_confirm,
-                            ws.name
-                        )
+                        stringResource(R.string.workspace_external_remove_confirm, ws.name)
                     } else {
                         stringResource(R.string.workspace_delete_confirm, ws.name)
                     }

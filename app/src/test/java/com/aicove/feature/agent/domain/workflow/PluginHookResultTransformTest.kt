@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -95,7 +96,7 @@ class PluginHookResultTransformTest {
         val parsed = Json.parseToJsonElement(result).jsonObject
 
         assertEquals("success", parsed["status"]?.jsonPrimitive?.content)
-        assertEquals(5, parsed["data"]?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull)
+        assertEquals(5L, parsed["data"]?.jsonObject?.get("count")?.jsonPrimitive?.longOrNull)
         assertEquals("done", parsed["data"]?.jsonObject?.get("message")?.jsonPrimitive?.content)
     }
 }

@@ -37,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aicove.R
+import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
 import com.aicove.core.util.FileLogger
@@ -208,6 +211,9 @@ internal fun PluginsSection(
                         PluginRow(
                             plugin = plugin,
                             languageTag = languageTag,
+                            // 与 LazyGroupItem 拼出的卡片轮廓一致：首项圆上角、末项圆下角。
+                            // 点击层按同一形状裁剪，按压反馈才不会在卡片圆角外露出直角横带。
+                            contentShape = pluginRowShape(index, filteredPlugins.lastIndex),
                             onClick = { onOpenDetail(plugin) },
                             onDelete = { pluginToUninstall = plugin }
                         )
@@ -238,6 +244,17 @@ internal fun PluginsSection(
 }
 
 /**
+ * 插件行与 [LazyGroupItem] 卡片轮廓一致的裁剪形状：首项圆上角、末项圆下角，中间项直角。
+ * 只用于表层点击层的裁剪，不参与背景与描边。
+ */
+private fun pluginRowShape(index: Int, lastIndex: Int): Shape = RoundedCornerShape(
+    topStart = if (index == 0) Radius.lg else 0.dp,
+    topEnd = if (index == 0) Radius.lg else 0.dp,
+    bottomStart = if (index == lastIndex) Radius.lg else 0.dp,
+    bottomEnd = if (index == lastIndex) Radius.lg else 0.dp
+)
+
+/**
  * 单个插件列表行：MCP 风格卡片行。
  * 左侧 40dp 方形图标容器，中间名称/简介/元信息 Pill 标签，右侧状态指示 Pill + Chevron 箭头，支持左滑删除。
  */
@@ -246,7 +263,8 @@ private fun PluginRow(
     plugin: InstalledPlugin,
     languageTag: String,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    contentShape: Shape = RectangleShape
 ) {
     val statusText = when {
         plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_status_incompatible)
@@ -267,7 +285,8 @@ private fun PluginRow(
 
     SwipeToDeleteRow(
         onDelete = onDelete,
-        onClick = onClick
+        onClick = onClick,
+        contentShape = contentShape
     ) {
         Row(
             modifier = Modifier

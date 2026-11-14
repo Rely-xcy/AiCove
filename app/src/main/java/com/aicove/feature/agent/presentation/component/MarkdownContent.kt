@@ -76,6 +76,31 @@ import kotlinx.coroutines.withContext
 // 内置 JetBrains Mono NL 经资源加载可走系统 fallback，能显示 ₀-₉ 等下标/上标字符。
 private val CodeFontFamily = FontFamily(Font(R.font.jetbrains_mono_nl))
 
+/**
+ * 定稿正文允许首帧同步解析的字符上限。
+ *
+ * 同步解析跑在组合期的主线程上：不可拆的单块（[splitLongContent] 会保护代码围栏，巨型表格也不拆）
+ * 一次要几十毫秒，正是 beta d6774463 实测卡顿的成因。长文在进入渲染前已被拆成
+ * ≤ CHUNK_BUDGET_CHARS 的块，这里留三倍余量——正常正文全部落在界内、能首帧定高，
+ * 只有病态单块退回异步。
+ */
+internal const val MARKDOWN_SYNC_PARSE_MAX_CHARS = 4_000
+
+/**
+ * 定稿正文是否在首帧同步解析（[MarkdownLiveBlock] 的 `immediate`）。
+ *
+ * 为什么必须同步：异步路径的第一帧只有 [PlainMarkdownText] 的裸文本，解析完成后才换成表格/
+ * 代码块，高度突变。LazyColumn 按 item 索引与像素偏移锚定，item 首帧测量后再改高度会让下方
+ * 内容整体位移一下——这就是用户反复反馈的「纯滑动也跳」，不是抢滚动。
+ *
+ * 为什么不能全量同步：解析在主线程，一屏十几条定稿同时未命中会把帧时间拉爆（beta d6774463）。
+ * 所以只对「长文已拆块」后的正常尺寸正文同步，超长单块退回异步。
+ *
+ * 流式正文必须异步：它每帧都在变，同步解析等于每帧卡主线程。
+ */
+internal fun shouldParseImmediately(streaming: Boolean, textLength: Int): Boolean =
+    !streaming && textLength <= MARKDOWN_SYNC_PARSE_MAX_CHARS
+
 internal class MarkdownRenderCache(
     // 200 条：一屏可见约 8-12 条（超长正文按 2000 字符分块后条目更多），上下翻十几屏就到了两百上下。
     // 容量只决定「滑入视口要不要再解析一次」的成本：未命中也不再改布局（见 MarkdownLiveBlock 的
@@ -178,7 +203,8 @@ internal fun StreamingMarkdownContent(
                 text = chunk,
                 color = color,
                 cache = cache,
-                streaming = false
+                streaming = false,
+                syncFirstFrame = false
             )
         }
         if (open != null) {
@@ -189,7 +215,8 @@ internal fun StreamingMarkdownContent(
                 text = open,
                 color = color,
                 cache = cache,
-                streaming = true
+                streaming = true,
+                syncFirstFrame = false
             )
         }
     }
@@ -208,7 +235,10 @@ internal fun MarkdownContent(
      *  才能触发懒加载），避免超大 md 一次性全量组合/测量造成的卡顿。 */
     lazyScroll: Boolean = false,
     /** 文本是否仍在流式增长：流式内容每帧都变，不能走缓存直出，也不写缓存以免挤爆 LRU。 */
-    streaming: Boolean = false
+    streaming: Boolean = false,
+    /** 首帧是否允许同步解析以锁定终态高度（见 [shouldParseImmediately]）。
+     *  流式容器里的块传 false：整条消息仍在增长，把主线程解析挤进流式的帧预算没有意义。 */
+    syncFirstFrame: Boolean = true
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val semantic = MaterialTheme.semanticColors
@@ -301,26 +331,29 @@ internal fun MarkdownContent(
                 mathTransformer = mathTransformer,
             )
         } else {
-            MarkdownLiveBlock(
-                text = text,
-                processed = processed,
-                color = color,
-                modifier = modifier,
-                cache = cache,
-                loading = loading,
-                lazyScroll = lazyScroll,
-                streaming = streaming,
-                // 定稿消息不做同步解析：Markdown 解析跑在主线程，一屏多条定稿消息同时未命中缓存时
-                // 会把帧时间拉爆（beta d6774463 实测严重卡顿）。这里回到异步路径，靠缓存容量兜住
-                // 「回翻时集体重新解析」，代价是首次进入视口仍有一次高度变化。
-                immediate = false,
-                mdColors = mdColors,
-                mdTypography = mdTypography,
-                mdPadding = mdPadding,
-                mdDimens = mdDimens,
-                highlightsBuilder = highlightsBuilder,
-                mathTransformer = mathTransformer,
-            )
+            val immediate = syncFirstFrame && shouldParseImmediately(streaming, processed.length)
+            // immediate 从 false 翻到 true（流式交接成定稿）时必须重建状态机：库的
+            // rememberMarkdownState 只在首次 remember 时读 immediate，复用旧状态机等于继续异步解析，
+            // 首帧仍是裸文本。定稿消息 immediate 恒定，不会触发重建。
+            key(immediate) {
+                MarkdownLiveBlock(
+                    text = text,
+                    processed = processed,
+                    color = color,
+                    modifier = modifier,
+                    cache = cache,
+                    loading = loading,
+                    lazyScroll = lazyScroll,
+                    streaming = streaming,
+                    immediate = immediate,
+                    mdColors = mdColors,
+                    mdTypography = mdTypography,
+                    mdPadding = mdPadding,
+                    mdDimens = mdDimens,
+                    highlightsBuilder = highlightsBuilder,
+                    mathTransformer = mathTransformer,
+                )
+            }
         }
     }
 }
@@ -595,7 +628,8 @@ private fun MarkdownLiveBlock(
      * 定稿消息传 true：占位（裸文本）与排版后的高度差得远——表格、代码块、图片都会换行高，
      * 先按占位排一版再换回去，就是「消息滑入视口时内容整体位移一下」。同步解析让第一帧就是
      * 终态高度，代价是这个 item 首次出现时解析跑在主线程上；预热（MarkdownParseWarmer）会
-     * 把大部分未命中提前吃掉，真正落到这里的很少。
+     * 把大部分未命中提前吃掉，真正落到这里的很少。取值由 [shouldParseImmediately] 统一决定：
+     * 超长单块（无法按块拆分的巨型代码块/表格）退回异步，避免一次同步解析就拉爆帧时间。
      *
      * 流式文本必须传 false：它每帧都在变，同步解析等于每帧卡主线程。
      */

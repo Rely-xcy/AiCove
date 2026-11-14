@@ -244,6 +244,7 @@ interface AgentMessageDao {
         SELECT m.id AS messageId,
                m.sessionId AS sessionId,
                s.title AS sessionTitle,
+               s.workspacePath AS workspacePath,
                m.role AS role,
                m.content AS content,
                m.timestamp AS timestamp
@@ -260,6 +261,29 @@ interface AgentMessageDao {
         """
     )
     suspend fun searchInWorkspace(workspacePath: String, escapedQuery: String, limit: Int): List<ChatSearchMatch>
+
+    /** 跨所有工作区的聊天记录搜索（不限 workspacePath）。 */
+    @Query(
+        """
+        SELECT m.id AS messageId,
+               m.sessionId AS sessionId,
+               s.title AS sessionTitle,
+               s.workspacePath AS workspacePath,
+               m.role AS role,
+               m.content AS content,
+               m.timestamp AS timestamp
+        FROM agent_messages m
+        JOIN chat_sessions s ON s.id = m.sessionId
+        WHERE m.isCompacted = 0
+          AND m.isContextSummary = 0
+          AND m.isCompactionMarker = 0
+          AND m.role IN ('USER', 'ASSISTANT')
+          AND m.content LIKE '%' || :escapedQuery || '%' ESCAPE '!'
+        ORDER BY m.timestamp DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchAll(escapedQuery: String, limit: Int): List<ChatSearchMatch>
 
     /** 指定会话中时间戳不早于 [timestamp] 的消息条数（含并列时间戳），供定位时确定所需分页上限。 */
     @Query("SELECT COUNT(*) FROM agent_messages WHERE sessionId = :sessionId AND timestamp >= :timestamp")
@@ -314,6 +338,7 @@ data class ChatSearchMatch(
     val messageId: String,
     val sessionId: String,
     val sessionTitle: String,
+    val workspacePath: String,
     val role: String,
     val content: String,
     val timestamp: Long

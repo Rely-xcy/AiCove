@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_scope_all">All workspaces</string>
+    <string name="chat_scope_current">Current workspace</string>
+    <string name="chat_workspace_unbound">Unbound workspace</string>
+</resources>

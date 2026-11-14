@@ -2364,4 +2364,8 @@
     <string name="plugins_no_available_tools">No available tools found</string>
     <string name="plugins_tool_add">Add</string>
     <string name="plugins_tool_added">Added</string>
+    <!-- Cross-workspace execution rejection -->
+    <string name="cross_workspace_path_mismatch">This session is bound to workspace \"%1$s\", but the current execution target is \"%2$s\". Please switch to the correct workspace before sending.</string>
+    <string name="cross_workspace_dir_missing">The directory for workspace \"%1$s\" no longer exists. Please reopen or switch to a different workspace.</string>
+    <string name="cross_workspace_no_workspace">The current workspace is not ready, so this message cannot be sent. Please open a workspace first.</string>
 </resources>

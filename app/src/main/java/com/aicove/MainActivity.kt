@@ -455,17 +455,19 @@ fun AppNavigation(
 
     // 侧边栏需要的数据。
     val currentWorkspace by workspaceViewModel.current.collectAsStateWithLifecycle()
+    val workspaces by workspaceViewModel.workspaces.collectAsStateWithLifecycle()
+    val workspaceNames = remember(workspaces) { workspaces.associate { it.path to it.name } }
     androidx.compose.runtime.LaunchedEffect(currentWorkspace) {
         // 远程模式连接未就绪时 currentWorkspace 为 null，不触发 setWorkspace，避免空路径点燃 session 加载
         val path = currentWorkspace?.path ?: return@LaunchedEffect
         agentViewModel.setWorkspace(path)
     }
 
-    val sessions by agentViewModel.sessions.collectAsStateWithLifecycle()
+    val sessions by agentViewModel.globalSessions.collectAsStateWithLifecycle()
     val currentSessionId by agentViewModel.currentSessionId.collectAsStateWithLifecycle()
     val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle()
     val awaitingPermissionSessionIds by agentViewModel.awaitingPermissionSessionIds.collectAsStateWithLifecycle()
-    val subSessionsByParent by agentViewModel.subSessionsByParent.collectAsStateWithLifecycle()
+    val subSessionsByParent by agentViewModel.globalSubSessionsByParent.collectAsStateWithLifecycle()
     val expandedPaths by agentViewModel.expandedPaths.collectAsStateWithLifecycle()
     val expandingPath by agentViewModel.expandingPath.collectAsStateWithLifecycle()
     val fileOpPaths by agentViewModel.fileOpPaths.collectAsStateWithLifecycle()
@@ -629,6 +631,8 @@ fun AppNavigation(
     // 侧栏内容：modal 抽屉与大屏常驻栏共用同一份，不在两处重复几十行参数。
     val drawerBody: @Composable () -> Unit = {
         ChatDrawerContent(
+            workspaceNames = workspaceNames,
+            currentWorkspacePath = currentWorkspace?.path,
             sessions = sessions,
             currentSessionId = currentSessionId,
             agentStates = agentStates,

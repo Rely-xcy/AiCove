@@ -2363,4 +2363,8 @@
     <string name="plugins_no_available_tools">没有找到匹配的可用工具</string>
     <string name="plugins_tool_add">添加</string>
     <string name="plugins_tool_added">已添加</string>
+    <!-- 跨工作区执行拒绝 -->
+    <string name="cross_workspace_path_mismatch">该会话绑定在工作区\"%1$s\"，当前执行目标是\"%2$s\"。请切换至对应工作区后再发送。</string>
+    <string name="cross_workspace_dir_missing">工作区\"%1$s\"的目录已不存在，请先重新打开或切换工作区。</string>
+    <string name="cross_workspace_no_workspace">当前工作区未就绪，无法发送。请先打开一个工作区。</string>
 </resources>

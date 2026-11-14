@@ -83,6 +83,7 @@ import com.aicove.feature.workspace.domain.WorkspacePathMapper
 import com.aicove.feature.workspace.domain.isValidFileEntryName
 import com.aicove.feature.agent.domain.workflow.AgentEvent
 import com.aicove.feature.agent.domain.workflow.CompactionProgress
+import java.io.File
 import com.aicove.feature.agent.domain.workflow.ContextUsage
 import com.aicove.feature.agent.domain.workflow.ContextUsageHolder
 import com.aicove.feature.agent.domain.tool.ToolPermissionManager
@@ -432,7 +433,22 @@ class AIAgentViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    // ── 聊天记录全局搜索（限当前工作区）──
+    /**
+     * 全局聊天列表：所有工作区的根会话（不限 workspacePath）。
+     * 保留 [sessions] 用于运行中范围判定与保活；本流只负责展示。
+     */
+    val globalSessions: StateFlow<List<ChatSession>> = chatSessionDao
+        .getAllRootSessionsFlow()
+        .map { list -> list.map { it.toDomain() } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** 全局子代理分组：所有工作区的子会话按父会话 id 分组。 */
+    val globalSubSessionsByParent: StateFlow<Map<String, List<ChatSession>>> = chatSessionDao
+        .getAllSessionsFlow()
+        .map { list -> list.filter { it.parentId != null }.groupBy({ it.parentId!! }, { it.toDomain() }) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    // ── 聊天记录全局搜索 ──
     private val _chatSearchQuery = MutableStateFlow("")
     val chatSearchQuery: StateFlow<String> = _chatSearchQuery.asStateFlow()
 
@@ -445,18 +461,17 @@ class AIAgentViewModel @Inject constructor(
      * 查询走 IO 调度器，避免 LIKE 全表扫描卡住主线程。
      */
     val chatSearchState: StateFlow<ChatSearchState> =
-        combine(_currentWorkspace, _chatSearchQuery) { ws, q -> ws to q }
+        _chatSearchQuery
             .debounce(chatSearchDebounceMs)
-            .flatMapLatest { (workspace, query) ->
+            .flatMapLatest { query ->
                 val keyword = query.trim()
-                if (workspace.isBlank() || keyword.isEmpty()) {
+                if (keyword.isEmpty()) {
                     flowOf(ChatSearchState(query = query))
                 } else {
                     flow {
                         emit(ChatSearchState(query = query, loading = true))
                         val hits = withContext(Dispatchers.IO) {
-                            agentMessageDao.searchInWorkspace(
-                                workspace,
+                            agentMessageDao.searchAll(
                                 escapeLike(keyword),
                                 chatSearchLimit
                             ).map { m ->
@@ -465,7 +480,8 @@ class AIAgentViewModel @Inject constructor(
                                     sessionTitle = m.sessionTitle,
                                     messageId = m.messageId,
                                     snippet = buildSnippet(m.content, keyword),
-                                    timestamp = m.timestamp
+                                    timestamp = m.timestamp,
+                                    workspacePath = m.workspacePath
                                 )
                             }
                         }
@@ -2099,6 +2115,35 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.w(TAG, "工作区未就绪，跳过请求")
             return@launch
         }
+        // 跨工作区校验：会话绑定的 workspacePath 必须与本次执行目标（projectRoot）一致。
+        // 不一致时拒绝执行，让用户先切换/重选工作区——不自动切 SSH、不停止所有任务。
+        run {
+            val boundSession = sessionUseCase.getSessionById(sessionId)
+            if (boundSession != null) {
+                val boundWs = boundSession.workspacePath
+                val targetWs = _currentWorkspace.value
+                val targetUnknown = projectRoot.isBlank() || targetWs.isBlank()
+                val pathMismatch = boundWs != projectRoot || boundWs != targetWs
+                // 校验2：绑定目录必须仍然存在（检测已删除工作区的会话）
+                val dirMissing = if (pathMismatch) false else withContext(Dispatchers.IO) {
+                    !fileAccess.exists("~/workspace") || !fileAccess.isDirectory("~/workspace")
+                }
+                if (targetUnknown || pathMismatch || dirMissing) {
+                    val workspaceName = boundWs.substringAfterLast('/')
+                    val reason = when {
+                        targetUnknown -> context.getString(R.string.cross_workspace_no_workspace)
+                        dirMissing -> context.getString(R.string.cross_workspace_dir_missing, workspaceName)
+                        else -> context.getString(R.string.cross_workspace_path_mismatch, workspaceName, targetWs)
+                    }
+                    FileLogger.w(
+                        TAG,
+                        "跨工作区执行被拒绝: sessionId=$sessionId boundWorkspace=$boundWs projectRoot=$projectRoot reason=${if (dirMissing) "dir_missing" else "path_mismatch"}"
+                    )
+                    _agentStates.value = _agentStates.value + (sessionId to AgentUIState.Error(reason))
+                    return@launch
+                }
+            }
+        }
         // 命令分流：命中斜杠命令（内置命令或技能）时，不走 agent workflow，直接执行命令操作
         // （命令文本已作为用户消息落库，进入对话上下文）。不注册 sessionJobs，
         // 因此 isRunning 保持 false，/compress 等命令内部的自检可以正常工作。
@@ -2978,9 +3023,13 @@ class AIAgentViewModel @Inject constructor(
         _currentSessionId.value = sid
     }
 
-    fun setSessionMode(mode: AgentMode) {
+    fun setSessionMode(mode: AgentMode, endGoal: Boolean = false) {
         val sid = _currentSessionId.value ?: return
         viewModelScope.launch {
+            if (endGoal) {
+                goalEmptyTurnCounts.remove(sid)
+                sessionUseCase.setGoal(sid, null, 0, 0)
+            }
             sessionUseCase.updateMode(sid, mode.name)
             // 工作期间切换：把新模式作为系统事件投递给运行中的 agent，本轮即时生效（见 StatefulAgentWorkflow）。
             // 空闲时无需投递——下一轮开轮会按新模式注入一次提醒。

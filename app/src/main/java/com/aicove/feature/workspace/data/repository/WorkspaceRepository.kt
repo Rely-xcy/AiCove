@@ -707,8 +707,8 @@ class WorkspaceRepository @Inject constructor(
         runCatching { context.contentResolver.releasePersistableUriPermission(uri, flags) }
     }
 
-    /** 删除工作区。内部/远程工作区连同文件与会话记录删除；外部本地工作区只解除关联，不删除物理目录，
-     *  其会话记录是否一并删除由「偏好设置」中的开关决定。
+    /** 删除工作区。内部/远程工作区连同文件一并删除（目录从磁盘移除），其会话记录保留在数据库中，不再级联清理。
+     *  外部本地工作区只解除关联（移除 DataStore 记录与 URI 权限），不删除物理目录，也不删除其会话记录。
      *  若删的是当前工作区，则自动切到剩余的第一个。
      *  远程模式下的工作区根取不到（未配置 / 目标目录展开后为空）时拒绝执行远程删除：
      *  空根拼出的目标是远端根目录下的 /<名称>，一条 rm -rf 就可能删掉服务器系统目录。 */
@@ -727,13 +727,9 @@ class WorkspaceRepository @Inject constructor(
                     )
                 }
             }
-            if (generalSettingsRepository.deleteExternalWorkspaceSessions()) {
-                sessionUseCase.deleteSessionsByWorkspace(target.path)
-            }
             FileLogger.i(TAG, "移除外部工作区关联: $name")
         } else if (isLocal()) {
             File(projectsRoot, name).deleteRecursively()
-            target?.let { sessionUseCase.deleteSessionsByWorkspace(it.path) }
         } else {
             val cfg = remoteSshConnection.config
             // 同一份根判据（与 initialize()/refreshRemoteWorkspaces/createWorkspace 同源）：根取不到时
@@ -750,7 +746,6 @@ class WorkspaceRepository @Inject constructor(
                 runCatching { execRemoteExit("rm -rf ${shellQuote(remotePath)}") }
                     .onFailure { FileLogger.e(TAG, "远程删除工作区失败: $remotePath", it) }
             }
-            target?.let { sessionUseCase.deleteSessionsByWorkspace(it.path) }
         }
         refreshWorkspaces()
         FileLogger.i(TAG, "删除工作区: $name")

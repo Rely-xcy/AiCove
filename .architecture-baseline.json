@@ -22,13 +22,13 @@
     "app/src/main/java/com/aicove/feature/agent/domain/tool/browser/BrowserManager.kt": 2017,
     "app/src/main/java/com/aicove/feature/agent/domain/workflow/ContextCompactor.kt": 1954,
     "app/src/main/java/com/aicove/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 2349,
-    "app/src/main/java/com/aicove/feature/agent/presentation/AIAgentViewModel.kt": 3807,
-    "app/src/main/java/com/aicove/feature/agent/presentation/component/AIChatPanel.kt": 2705,
-    "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatDrawer.kt": 1548,
+    "app/src/main/java/com/aicove/feature/agent/presentation/AIAgentViewModel.kt": 3856,
+    "app/src/main/java/com/aicove/feature/agent/presentation/component/AIChatPanel.kt": 2706,
+    "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatDrawer.kt": 1595,
     "app/src/main/java/com/aicove/feature/backup/data/BackupManagerImpl.kt": 1908,
     "app/src/main/java/com/aicove/feature/settings/presentation/SettingsViewModel.kt": 3417,
     "app/src/main/java/com/aicove/feature/settings/presentation/component/ProviderEditorScreen.kt": 3244,
-    "app/src/main/java/com/aicove/feature/settings/presentation/component/SettingsScreen.kt": 2125
+    "app/src/main/java/com/aicove/feature/settings/presentation/component/SettingsScreen.kt": 2122
   },
   "layering": {
     "feature/agent -> feature/backup": 3,

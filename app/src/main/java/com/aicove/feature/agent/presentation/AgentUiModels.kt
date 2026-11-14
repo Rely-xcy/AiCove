@@ -98,7 +98,9 @@ data class ChatSearchHit(
     val messageId: String,
     /** 命中词为中心的正文片段（已折叠换行空白，两端按需加省略号）。 */
     val snippet: String,
-    val timestamp: Long
+    val timestamp: Long,
+    /** 命中所属工作区路径，供全局搜索结果的分类与过滤。 */
+    val workspacePath: String = ""
 )
 
 /** 侧边栏聊天记录搜索状态：当前关键词与命中的扁平结果（按时间倒序）。 */

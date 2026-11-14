@@ -199,6 +199,7 @@ internal fun ChatInputBar(
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
     currentGoal: SessionGoalUi? = null,
+    onSetGoal: (String) -> Unit = {},
     onSetGoalPaused: (Boolean) -> Unit = {},
     onClearGoal: () -> Unit = {},
     reasoningEffort: ReasoningEffort,
@@ -636,43 +637,12 @@ internal fun ChatInputBar(
                         modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val modeColor = when (currentMode) {
-                            AgentMode.PLAN -> MaterialTheme.colorScheme.primaryContainer
-                            AgentMode.AUTO -> MaterialTheme.colorScheme.error
-                            AgentMode.BUILD -> MaterialTheme.semanticColors.success
-                        }
-                        val modeTextColor = when (currentMode) {
-                            AgentMode.PLAN -> MaterialTheme.colorScheme.onPrimaryContainer
-                            AgentMode.AUTO -> MaterialTheme.colorScheme.onError
-                            AgentMode.BUILD -> MaterialTheme.semanticColors.onSuccess
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(Radius.pill),
-                            color = modeColor,
-                            modifier = Modifier
-                                .clickable {
-                                    val nextMode = when (currentMode) {
-                                        AgentMode.BUILD -> AgentMode.PLAN
-                                        AgentMode.PLAN -> AgentMode.AUTO
-                                        AgentMode.AUTO -> AgentMode.BUILD
-                                    }
-                                    onToggleMode(nextMode)
-                                }
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = currentMode.name,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = modeTextColor
-                                    )
-                                )
-                            }
-                        }
+                        ChatModeMenu(
+                            mode = currentMode,
+                            goal = currentGoal,
+                            onSelectMode = onToggleMode,
+                            onSetGoal = onSetGoal
+                        )
                         Spacer(Modifier.width(Spacing.xs))
 
                         ModelIconButton(

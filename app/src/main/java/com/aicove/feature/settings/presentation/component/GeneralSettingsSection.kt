@@ -67,9 +67,7 @@ internal fun GeneralSettingsSection(
     goalMaxTurns: Int,
     onSetGoalMaxTurns: (Int) -> Unit,
     goalMaxTokens: Int,
-    onSetGoalMaxTokens: (Int) -> Unit,
-    deleteExternalWorkspaceSessions: Boolean,
-    onToggleDeleteExternalWorkspaceSessions: (Boolean) -> Unit
+    onSetGoalMaxTokens: (Int) -> Unit
 ) {
     var showStartupSessionSheet by remember { mutableStateOf(false) }
     var editingFirstByteTimeout by remember { mutableStateOf(false) }
@@ -158,18 +156,6 @@ internal fun GeneralSettingsSection(
                         text = stringResource(startupSessionMode.labelRes()),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.semanticColors.subtleText
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = null,
-                title = stringResource(R.string.settings_delete_external_workspace_sessions),
-                subtitle = stringResource(R.string.settings_delete_external_workspace_sessions_desc),
-                trailing = {
-                    AppSwitch(
-                        checked = deleteExternalWorkspaceSessions,
-                        onCheckedChange = onToggleDeleteExternalWorkspaceSessions
                     )
                 }
             )

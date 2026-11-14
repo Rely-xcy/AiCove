@@ -18,6 +18,14 @@ interface ChatSessionDao {
     @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun getRootSessionsByWorkspace(workspacePath: String): Flow<List<ChatSessionEntity>>
 
+    /** 所有工作区的全部根会话（不限 workspacePath），供全局聊天列表。 */
+    @Query("SELECT * FROM chat_sessions WHERE parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    fun getAllRootSessionsFlow(): Flow<List<ChatSessionEntity>>
+
+    /** 所有工作区的全部会话（含子代理），供全局子代理分组展示。 */
+    @Query("SELECT * FROM chat_sessions ORDER BY updatedAt DESC")
+    fun getAllSessionsFlow(): Flow<List<ChatSessionEntity>>
+
     @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath ORDER BY isPinned DESC, updatedAt DESC")
     suspend fun getAllSessionsByWorkspaceOnce(workspacePath: String): List<ChatSessionEntity>
 

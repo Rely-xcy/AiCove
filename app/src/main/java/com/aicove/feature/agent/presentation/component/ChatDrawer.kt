@@ -96,6 +96,7 @@ import com.aicove.core.ui.SegmentedTabs
 import com.aicove.core.ui.rememberImeBottomInset
 import com.aicove.feature.settings.presentation.component.ModelSearchField
 import com.aicove.feature.settings.presentation.component.SettingsDivider
+import com.aicove.core.ui.CollapsibleGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsGroup
 import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsRow
@@ -184,11 +185,20 @@ fun ChatDrawerContent(
     onSearchQueryChange: (String) -> Unit,
     onClearSearch: () -> Unit,
     onOpenSearchHit: (ChatSearchHit) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentWorkspacePath: String? = null,
+    workspaceNames: Map<String, String> = emptyMap()
 ) {
     // tab 与展开状态进 saveable：大屏下侧栏收起后整棵子树会离开组合（见 MainActivity 的
     // SaveableStateProvider），用 remember 存会让每次回到聊天页都重置回「会话」页。
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var currentWorkspaceOnly by rememberSaveable { mutableStateOf(false) }
+    val visibleSessions = remember(sessions, currentWorkspaceOnly, currentWorkspacePath) {
+        if (currentWorkspaceOnly) sessions.filter { it.workspacePath == currentWorkspacePath } else sessions
+    }
+    val visibleSearchState = if (currentWorkspaceOnly) {
+        searchState.copy(hits = searchState.hits.filter { it.workspacePath == currentWorkspacePath })
+    } else searchState
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     val selectedSessionIds = remember { mutableStateListOf<String>() }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
@@ -324,19 +334,26 @@ fun ChatDrawerContent(
                 onQueryChange = onSearchQueryChange,
                 onClear = onClearSearch
             )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { currentWorkspaceOnly = !currentWorkspaceOnly }) {
+                    Text(stringResource(if (currentWorkspaceOnly) R.string.chat_scope_current else R.string.chat_scope_all))
+                }
+            }
         }
 
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
                 0 -> SessionListTab(
-                    sessions = sessions,
+                    currentWorkspacePath = currentWorkspacePath,
+                    workspaceNames = workspaceNames,
+                    sessions = visibleSessions,
                     currentSessionId = currentSessionId,
                     agentStates = agentStates,
                     awaitingPermissionSessionIds = awaitingPermissionSessionIds,
                     subSessionsByParent = subSessionsByParent,
                     listState = listState,
                     searchQuery = searchQuery,
-                    searchState = searchState,
+                    searchState = visibleSearchState,
                     selectionMode = isSelectionMode,
                     selectedSessionIds = selectedSessionIds,
                     onToggleSelectSession = { s ->
@@ -525,10 +542,14 @@ private fun SessionListTab(
     onToggleSelectSession: (ChatSession) -> Unit = {},
     onSelect: (ChatSession) -> Unit,
     onLongClick: (ChatSession) -> Unit,
-    onOpenSearchHit: (ChatSearchHit) -> Unit
+    onOpenSearchHit: (ChatSearchHit) -> Unit,
+    currentWorkspacePath: String?,
+    workspaceNames: Map<String, String>
 ) {
     if (searchQuery.isBlank()) {
         SessionListContent(
+            currentWorkspacePath = currentWorkspacePath,
+            workspaceNames = workspaceNames,
             sessions = sessions,
             currentSessionId = currentSessionId,
             agentStates = agentStates,
@@ -559,7 +580,9 @@ private fun SessionListContent(
     selectedSessionIds: List<String> = emptyList(),
     onToggleSelectSession: (ChatSession) -> Unit = {},
     onSelect: (ChatSession) -> Unit,
-    onLongClick: (ChatSession) -> Unit
+    onLongClick: (ChatSession) -> Unit,
+    currentWorkspacePath: String?,
+    workspaceNames: Map<String, String>
 ) {
     if (sessions.isEmpty()) {
         Box(
@@ -581,14 +604,19 @@ private fun SessionListContent(
             restore = { it.toSet() }
         )
     ) { mutableStateOf(emptySet<String>()) }
-    val groups = remember(sessions) {
-        val now = System.currentTimeMillis()
-        val pinned = sessions.filter { it.isPinned }
-        val unpinned = sessions.filterNot { it.isPinned }
-        buildList {
-            if (pinned.isNotEmpty()) add(SessionGroup("pinned", pinned))
-            addAll(buildSessionGroups(unpinned, now))
-        }
+    val workspaceGroups = remember(sessions, currentWorkspacePath) {
+        buildWorkspaceSessionGroups(sessions, currentWorkspacePath, System.currentTimeMillis())
+    }
+    var expandedWorkspaces by rememberSaveable(
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() }
+        )
+    ) { mutableStateOf(setOfNotNull(currentWorkspacePath)) }
+    LaunchedEffect(currentWorkspacePath, currentSessionId) {
+        val selectedWorkspace = sessions.firstOrNull { it.id == currentSessionId }?.workspacePath
+            ?: subSessionsByParent.values.flatten().firstOrNull { it.id == currentSessionId }?.workspacePath
+        expandedWorkspaces = expandedWorkspaces + listOfNotNull(currentWorkspacePath, selectedWorkspace)
     }
     LazyColumn(
         state = listState,
@@ -596,8 +624,26 @@ private fun SessionListContent(
     ) {
         // 每个分组占一个 item、组内 forEach 全量渲染会让 LazyColumn 失去惰性：
         // 「最近 30 天」这种分组有上百个会话时，一个 item 就要组合上百行。分组头与会话各自成 item。
-        groups.forEach { group ->
-            item(key = "group-${group.groupKey}", contentType = "group-header") {
+        workspaceGroups.forEach { workspace ->
+            val workspaceExpanded = workspace.workspacePath in expandedWorkspaces
+            item(key = "workspace:${workspace.workspacePath}", contentType = "workspace-header") {
+                CollapsibleGroupHeader(
+                    text = workspaceNames[workspace.workspacePath]
+                        ?: workspace.workspacePath.trimEnd('/').substringAfterLast('/').ifBlank {
+                            stringResource(R.string.chat_workspace_unbound)
+                        },
+                    expanded = workspaceExpanded,
+                    onToggle = {
+                        expandedWorkspaces = if (workspaceExpanded) {
+                            expandedWorkspaces - workspace.workspacePath
+                        } else {
+                            expandedWorkspaces + workspace.workspacePath
+                        }
+                    }
+                )
+            }
+            if (workspaceExpanded) workspace.groups.forEach { group ->
+            item(key = "group:${workspace.workspacePath}:${group.groupKey}", contentType = "group-header") {
                 SettingsGroupHeader(
                     text = sessionGroupLabel(group.groupKey, group.sessions.first())
                 )
@@ -692,6 +738,7 @@ private fun SessionListContent(
                         }
                     }
                 }
+            }
             }
         }
     }

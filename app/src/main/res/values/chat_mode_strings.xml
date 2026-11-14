@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_mode_managed">自动托管</string>
+    <string name="chat_managed_goal_hint">描述要达成的目标，AI 会自主循环推进</string>
+    <string name="chat_managed_start">开始托管</string>
+</resources>

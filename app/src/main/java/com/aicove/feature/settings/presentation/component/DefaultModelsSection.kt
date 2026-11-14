@@ -1,5 +1,7 @@
 package com.aicove.feature.settings.presentation.component
 
+import com.aicove.core.ui.CollapsibleGroupHeader
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

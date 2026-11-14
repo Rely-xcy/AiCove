@@ -2388,7 +2388,8 @@ fun AIChatPanel(
                     viewModel.setSessionProviderModel(p, m)
                 },
                 currentMode = currentMode,
-                onToggleMode = { viewModel.setSessionMode(it) },
+                onToggleMode = { viewModel.setSessionMode(it, endGoal = true) },
+                onSetGoal = { viewModel.setSessionGoal(it) },
                 currentGoal = currentGoal,
                 onSetGoalPaused = { viewModel.setGoalPaused(it) },
                 onClearGoal = { viewModel.clearGoal() },
