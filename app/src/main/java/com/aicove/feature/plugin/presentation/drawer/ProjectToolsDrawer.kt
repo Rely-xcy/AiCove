@@ -60,7 +60,7 @@ import compose.icons.feathericons.Trash2
  */
 @Composable
 fun ProjectToolsDrawer(
-    workspacePath: String,
+    workspacePath: String?,
     tools: List<ProjectToolItem>,
     pluginToolsMap: Map<String, PluginWorkspaceTool>,
     languageTag: String = "zh-CN",
@@ -117,7 +117,7 @@ fun ProjectToolsDrawer(
 /** 顶部当前项目卡片 */
 @Composable
 private fun ProjectHeaderCard(
-    workspacePath: String,
+    workspacePath: String?,
     onOpenSettings: () -> Unit
 ) {
     Surface(
@@ -161,7 +161,7 @@ private fun ProjectHeaderCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = workspacePath.ifBlank { "/workspace" },
+                    text = workspacePath?.ifBlank { "/workspace" } ?: "/workspace",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

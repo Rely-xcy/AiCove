@@ -178,7 +178,21 @@ class RemoteTerminalSessionManager @Inject constructor(
         // 但 TerminalSession 构造时会 new Handler()（绑当前线程 Looper），必须在有 Looper 的线程（主线程）构造，
         // 所以只把 sshj channel 建立切到 IO，拿到 shell 句柄后回主线程构造 session。
         val shell = withContext(Dispatchers.IO) {
-            connection.startShellSession().also { it.allocateDefaultPTY() }.startShell()
+            if (command == null && !exitOnFinish) {
+                // 交互标签：带 PTY 的 exec 通道先 cd 再 exec 交互 shell，首个提示符就在工作区，
+                // 不必向已就绪的 shell 里补发 cd（那行会显示在终端输入区）。
+                connection.startShellSession().let { session ->
+                    try {
+                        session.allocateDefaultPTY()
+                        session.exec("${buildRemoteWorkspaceCdCommand(wsPath)} && exec \"\${SHELL:-/bin/sh}\" -i")
+                    } catch (e: Exception) {
+                        session.close()
+                        throw e
+                    }
+                }
+            } else {
+                connection.startShellSession().also { it.allocateDefaultPTY() }.startShell()
+            }
         }
         val backend = SshShellBackend(shell) { connection.isConnected() }
         backends[id] = backend
@@ -194,7 +208,7 @@ class RemoteTerminalSessionManager @Inject constructor(
         // 优先 ~/workspace 符号链接，失败回退到真实工作区路径。
         val workspaceCommand = buildRemoteWorkspaceCdCommand(wsPath)
         if (command == null) {
-            termSession.write("$workspaceCommand || exit\n")
+            if (!exitOnFinish) termSession.write("$workspaceCommand || exit\n")
         } else {
             // notify=true：命令后打印退出标记并 exit，让交互 shell 结束 → channel 关闭 →
             // onSessionFinished 触发；标记同时供 monitorBackgroundExit 解析真实退出码

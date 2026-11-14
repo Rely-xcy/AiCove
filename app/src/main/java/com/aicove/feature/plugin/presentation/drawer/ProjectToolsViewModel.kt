@@ -26,8 +26,8 @@ class ProjectToolsViewModel @Inject constructor(
     private val pluginManager: PluginManager
 ) : ViewModel() {
 
-    /** 当前工作区绝对路径 */
-    val currentWorkspacePath: String get() = workspaceRepository.currentPath()
+    /** 当前工作区绝对路径；工作区未落定时为 null（右侧抽屉在设置页也会参与组合，不能抛异常）。 */
+    val currentWorkspacePath: String? get() = workspaceRepository.currentPathOrNull()
 
     /** 当前工作区已启用的工具配置列表 */
     val projectTools: StateFlow<List<ProjectToolItem>> = projectToolsRepository.tools

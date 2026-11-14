@@ -2,6 +2,7 @@ package com.aicove.feature.terminal.domain
 
 import com.aicove.core.util.FileLogger
 import com.termux.terminal.SessionBackend
+import net.schmizz.sshj.connection.channel.Channel
 import net.schmizz.sshj.connection.channel.direct.Session
 import java.io.InputStream
 import java.io.OutputStream
@@ -10,23 +11,24 @@ import java.util.concurrent.Executors
 private const val TAG = "SshShellBackend"
 
 /**
- * [SessionBackend] backed by an sshj interactive shell channel ([Session.Shell]).
+ * [SessionBackend] backed by an sshj channel ([Channel]) with a PTY allocated.
  *
  * Used by [RemoteTerminalSessionManager] so the remote SSH shell drives the Termux
  * [com.termux.terminal.TerminalEmulator] exactly like a local pty would: shell output →
  * emulator, user input → shell stdin, resize → PTY window size change.
  *
- * The [Session.Shell] must already be started (with a PTY allocated) before being wrapped
- * here. [waitForExit] blocks on [Session.Shell.join]; remote shells have no meaningful
- * exit status, so 0 is returned (the emulator appends its own "[Process completed]" notice
- * via [com.termux.terminal.TerminalSession] once the reader thread hits EOF).
+ * 交互标签用带 PTY 的 exec 通道（`cd <工作区> && exec $SHELL -i`）启动，首个提示符就在工作区；
+ * 后台命令标签仍走 shell 通道。两者都是 [net.schmizz.sshj.connection.channel.Channel]，
+ * 所以这里只依赖 Channel 的读写与 join。
  *
- * 因为返回值永远是 0，「断网导致的结束」与「用户敲 exit」在 UI 上长得一模一样；[closedByDisconnect]
- * 把前者单独标出来，供 [RemoteTerminalSessionManager] 打「已断开」。返回值语义（[SessionBackend]
- * 的约定，本地终端共用）不动。
+ * [waitForExit] 仍返回 0：后台命令的真实退出码由 [RemoteTerminalSessionManager] 从输出里的
+ * 退出标记解析，不依赖 channel 的 exit status。
+ *
+ * 「断网导致的结束」与「用户敲 exit」在 UI 上长得一模一样；[closedByDisconnect]
+ * 把前者单独标出来，供 [RemoteTerminalSessionManager] 打「已断开」。
  */
 class SshShellBackend(
-    private val shell: Session.Shell,
+    private val shell: Channel,
     /** 连接是否仍然活着；由 [RemoteTerminalSessionManager] 接 RemoteSshConnection.isConnected。 */
     private val isConnectionAlive: () -> Boolean = { true }
 ) : SessionBackend {
@@ -52,7 +54,8 @@ class SshShellBackend(
     override fun resize(columns: Int, rows: Int) {
         if (closed || resizeExecutor.isShutdown) return
         resizeExecutor.execute {
-            runCatching { shell.changeWindowDimensions(columns, rows, 0, 0) }
+            // sshj 的 SessionChannel 同时实现 Command 与 Shell，窗口调整只暴露在 Shell 接口上。
+            runCatching { (shell as? Session.Shell)?.changeWindowDimensions(columns, rows, 0, 0) }
                 .onFailure { FileLogger.w(TAG, "PTY resize 失败 ${columns}x${rows}", it) }
         }
     }
