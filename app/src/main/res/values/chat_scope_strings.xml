@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="chat_scope_all">全部工作区</string>
-    <string name="chat_scope_current">当前工作区</string>
     <string name="chat_workspace_unbound">未绑定工作区</string>
 </resources>

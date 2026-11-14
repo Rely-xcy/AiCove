@@ -2115,29 +2115,27 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.w(TAG, "工作区未就绪，跳过请求")
             return@launch
         }
-        // 跨工作区校验：会话绑定的 workspacePath 必须与本次执行目标（projectRoot）一致。
-        // 不一致时拒绝执行，让用户先切换/重选工作区——不自动切 SSH、不停止所有任务。
+        // 执行前只拦两种真错误：没有可用工作区、会话绑定的目录已被删除。
+        // 路径不一致不再拒绝——全局列表里点开别的工作区的历史本就是要接着聊，
+        // 选中会话时已自动切到它所属的工作区（见 openSessionInWorkspace）。
         run {
             val boundSession = sessionUseCase.getSessionById(sessionId)
             if (boundSession != null) {
                 val boundWs = boundSession.workspacePath
-                val targetWs = _currentWorkspace.value
-                val targetUnknown = projectRoot.isBlank() || targetWs.isBlank()
-                val pathMismatch = boundWs != projectRoot || boundWs != targetWs
-                // 校验2：绑定目录必须仍然存在（检测已删除工作区的会话）
-                val dirMissing = if (pathMismatch) false else withContext(Dispatchers.IO) {
+                val targetUnknown = projectRoot.isBlank() || _currentWorkspace.value.isBlank()
+                val dirMissing = !targetUnknown && withContext(Dispatchers.IO) {
                     !fileAccess.exists("~/workspace") || !fileAccess.isDirectory("~/workspace")
                 }
-                if (targetUnknown || pathMismatch || dirMissing) {
+                if (targetUnknown || dirMissing) {
                     val workspaceName = boundWs.substringAfterLast('/')
-                    val reason = when {
-                        targetUnknown -> context.getString(R.string.cross_workspace_no_workspace)
-                        dirMissing -> context.getString(R.string.cross_workspace_dir_missing, workspaceName)
-                        else -> context.getString(R.string.cross_workspace_path_mismatch, workspaceName, targetWs)
+                    val reason = if (targetUnknown) {
+                        context.getString(R.string.cross_workspace_no_workspace)
+                    } else {
+                        context.getString(R.string.cross_workspace_dir_missing, workspaceName)
                     }
                     FileLogger.w(
                         TAG,
-                        "跨工作区执行被拒绝: sessionId=$sessionId boundWorkspace=$boundWs projectRoot=$projectRoot reason=${if (dirMissing) "dir_missing" else "path_mismatch"}"
+                        "执行被拒绝: sessionId=$sessionId boundWorkspace=$boundWs reason=${if (dirMissing) "dir_missing" else "no_workspace"}"
                     )
                     _agentStates.value = _agentStates.value + (sessionId to AgentUIState.Error(reason))
                     return@launch

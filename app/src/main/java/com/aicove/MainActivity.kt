@@ -679,8 +679,11 @@ fun AppNavigation(
             onClearClipboard = { agentViewModel.clearBrowseClipboard() },
             onPasteOverwrite = { agentViewModel.pasteBrowseEntryOverwrite() },
             onCancelPasteOverwrite = { agentViewModel.clearPasteConflict() },
-            onSelect = {
-                agentViewModel.selectSession(it.id)
+            onSelect = { session ->
+                // 聊天记录全局可见：点开别的工作区的历史就切到它所属的工作区，
+                // 否则发送时会落在错误目录。
+                session.workspacePath.takeIf { it.isNotBlank() }?.let(agentViewModel::setWorkspace)
+                agentViewModel.selectSession(session.id)
                 if (!permanentDrawer) scope.launch { drawerState.close() }
             },
             onDelete = { agentViewModel.deleteSession(it.id) },

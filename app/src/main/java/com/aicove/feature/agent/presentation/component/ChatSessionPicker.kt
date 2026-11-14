@@ -29,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,16 +56,30 @@ fun ChatSessionRow(
     trailing: (@Composable () -> Unit)? = null,
     selectionMode: Boolean = false,
     checked: Boolean = false,
-    onCheckedChange: ((Boolean) -> Unit)? = null
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    /** 分组内首/末行：只有首行上圆角、末行下圆角，中间行直角，从而连成一块卡片。 */
+    firstInGroup: Boolean = true,
+    lastInGroup: Boolean = true
 ) {
+    val cardShape = RoundedCornerShape(
+        topStart = if (firstInGroup) Radius.md else 0.dp,
+        topEnd = if (firstInGroup) Radius.md else 0.dp,
+        bottomStart = if (lastInGroup) Radius.md else 0.dp,
+        bottomEnd = if (lastInGroup) Radius.md else 0.dp
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 40.dp)
             // 圆角必须先于 combinedClickable：按住时的涟漪与置顶底色都靠这层裁剪，
             // 否则行宽一整条的反馈是直角横带，与下方圆角卡片脱节。
-            .clip(RoundedCornerShape(Radius.md))
-            .background(if (pinned) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .clip(cardShape)
+            .background(
+                when {
+                    pinned -> MaterialTheme.colorScheme.primaryContainer
+                    else -> MaterialTheme.semanticColors.cardSurface
+                }
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick

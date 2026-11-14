@@ -192,13 +192,8 @@ fun ChatDrawerContent(
     // tab 与展开状态进 saveable：大屏下侧栏收起后整棵子树会离开组合（见 MainActivity 的
     // SaveableStateProvider），用 remember 存会让每次回到聊天页都重置回「会话」页。
     var selectedTab by rememberSaveable { mutableStateOf(0) }
-    var currentWorkspaceOnly by rememberSaveable { mutableStateOf(false) }
-    val visibleSessions = remember(sessions, currentWorkspaceOnly, currentWorkspacePath) {
-        if (currentWorkspaceOnly) sessions.filter { it.workspacePath == currentWorkspacePath } else sessions
-    }
-    val visibleSearchState = if (currentWorkspaceOnly) {
-        searchState.copy(hits = searchState.hits.filter { it.workspacePath == currentWorkspacePath })
-    } else searchState
+    val visibleSessions = sessions
+    val visibleSearchState = searchState
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     val selectedSessionIds = remember { mutableStateListOf<String>() }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
@@ -334,11 +329,6 @@ fun ChatDrawerContent(
                 onQueryChange = onSearchQueryChange,
                 onClear = onClearSearch
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { currentWorkspaceOnly = !currentWorkspaceOnly }) {
-                    Text(stringResource(if (currentWorkspaceOnly) R.string.chat_scope_current else R.string.chat_scope_all))
-                }
-            }
         }
 
         Box(modifier = Modifier.weight(1f)) {
@@ -612,12 +602,10 @@ private fun SessionListContent(
             save = { it.toList() },
             restore = { it.toSet() }
         )
-    ) { mutableStateOf(setOfNotNull(currentWorkspacePath)) }
-    LaunchedEffect(currentWorkspacePath, currentSessionId) {
-        val selectedWorkspace = sessions.firstOrNull { it.id == currentSessionId }?.workspacePath
-            ?: subSessionsByParent.values.flatten().firstOrNull { it.id == currentSessionId }?.workspacePath
-        expandedWorkspaces = expandedWorkspaces + listOfNotNull(currentWorkspacePath, selectedWorkspace)
-    }
+    ) { mutableStateOf(emptySet<String>()) }
+    // 当前工作区总是展开；其他工作区的展开状态完全由用户手动控制，
+    // 不因切换会话/工作区被动撑开（否则用户收起的分组会自己又弹回来）。
+    val effectiveExpandedWorkspaces = expandedWorkspaces + listOfNotNull(currentWorkspacePath)
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize()
@@ -625,7 +613,7 @@ private fun SessionListContent(
         // 每个分组占一个 item、组内 forEach 全量渲染会让 LazyColumn 失去惰性：
         // 「最近 30 天」这种分组有上百个会话时，一个 item 就要组合上百行。分组头与会话各自成 item。
         workspaceGroups.forEach { workspace ->
-            val workspaceExpanded = workspace.workspacePath in expandedWorkspaces
+            val workspaceExpanded = workspace.workspacePath in effectiveExpandedWorkspaces
             item(key = "workspace:${workspace.workspacePath}", contentType = "workspace-header") {
                 CollapsibleGroupHeader(
                     text = workspaceNames[workspace.workspacePath]
@@ -670,6 +658,8 @@ private fun SessionListContent(
                         selectionMode = selectionMode,
                         checked = session.id in selectedSessionIds,
                         onCheckedChange = { onToggleSelectSession(session) },
+                        firstInGroup = index == 0,
+                        lastInGroup = index == group.sessions.lastIndex,
                         onClick = {
                             if (selectionMode) {
                                 onToggleSelectSession(session)

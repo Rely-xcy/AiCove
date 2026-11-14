@@ -193,20 +193,24 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
         )
     }
 
-    /** 会话绑定 A、当前工作区 B、projectRoot B → 目标与绑定不一致，拒绝。 */
+    /**
+     * 全局列表点开会话时会把当前工作区切到会话所属的那个（MainActivity.onSelect），
+     * 切完再发送就是正常路径，不应被守卫拦下。
+     */
     @Test
-    fun executeAgentRequestStream_crossWorkspace_rejected() {
+    fun switchingToSessionWorkspace_allowsSending() {
         viewModel = newViewModel()
-        viewModel.selectSession(SESSION_A)
         viewModel.setWorkspace(WORKSPACE_B)
+        viewModel.setWorkspace(WORKSPACE_A)
+        viewModel.selectSession(SESSION_A)
 
         val job = viewModel.executeAgentRequestStream(
             request = "hello",
-            projectRoot = WORKSPACE_B,
+            projectRoot = WORKSPACE_A,
             targetSessionId = SESSION_A
         )
 
-        assertRejected(job, SENTINEL_PATH_MISMATCH)
+        assertNotGuardRejected(job)
     }
 
     /** 绑定 A、当前 A、projectRoot A、目录可用 → 放行。 */
