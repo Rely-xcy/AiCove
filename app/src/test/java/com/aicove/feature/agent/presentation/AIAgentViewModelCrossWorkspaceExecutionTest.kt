@@ -1,6 +1,7 @@
 package com.aicove.feature.agent.presentation
 
 import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -109,6 +110,7 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             every { ctx.getString(R.string.cross_workspace_path_mismatch, *anyVararg()) } returns SENTINEL_PATH_MISMATCH
             every { ctx.getString(R.string.cross_workspace_dir_missing, *anyVararg()) } returns SENTINEL_DIR_MISSING
             every { ctx.getString(R.string.cross_workspace_no_workspace) } returns SENTINEL_NO_WORKSPACE
+            every { ctx.getSystemService(Context.POWER_SERVICE) } returns mockk<PowerManager>(relaxed = true)
         }
         return AIAgentViewModel(
             agentWorkflow = mockk(relaxed = true),
