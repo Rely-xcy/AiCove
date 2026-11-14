@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_shizuku_status_not_installed">Not installed</string>
+    <string name="notification_channel_plugin_events">Plugin notifications</string>
+    <string name="notification_channel_plugin_events_desc">Notifications sent by plugins through host.notify</string>
+    <string name="provider_source_plugin">Plugin</string>
+    <string name="plugins_preview_shizuku_notice">This plugin declares Android system commands executed through Shizuku. After installing, you must grant it separately in the plugin details; once granted, commands within the declared scope run directly.</string>
+    <string name="plugins_content_transform_hook">Writable Hook · %1$s</string>
+    <string name="plugins_content_review_hook">Permission Hook · %1$s</string>
+    <string name="plugins_content_provider">Provider · %1$s</string>
+    <string name="plugins_content_shizuku">Shizuku · %1$s</string>
+    <string name="plugins_shizuku_section">Shizuku permission</string>
+    <string name="plugins_shizuku_scope">After granting, any Shizuku command can run directly</string>
+    <string name="plugins_shizuku_authorized_hint">Granted. Commands in scope run directly.</string>
+    <string name="plugins_shizuku_unauthorized_hint">Not granted. The plugin cannot run commands through Shizuku.</string>
+    <string name="plugins_shizuku_system_state">System status: %1$s</string>
+    <string name="plugins_dev_section">Developer</string>
+    <string name="plugins_dev_mode">Developer sideload</string>
+    <string name="plugins_dev_mode_desc">Install plugin folders from the dev directory and reload them automatically when files change. For development only.</string>
+    <string name="plugins_dev_root">Dev directory: %1$s</string>
+    <string name="plugins_dev_refresh">Refresh</string>
+    <string name="plugins_dev_empty">Put plugin folders under the dev directory; each subfolder needs a plugin.json.</string>
+    <string name="plugins_dev_install">Install</string>
+    <string name="plugins_dev_reload">Reload</string>
+    <string name="plugins_dev_installed">Installed %1$s</string>
+    <string name="plugins_dev_not_installed">Not installed</string>
+    <string name="plugins_dev_invalid">Invalid manifest</string>
+    <string name="plugins_section_dependencies">Dependencies</string>
+    <string name="plugins_dependencies_ready">Dependencies ready</string>
+    <string name="plugins_dependencies_missing">Dependencies not prepared</string>
+    <string name="plugins_dependencies_prepare">Prepare</string>
+    <string name="plugins_dependencies_preparing">Preparing…</string>
+    <string name="project_tools_drawer_title">Project tools</string>
+</resources>

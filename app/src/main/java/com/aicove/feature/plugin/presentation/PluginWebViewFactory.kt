@@ -3,13 +3,15 @@ package com.aicove.feature.plugin.presentation
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ContextThemeWrapper
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import com.aicove.core.ui.web.PluginThemeTokens
 import androidx.webkit.WebViewAssetLoader
 import com.aicove.R
+import com.aicove.core.util.FileLogger
 import com.aicove.feature.plugin.domain.PluginSettingsPage
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -25,7 +27,10 @@ internal object PluginWebViewFactory {
 
     const val PAGE_BASE_URL = "https://appassets.androidplatform.net/plugin/"
 
-    fun pageUrl(page: PluginSettingsPage): String = PAGE_BASE_URL + page.pageFile
+    fun pageUrl(page: PluginSettingsPage): String {
+        val version = page.pluginVersion.takeIf { it.isNotBlank() }?.let { "?v=$it" }.orEmpty()
+        return PAGE_BASE_URL + page.pageFile + version
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
@@ -48,9 +53,20 @@ internal object PluginWebViewFactory {
             settings.allowContentAccess = false
             settings.domStorageEnabled = false
             settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
+            settings.loadWithOverviewMode = false
+            settings.setSupportZoom(false)
             settings.builtInZoomControls = false
+            settings.displayZoomControls = false
             setBackgroundColor(backgroundColor)
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    FileLogger.d(
+                        "PluginWebView",
+                        "[${page.pluginId}] ${message.message()} (${message.sourceId()}:${message.lineNumber()})"
+                    )
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
                     view: WebView,
@@ -87,7 +103,7 @@ internal object PluginWebViewFactory {
             if (file != root && !file.path.startsWith(prefix)) return null
             if (!file.isFile) return null
             val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
-            return WebResourceResponse(mimeOf(path), null, ByteArrayInputStream(bytes))
+            return webResource(mimeOf(path), bytes)
         }
     }
 
@@ -104,12 +120,21 @@ internal object PluginWebViewFactory {
                     ByteArrayInputStream(css.toByteArray(Charsets.UTF_8))
                 )
             }
+            if (path.isBlank() || path.startsWith("/") || path.split('/').any { it == ".." || it == "." }) {
+                return null
+            }
             val bytes = runCatching {
                 context.assets.open("plugin-ui/$path").use { it.readBytes() }
             }.getOrNull() ?: return null
-            return WebResourceResponse(mimeOf(path), null, ByteArrayInputStream(bytes))
+            return webResource(mimeOf(path), bytes)
         }
     }
+
+    /** 插件页资源禁用缓存：APK 更新后 WebView 不能继续用旧版 aicode.js。 */
+    private fun webResource(mime: String, bytes: ByteArray): WebResourceResponse =
+        WebResourceResponse(mime, "utf-8", ByteArrayInputStream(bytes)).apply {
+            setResponseHeaders(mapOf("Cache-Control" to "no-store"))
+        }
 
     private fun mimeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
         "html", "htm" -> "text/html"

@@ -6,8 +6,6 @@ import com.aicove.feature.agent.domain.skill.Skill
 import com.aicove.feature.agent.domain.skill.SkillParser
 import com.aicove.feature.agent.domain.subagent.AgentDefinition
 import com.aicove.feature.agent.domain.subagent.AgentDefinitionParser
-import com.aicove.core.ui.adaptive.AdaptiveCardRoot
-import com.aicove.core.ui.adaptive.AdaptiveCardParser
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -31,7 +29,9 @@ data class PluginWorkspaceTool(
     val description: LocalizedText,
     val icon: String,
     val category: String,
-    val cardRoot: AdaptiveCardRoot?
+    val pageFile: String,
+    val installDir: File,
+    val pluginVersion: String
 ) {
     /** 唯一的全局工具键名：`<插件ID>:<局部ID>` */
     val key: String get() = pluginContributionName(pluginId, localId)
@@ -46,14 +46,28 @@ data class PluginSettingsPage(
     val pageFile: String,
     val icon: String,
     val installDir: File,
-    val pluginVersion: String = "",
-    val dataDir: File? = null
+    val pluginVersion: String = ""
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
+
+    /** WebView/页面桥缓存键：插件版本变化后强制创建新实例，避免继续使用旧页面。 */
+    val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
 }
 
 /** 已校验存在性的插件业务入口文件。 */
-data class PluginRuntimeEntry(val type: String, val entryFile: File)
+/** 已解析的插件运行时：进程入口、启动命令与依赖，工具与 hook 共用。 */
+data class PluginRuntime(
+    val pluginId: String,
+    val type: String,
+    val installDir: File,
+    val entryFile: File,
+    val command: List<String>,
+    val dependencies: PluginDependency? = null,
+    val resident: Boolean = false
+)
+
+/** 已校验存在的依赖输入文件。 */
+data class PluginDependency(val tool: String, val file: File)
 
 /** 已解析的 AI 工具贡献：schema 已读入，handler 留给运行时按需调用。 */
 data class PluginTool(
@@ -63,18 +77,19 @@ data class PluginTool(
     val description: LocalizedText,
     val inputSchema: JsonObject,
     val handler: String,
-    val runtimeEntry: File
+    val runtime: PluginRuntime
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
-/** 已解析的生命周期 hook；[runtimeEntry] 与工具共用插件 runtime 的入口文件。 */
+/** 已解析的生命周期 hook；[runtime] 与工具共用同一个插件运行时。 */
 data class PluginHook(
     val pluginId: String,
     val localId: String,
     val event: String,
     val handler: String,
-    val runtimeEntry: File
+    val runtime: PluginRuntime,
+    val mode: String = PluginHookModes.OBSERVE
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
@@ -89,15 +104,36 @@ data class PluginMcpServer(
     val key: String get() = "$pluginId:$localId:$originalName"
 }
 
+/** 已解析的插件提供商：宿主只读取兼容服务地址与模型，不接触上游协议。 */
+data class PluginProviderDefinition(
+    val pluginId: String,
+    val localId: String,
+    val name: LocalizedText,
+    val description: LocalizedText,
+    val format: String,
+    val baseUrl: String,
+    val pluginVersion: String
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
+/** 已解析的 Shizuku 声明：仅用途说明，授权后可直接执行任意命令。 */
+data class PluginShizukuDefinition(
+    val pluginId: String,
+    val purpose: String
+)
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
     val settingsPages: List<PluginSettingsPage> = emptyList(),
-    val runtime: PluginRuntimeEntry? = null,
+    val runtime: PluginRuntime? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
+    val providers: List<PluginProviderDefinition> = emptyList(),
+    val shizuku: PluginShizukuDefinition? = null,
     val configPage: PluginSettingsPage? = null
 )
 
@@ -122,18 +158,55 @@ object PluginContentLoader {
         val errors = mutableListOf<PluginError>()
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
-        val workspaceTools = manifest.workspaceTools.map { loadWorkspaceTool(dir, manifest.id, it, errors) }
-        val settingsPages = manifest.settingsPages.mapNotNull { loadSettingsPage(dir, manifest.id, it, errors) }
-        val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
+        val workspaceTools = manifest.workspaceTools.map {
+            loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
+        val settingsPages = manifest.settingsPages.mapNotNull {
+            loadSettingsPage(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
+        val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
         val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
-        val configPage = manifest.configPage?.let { loadConfigPage(dir, manifest.id, it, errors) }
+        val providers = manifest.providers.map { provider ->
+            PluginProviderDefinition(
+                pluginId = manifest.id,
+                localId = provider.id,
+                name = provider.name,
+                description = provider.description,
+                format = provider.format,
+                baseUrl = provider.baseUrl,
+                pluginVersion = manifest.version.toString()
+            )
+        }
+        val configPage = manifest.configPage?.let {
+            loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
+        val shizuku = manifest.shizuku?.let {
+            PluginShizukuDefinition(
+                pluginId = manifest.id,
+                purpose = it.purpose
+            )
+        }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp, configPage))
+            ContentLoadResult.Ok(
+                PluginContent(
+                    skills = skills,
+                    agents = agents,
+                    workspaceTools = workspaceTools,
+                    settingsPages = settingsPages,
+                    runtime = runtime,
+                    tools = tools,
+                    hooks = hooks,
+                    mcp = mcp,
+                    providers = providers,
+                    shizuku = shizuku,
+                    configPage = configPage
+                )
+            )
         } else {
             ContentLoadResult.Failed(errors)
         }
@@ -174,11 +247,12 @@ object PluginContentLoader {
         if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-') c else '_'
     }.joinToString("").ifBlank { "server" }
 
-    private fun loadRuntimeEntry(
+    private fun loadRuntime(
         dir: File,
+        pluginId: String,
         ref: PluginRuntimeRef,
         errors: MutableList<PluginError>
-    ): PluginRuntimeEntry? {
+    ): PluginRuntime? {
         val file = File(dir, ref.entry)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
         if (!inside || !file.isFile) {
@@ -189,14 +263,37 @@ object PluginContentLoader {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.entry}: too large")
             return null
         }
-        return PluginRuntimeEntry(ref.type, file)
+        val dependency = ref.dependencies?.let { dep ->
+            val depFile = File(dir, dep.file)
+            val depInside = depFile.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+            if (!depInside || !depFile.isFile) {
+                errors += PluginError(PluginErrorCode.FILE_MISSING, dep.file)
+                return null
+            }
+            PluginDependency(dep.tool, depFile)
+        }
+        return PluginRuntime(
+            pluginId = pluginId,
+            type = ref.type,
+            installDir = dir,
+            entryFile = file,
+            command = ref.command ?: defaultCommand(ref.type, ref.entry),
+            dependencies = dependency,
+            resident = ref.resident
+        )
+    }
+
+    private fun defaultCommand(type: String, entry: String): List<String> = when (type) {
+        PluginRuntimeTypes.JAVASCRIPT -> listOf("node", entry)
+        PluginRuntimeTypes.PYTHON -> listOf("python3", entry)
+        else -> emptyList()
     }
 
     private fun loadTool(
         dir: File,
         pluginId: String,
         ref: PluginToolRef,
-        runtime: PluginRuntimeEntry?,
+        runtime: PluginRuntime?,
         errors: MutableList<PluginError>
     ): PluginTool? {
         if (runtime == null) return null
@@ -218,14 +315,14 @@ object PluginContentLoader {
             description = ref.description,
             inputSchema = schema,
             handler = ref.handler,
-            runtimeEntry = runtime.entryFile
+            runtime = runtime
         )
     }
 
     private fun loadHook(
         pluginId: String,
         ref: PluginHookRef,
-        runtime: PluginRuntimeEntry?
+        runtime: PluginRuntime?
     ): PluginHook? {
         if (runtime == null) return null
         return PluginHook(
@@ -233,26 +330,29 @@ object PluginContentLoader {
             localId = ref.id,
             event = ref.event,
             handler = ref.handler,
-            runtimeEntry = runtime.entryFile
+            runtime = runtime,
+            mode = ref.mode
         )
     }
 
     private fun loadWorkspaceTool(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         ref: PluginWorkspaceToolRef,
         errors: MutableList<PluginError>
     ): PluginWorkspaceTool {
         val file = File(dir, ref.pageFile)
-        val card = if (file.isFile && file.length() <= MAX_CONTENT_BYTES) {
-            val text = runCatching { file.readText() }.getOrNull()
-            text?.let { AdaptiveCardParser.parseAdaptiveCard(it) }
-        } else null
-
-        if (card == null && ref.pageFile.isNotBlank() && !file.exists()) {
-            errors.add(PluginError(PluginErrorCode.FILE_MISSING, ref.pageFile))
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        val isHtml = ref.pageFile.endsWith(".html", ignoreCase = true) ||
+            ref.pageFile.endsWith(".htm", ignoreCase = true)
+        if (!isHtml) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.pageFile}: workspace tool page must be html")
+        } else if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.pageFile)
+        } else if (file.length() > MAX_CONTENT_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.pageFile}: too large")
         }
-
         return PluginWorkspaceTool(
             pluginId = pluginId,
             localId = ref.id,
@@ -260,7 +360,9 @@ object PluginContentLoader {
             description = ref.description,
             icon = ref.icon,
             category = ref.category,
-            cardRoot = card
+            pageFile = ref.pageFile,
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 
@@ -268,6 +370,7 @@ object PluginContentLoader {
     private fun loadSettingsPage(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         ref: PluginSettingsPageRef,
         errors: MutableList<PluginError>
     ): PluginSettingsPage? {
@@ -288,7 +391,8 @@ object PluginContentLoader {
             anchor = ref.anchor,
             pageFile = ref.page,
             icon = ref.icon,
-            installDir = dir
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 
@@ -296,6 +400,7 @@ object PluginContentLoader {
     private fun loadConfigPage(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         relativePath: String,
         errors: MutableList<PluginError>
     ): PluginSettingsPage? {
@@ -316,7 +421,8 @@ object PluginContentLoader {
             anchor = "",
             pageFile = relativePath,
             icon = "settings",
-            installDir = dir
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 

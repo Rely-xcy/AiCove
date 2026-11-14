@@ -27,7 +27,7 @@ import kotlinx.serialization.json.longOrNull
  *
  * 对模型暴露的名字带 `plugin__` 命名空间并清洗成 function-calling 合法字符；实际调用时用
  * 清单里的 handler 交给 [PluginRuntimeManager]。工具统一按外部工具处理：默认 ASK，
- * PLAN 模式下由权限策略拦截，不信任插件自报的“只读”声明。
+ * PLAN 模式下由权限策略拦截，不信任插件自报的"只读"声明。
  */
 class PluginToolAdapter(
     private val context: Context,
@@ -68,14 +68,14 @@ class PluginToolAdapter(
             val result = runtime.invoke(
                 pluginId = pluginId,
                 version = pluginVersion,
-                entryFile = tool.runtimeEntry,
+                runtime = tool.runtime,
                 handler = tool.handler,
                 args = JsonObject(args)
             )
             ToolResult.Success(result)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: PluginRuntimeException) {
+        } catch (e: PluginProcessException) {
             FileLogger.w(TAG, "插件工具执行失败: $pluginId/${tool.localId} (${e.code})")
             ToolResult.Error(e.message ?: context.getString(R.string.plugin_runtime_failed), e.code)
         } catch (e: Exception) {

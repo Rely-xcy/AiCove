@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_provider_missing_bound">Plugin provider “%1$s” was deleted, or its plugin was disabled or uninstalled. Choose a model again.</string>
+    <string name="plugin_provider_missing_default">The default plugin provider was deleted, or its plugin was disabled or uninstalled. Choose a model again.</string>
+    <string name="plugin_hook_denied">The plugin blocked this tool call</string>
+    <string name="plugin_review_denied">The plugin review denied this tool call</string>
+</resources>

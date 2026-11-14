@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * 一个已安装插件的宿主侧记录。启停、授权与包摘要只存在这里，由宿主独占写入，
+ * 一个已安装插件的宿主侧记录。启停与包摘要只存在这里，由宿主独占写入，
  * 不放进插件包目录，插件包内容无法改动它。
  */
 @Serializable
@@ -23,14 +23,16 @@ data class PluginRecord(
     val origin: String,
     val archiveSha256: String,
     val manifestSha256: String,
-    /** 使用者已授予的能力 ID。 */
-    val grants: List<String> = emptyList()
+    /** 依赖是否已在本容器准备完成。 */
+    val dependenciesReady: Boolean = false,
+    /** 依赖输入文件的 sha256；变化后需要重新准备。 */
+    val dependenciesHash: String? = null
 )
 
 @Serializable
 private data class RegistryFile(val schema: Int = SCHEMA, val plugins: List<PluginRecord> = emptyList())
 
-private const val SCHEMA = 1
+private const val SCHEMA = 3
 
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {
@@ -40,7 +42,7 @@ class PluginRegistryStore(private val file: File) {
         if (!file.isFile) return emptyList()
         return try {
             val parsed = JSON.decodeFromString<RegistryFile>(file.readText())
-            if (parsed.schema != SCHEMA) throw IllegalStateException("schema=${parsed.schema}")
+            if (parsed.schema !in 1..SCHEMA) throw IllegalStateException("schema=${parsed.schema}")
             parsed.plugins.filter { record ->
                 PluginManifestParser.isValidPluginId(record.id).also { valid ->
                     if (!valid) FileLogger.w(TAG, "忽略 ID 非法的插件记录")

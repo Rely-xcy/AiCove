@@ -4,17 +4,38 @@
   var pending = {};
   var nextId = 1;
 
-  var backHandler = null;
+  // 页面内返回处理器栈：后注册的优先执行，返回 true 的处理器消费本次返回。
+  var backHandlers = [];
+  var eventHandlers = [];
+
+  // 宿主推送插件事件：payload 是 JSON 字符串，形如 { name, payload }。
+  window.__aicodeEvent = function (payload) {
+    var event;
+    try {
+      event = payload ? JSON.parse(payload) : null;
+    } catch (e) {
+      return;
+    }
+    eventHandlers.slice().forEach(function (handler) {
+      try {
+        handler(event);
+      } catch (e) {
+        console.error('aicode: event handler failed', e);
+      }
+    });
+  };
 
   // 宿主返回键派发入口：页面注册的处理器同步返回 true 表示已消费，宿主不再退出插件页。
   window.__aicodeBack = function () {
-    if (typeof backHandler !== 'function') return false;
-    try {
-      return backHandler() === true;
-    } catch (e) {
-      console.error('aicode: back handler failed', e);
-      return false;
+    var snapshot = backHandlers.slice();
+    for (var i = snapshot.length - 1; i >= 0; i--) {
+      try {
+        if (snapshot[i]() === true) return true;
+      } catch (e) {
+        console.error('aicode: back handler failed', e);
+      }
     }
+    return false;
   };
 
   window.__aicodeResolve = function (id, payload) {
@@ -66,15 +87,63 @@
     toast: function (message) {
       return call('toast', { message: String(message) });
     },
+    // 在对话内显示可关闭提示条；options.action = { label, handler } 时点击会回调插件进程。
+    tip: function (options) {
+      return call('tip', options || {});
+    },
+    // 通过 Shizuku 在 Android 系统执行命令；需插件声明范围且使用者已单独授权。
+    shizuku: {
+      exec: function (command, options) {
+        var params = { command: String(command) };
+        if (options && options.timeout != null) params.timeout = Number(options.timeout);
+        return call('shizuku.exec', params);
+      }
+    },
     ui: {
       close: function () {
         return call('ui.close');
       },
+      // 页面内全屏弹层开关：打开时宿主按矩形在全局背景图上挖洞，关闭后恢复。
+      setOverlay: function (visible, rect) {
+        var params = { visible: visible !== false };
+        if (params.visible && rect) {
+          params.rect = {
+            left: Number(rect.left) || 0,
+            top: Number(rect.top) || 0,
+            width: Number(rect.width) || 0,
+            height: Number(rect.height) || 0,
+            topRadius: Number(rect.topRadius) || 0,
+            bottomRadius: Number(rect.bottomRadius) || 0,
+            coversBottom: rect.coversBottom === true
+          };
+        }
+        return call('ui.overlay', params);
+      },
       // 注册页面内返回：系统返回手势 / 返回键先交给它，返回 true 时宿主不退出插件页。
+      // 返回的 Promise 解析为注销函数，便于弹窗等临时界面关闭后移除处理器。
       onBack: function (handler) {
-        backHandler = typeof handler === 'function' ? handler : null;
-        return Promise.resolve();
+        if (typeof handler !== 'function') return Promise.resolve(function () {});
+        backHandlers.push(handler);
+        return Promise.resolve(function () {
+          var index = backHandlers.indexOf(handler);
+          if (index >= 0) backHandlers.splice(index, 1);
+        });
       }
+    },
+    // 监听插件进程主动发出的事件；返回取消订阅函数。
+    events: {
+      on: function (handler) {
+        if (typeof handler !== 'function') return function () {};
+        eventHandlers.push(handler);
+        return function () {
+          var index = eventHandlers.indexOf(handler);
+          if (index >= 0) eventHandlers.splice(index, 1);
+        };
+      }
+    },
+    // 调用同一插件的常驻进程 handler，返回 handler 的 result；不支持跨插件调用。
+    invoke: function (handler, args) {
+      return call('plugin.invoke', { handler: String(handler), args: args || {} });
     },
     // 在当前工作区执行一次性 Shell 命令，返回 { output, exitCode, truncated }。
     // 需要插件获得 workspace.exec 授权；环境检测等短命令使用，不适合常驻进程。
@@ -82,6 +151,24 @@
       var params = { command: String(command) };
       if (options && options.timeout != null) params.timeout = Number(options.timeout);
       return call('bash', params);
+    },
+    // 插件显式选择共享终端标签：命令在后台运行，页面关闭也不会停止。
+    // run 返回 { tabId, state }；用 poll 按偏移读增量输出，stop 发 Ctrl-C，close 关闭标签。
+    terminal: {
+      run: function (command, options) {
+        var params = { command: String(command) };
+        if (options && options.title != null) params.title = String(options.title);
+        return call('terminal.run', params);
+      },
+      poll: function (tabId, offset) {
+        return call('terminal.poll', { tabId: String(tabId), offset: Number(offset) || 0 });
+      },
+      stop: function (tabId) {
+        return call('terminal.stop', { tabId: String(tabId) });
+      },
+      close: function (tabId) {
+        return call('terminal.close', { tabId: String(tabId) });
+      }
     },
     fs: {
       read: function (path) {
@@ -104,6 +191,11 @@
       Object.keys(variables || {}).forEach(function (key) {
         document.documentElement.style.setProperty(key, variables[key]);
       });
+      try {
+        window.dispatchEvent(new CustomEvent('aicode:theme', { detail: variables || {} }));
+      } catch (e) {
+        // 旧 WebView 不支持 CustomEvent 时忽略。
+      }
     }
   };
 })();

@@ -314,6 +314,13 @@ fun ProviderItem(
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (provider.pluginProviderId != null) {
+                            McpPill(
+                                text = stringResource(R.string.provider_source_plugin),
+                                textColor = MaterialTheme.colorScheme.primary,
+                                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            )
+                        }
                     }
                 }
             }

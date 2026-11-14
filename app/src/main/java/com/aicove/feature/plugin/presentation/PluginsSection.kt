@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.presentation
 
+import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,12 +48,14 @@ import androidx.compose.ui.unit.dp
 import com.aicove.R
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
+import com.aicove.core.util.FileLogger
 import com.aicove.core.ui.AppSwitch
 import com.aicove.core.ui.SegmentedTabs
 import com.aicove.core.ui.SwipeToDeleteRow
+import com.aicove.feature.agent.domain.shizuku.ShizukuState
 import com.aicove.feature.plugin.domain.InstalledPlugin
+import com.aicove.feature.plugin.domain.PluginHookModes
 import com.aicove.feature.plugin.domain.PluginMcpServer
-import com.aicove.feature.plugin.domain.PluginPermission
 import com.aicove.feature.plugin.domain.PluginSettingsPage
 import com.aicove.feature.plugin.domain.PluginStatus
 import com.aicove.feature.settings.presentation.component.LazyGroupItem
@@ -64,6 +70,7 @@ import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ExternalLink
 import compose.icons.feathericons.Package
 import compose.icons.feathericons.Search
+import kotlinx.coroutines.delay
 
 /** 当前界面语言标签，用于挑选插件自带的多语言文本。 */
 @Composable
@@ -86,21 +93,6 @@ internal fun mcpDescription(server: PluginMcpServer): String {
     return if (target.isBlank()) transport else "$transport · $target"
 }
 
-@Composable
-internal fun PluginPermission.label(): String = stringResource(
-    when (this) {
-        PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
-        PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
-        PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
-        PluginPermission.WORKSPACE_EXEC -> R.string.plugins_permission_workspace_exec
-        PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
-        PluginPermission.AGENT_EVENTS -> R.string.plugins_permission_agent_events
-        PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register
-        PluginPermission.MCP_CONNECT -> R.string.plugins_permission_mcp_connect
-        PluginPermission.SETTINGS_PAGES -> R.string.plugins_permission_settings_pages
-    }
-)
-
 /**
  * 设置 → 插件：类似 MCP 风格的插件卡片列表。
  * 包含左侧方块图标、主标题、描述摘要、元信息/能力 Pills、状态指示 Pill 与左滑卸载。
@@ -111,20 +103,15 @@ internal fun PluginsSection(
     loaded: Boolean,
     onOpenDetail: (InstalledPlugin) -> Unit,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
-    onUninstall: (InstalledPlugin) -> Unit = {}
+    onUninstall: (InstalledPlugin) -> Unit = {},
+    devMode: Boolean = false,
+    devRootPath: String = "",
+    devProjects: List<PluginDevProject> = emptyList(),
+    onSetDevMode: (Boolean) -> Unit = {},
+    onRefreshDevProjects: () -> Unit = {},
+    onInstallDevProject: (PluginDevProject) -> Unit = {}
 ) {
     if (!loaded) return
-    if (plugins.isEmpty()) {
-        SettingsEmptyState(
-            icon = FeatherIcons.Package,
-            title = stringResource(R.string.plugins_empty_title),
-            hint = stringResource(R.string.plugins_empty_hint),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = Spacing.xl, vertical = 48.dp)
-        )
-        return
-    }
 
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -152,6 +139,28 @@ internal fun PluginsSection(
             contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
+            item(key = "developer", contentType = "developer") {
+                PluginDeveloperSection(
+                    devMode = devMode,
+                    devRootPath = devRootPath,
+                    projects = devProjects,
+                    onSetDevMode = onSetDevMode,
+                    onRefresh = onRefreshDevProjects,
+                    onInstall = onInstallDevProject
+                )
+            }
+            if (plugins.isEmpty() && !devMode) {
+                item(key = "empty", contentType = "empty") {
+                    SettingsEmptyState(
+                        icon = FeatherIcons.Package,
+                        title = stringResource(R.string.plugins_empty_title),
+                        hint = stringResource(R.string.plugins_empty_hint),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.xl, vertical = 48.dp)
+                    )
+                }
+            }
             if (plugins.size >= 3) {
                 item(key = "search", contentType = "search") {
                     ModelSearchField(
@@ -163,7 +172,7 @@ internal fun PluginsSection(
                 }
             }
 
-            if (filteredPlugins.isEmpty()) {
+            if (filteredPlugins.isEmpty() && plugins.isNotEmpty()) {
                 item(key = "search-empty", contentType = "empty") {
                     Box(
                         modifier = Modifier
@@ -243,7 +252,6 @@ private fun PluginRow(
         plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_status_incompatible)
         plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_status_damaged)
         !plugin.record.enabled -> stringResource(R.string.plugins_status_disabled)
-        plugin.missingRequired.isNotEmpty() -> stringResource(R.string.plugins_status_needs_permission)
         else -> stringResource(R.string.plugins_status_active)
     }
 
@@ -252,8 +260,6 @@ private fun PluginRow(
             MaterialTheme.colorScheme.error
         !plugin.record.enabled ->
             MaterialTheme.colorScheme.outline
-        plugin.missingRequired.isNotEmpty() ->
-            MaterialTheme.semanticColors.warning
         else ->
             MaterialTheme.colorScheme.tertiary
     }
@@ -437,15 +443,72 @@ private fun PluginRow(
 internal fun PluginDetailSection(
     plugin: InstalledPlugin,
     onToggleEnabled: (Boolean) -> Unit,
-    onTogglePermission: (PluginPermission, Boolean) -> Unit,
     onUninstall: () -> Unit,
     bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
-    onClosePage: () -> Unit = {}
+    onClosePage: () -> Unit = {},
+    dependencyState: PluginDependencyUiState? = null,
+    onPrepareDependencies: () -> Unit = {},
+    shizukuGranted: Boolean = false,
+    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
     val hasConfigPage = configPage != null && bridgeFactory != null
-    var selectedTab by rememberSaveable(plugin.id) { mutableIntStateOf(0) }
+    var selectedTab by remember(plugin.id) { mutableIntStateOf(0) }
+
+    val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
+    val semantic = MaterialTheme.semanticColors
+    val fontScale = LocalConfiguration.current.fontScale
+    val themeDark = PluginThemeTokens.isDark(colorScheme)
+    val themeVariables = remember(colorScheme, semantic, fontScale) {
+        PluginThemeTokens.variables(colorScheme, semantic, fontScale)
+    }
+    val pageBackground = semantic.pageBackground.toArgb()
+
+    // 详情页打开后预热专属配置页：切到「插件配置」时直接复用已加载页面，避免首次进入现建 WebView 的白屏。
+    // WebView 尚未挂到窗口，先按屏幕尺寸布局再加载，否则页面会按 0×0 视口完成首次布局。
+    LaunchedEffect(plugin.id, hasConfigPage) {
+        if (!hasConfigPage) return@LaunchedEffect
+        val url = PluginWebViewFactory.pageUrl(configPage)
+        delay(200)
+        if (PluginWebViewCache.isLoaded(configPage.cacheKey, url)) return@LaunchedEffect
+        runCatching {
+            val webView = PluginWebViewCache.take(configPage.cacheKey) ?: PluginWebViewFactory.create(
+                context = context,
+                page = configPage,
+                dark = themeDark,
+                backgroundColor = pageBackground,
+                themeVariables = { themeVariables },
+                onPageFinished = { view ->
+                    PluginWebViewCache.markLoaded(configPage.cacheKey, url)
+                    view.evaluateJavascript(PluginThemeTokens.applyScript(themeVariables), null)
+                },
+                onMainFrameError = { PluginWebViewCache.clearLoading(configPage.cacheKey) }
+            )
+            PluginWebViewCache.put(configPage.cacheKey, webView)
+            if (PluginWebViewCache.takeBridge(configPage.cacheKey) == null) {
+                val bridge = bridgeFactory(
+                    configPage,
+                    { script -> runCatching { webView.evaluateJavascript(script, null) } },
+                    onClosePage
+                )
+                webView.addJavascriptInterface(bridge, "__aicodeBridge")
+                PluginWebViewCache.putBridge(configPage.cacheKey, bridge)
+            }
+            PluginWebViewCache.markLoading(configPage.cacheKey, url)
+            val metrics = context.resources.displayMetrics
+            webView.measure(
+                View.MeasureSpec.makeMeasureSpec(metrics.widthPixels, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(metrics.heightPixels, View.MeasureSpec.EXACTLY)
+            )
+            webView.layout(0, 0, metrics.widthPixels, metrics.heightPixels)
+            webView.loadUrl(url)
+        }.onFailure { error ->
+            FileLogger.w("PluginsSection", "插件配置页预热失败", error)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (hasConfigPage) {
@@ -470,8 +533,12 @@ internal fun PluginDetailSection(
                 hasConfigPage = hasConfigPage,
                 onNavigateToConfigTab = { selectedTab = 1 },
                 onToggleEnabled = onToggleEnabled,
-                onTogglePermission = onTogglePermission,
-                onUninstall = onUninstall
+                onUninstall = onUninstall,
+                dependencyState = dependencyState,
+                onPrepareDependencies = onPrepareDependencies,
+                shizukuGranted = shizukuGranted,
+                shizukuState = shizukuState,
+                onSetShizukuGranted = onSetShizukuGranted
             )
         } else {
             // Tab 1: 插件自己的专属 WebView 配置页面
@@ -481,7 +548,8 @@ internal fun PluginDetailSection(
                 bridgeFactory = { post, onClose ->
                     bridgeFactory(configPage, post, onClose)
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                applySystemBarInsets = false
             )
         }
     }
@@ -495,8 +563,12 @@ private fun PluginNativeConfigContent(
     hasConfigPage: Boolean,
     onNavigateToConfigTab: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onTogglePermission: (PluginPermission, Boolean) -> Unit,
-    onUninstall: () -> Unit
+    onUninstall: () -> Unit,
+    dependencyState: PluginDependencyUiState? = null,
+    onPrepareDependencies: () -> Unit = {},
+    shizukuGranted: Boolean = false,
+    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
     var confirmUninstall by remember { mutableStateOf(false) }
@@ -536,6 +608,55 @@ private fun PluginNativeConfigContent(
                     onCheckedChange = onToggleEnabled,
                     enabled = plugin.status == PluginStatus.OK
                 )
+            }
+        }
+
+        plugin.content.shizuku?.let { declaration ->
+            SettingsGroupHeader(text = stringResource(R.string.plugins_shizuku_section))
+            SettingsGroup {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.plugins_shizuku_scope),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = declaration.purpose,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = stringResource(
+                                if (shizukuGranted) R.string.plugins_shizuku_authorized_hint
+                                else R.string.plugins_shizuku_unauthorized_hint
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (shizukuGranted) MaterialTheme.semanticColors.success
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (shizukuState != ShizukuState.READY) {
+                            Text(
+                                text = stringResource(
+                                    R.string.plugins_shizuku_system_state,
+                                    stringResource(shizukuState.statusLabelRes())
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    AppSwitch(
+                        checked = shizukuGranted,
+                        onCheckedChange = onSetShizukuGranted,
+                        enabled = plugin.isActive
+                    )
+                }
             }
         }
 
@@ -607,8 +728,10 @@ private fun PluginNativeConfigContent(
                 val aiTools = plugin.content.tools
                 val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
+                val providers = plugin.content.providers
+                val shizuku = plugin.content.shizuku
                 if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty()
+                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty() && shizuku == null
                 ) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
@@ -620,77 +743,84 @@ private fun PluginNativeConfigContent(
                     )
                 }
                 val rows = skills.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_skill, it.skill.name),
-                        it.skill.description,
-                        PluginPermission.SKILLS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_skill, it.skill.name) to it.skill.description
                 } + agents.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_agent, it.definition.name),
-                        it.definition.description,
-                        PluginPermission.AGENTS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_agent, it.definition.name) to it.definition.description
                 } + workspaceTools.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)),
-                        it.description.resolve(languageTag),
-                        PluginPermission.WORKSPACE_TOOLS
-                    )
+                    stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)) to
+                        it.description.resolve(languageTag)
                 } + settingsPages.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)),
-                        it.anchor,
-                        PluginPermission.SETTINGS_PAGES
-                    )
+                    stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)) to it.anchor
                 } + aiTools.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)),
-                        it.description.resolve(languageTag),
-                        PluginPermission.TOOLS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
+                        it.description.resolve(languageTag)
                 } + hooks.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_hook, it.event),
-                        it.handler,
-                        PluginPermission.AGENT_EVENTS
-                    )
-                } + mcpServers.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_mcp, it.originalName),
-                        mcpDescription(it),
-                        PluginPermission.MCP_CONNECT
-                    )
-                }
-                rows.forEachIndexed { index, (title, description, permission) ->
-                    if (index > 0) SettingsDivider()
-                    val active = plugin.isActive && when (permission) {
-                        PluginPermission.MCP_CONNECT ->
-                            PluginPermission.MCP_REGISTER in plugin.granted &&
-                                PluginPermission.MCP_CONNECT in plugin.granted
-                        PluginPermission.AGENT_EVENTS ->
-                            PluginPermission.AGENT_EVENTS in plugin.granted
-                        else -> permission in plugin.granted
+                    val title = when (it.mode) {
+                        PluginHookModes.TRANSFORM -> stringResource(R.string.plugins_content_transform_hook, it.event)
+                        PluginHookModes.REVIEW -> stringResource(R.string.plugins_content_review_hook, it.event)
+                        else -> stringResource(R.string.plugins_content_hook, it.event)
                     }
-                    ContentRow(
-                        title = title,
-                        description = description,
-                        active = active
-                    )
+                    title to it.handler
+                } + mcpServers.map {
+                    stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
+                } + providers.map {
+                    stringResource(R.string.plugins_content_provider, it.name.resolve(languageTag)) to it.baseUrl
+                } + listOfNotNull(
+                    shizuku?.let {
+                        stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
+                    }
+                )
+                rows.forEachIndexed { index, (title, description) ->
+                    if (index > 0) SettingsDivider()
+                    ContentRow(title = title, description = description, active = plugin.isActive)
                 }
             }
+        }
 
-            SettingsGroupHeader(text = stringResource(R.string.plugins_section_permissions))
+        val dependency = plugin.content.runtime?.dependencies
+        if (dependency != null) {
+            SettingsGroupHeader(text = stringResource(R.string.plugins_section_dependencies))
             SettingsGroup {
-                manifest.permissions.forEachIndexed { index, request ->
-                    if (index > 0) SettingsDivider()
-                    PermissionRow(
-                        label = request.permission.label(),
-                        reason = request.reason.resolve(languageTag),
-                        required = request.required,
-                        granted = request.permission in plugin.granted,
-                        onToggle = { onTogglePermission(request.permission, it) }
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        val ready = dependencyState?.ready ?: plugin.record.dependenciesReady
+                        Text(
+                            text = stringResource(
+                                if (ready) R.string.plugins_dependencies_ready
+                                else R.string.plugins_dependencies_missing
+                            ),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = dependency.file.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        dependencyState?.message?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    TextButton(
+                        onClick = onPrepareDependencies,
+                        enabled = dependencyState?.running != true
+                    ) {
+                        Text(
+                            stringResource(
+                                if (dependencyState?.running == true) R.string.plugins_dependencies_preparing
+                                else R.string.plugins_dependencies_prepare
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -732,7 +862,6 @@ private fun PluginNativeConfigContent(
 private fun enableHint(plugin: InstalledPlugin): String = when {
     plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_hint_incompatible)
     plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_hint_damaged)
-    plugin.missingRequired.isNotEmpty() -> stringResource(R.string.plugins_hint_needs_permission)
     else -> stringResource(R.string.plugins_enable_hint)
 }
 
@@ -784,32 +913,117 @@ private fun ContentRow(title: String, description: String, active: Boolean) {
 }
 
 @Composable
-private fun PermissionRow(
-    label: String,
-    reason: String,
-    required: Boolean,
-    granted: Boolean,
-    onToggle: (Boolean) -> Unit
+private fun PluginDeveloperSection(
+    devMode: Boolean,
+    devRootPath: String,
+    projects: List<PluginDevProject>,
+    onSetDevMode: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    onInstall: (PluginDevProject) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "$label · ${stringResource(if (required) R.string.plugins_permission_required else R.string.plugins_permission_optional)}",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    SettingsGroupHeader(text = stringResource(R.string.plugins_dev_section))
+    SettingsGroup {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.plugins_dev_mode),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(R.string.plugins_dev_mode_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppSwitch(checked = devMode, onCheckedChange = onSetDevMode)
         }
-        Spacer(modifier = Modifier.width(Spacing.md))
-        AppSwitch(checked = granted, onCheckedChange = onToggle)
     }
+
+    if (!devMode) return
+
+    Spacer(Modifier.height(Spacing.xs))
+    SettingsGroup {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.plugins_dev_root, devRootPath),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onRefresh) {
+                Text(stringResource(R.string.plugins_dev_refresh))
+            }
+        }
+    }
+
+    if (projects.isEmpty()) {
+        Text(
+            text = stringResource(R.string.plugins_dev_empty),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
+        return
+    }
+
+    SettingsGroup {
+        projects.forEachIndexed { index, project ->
+            if (index > 0) SettingsDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = project.dirName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = when {
+                            project.error != null -> stringResource(R.string.plugins_dev_invalid)
+                            project.installedVersion != null -> stringResource(
+                                R.string.plugins_dev_installed,
+                                project.installedVersion
+                            )
+                            else -> stringResource(R.string.plugins_dev_not_installed)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(
+                    onClick = { onInstall(project) },
+                    enabled = project.error == null
+                ) {
+                    Text(
+                        stringResource(
+                            if (project.installedVersion != null) R.string.plugins_dev_reload
+                            else R.string.plugins_dev_install
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun ShizukuState.statusLabelRes(): Int = when (this) {
+    ShizukuState.NOT_INSTALLED -> R.string.settings_shizuku_status_not_installed
+    ShizukuState.NOT_RUNNING -> R.string.settings_shizuku_status_not_running
+    ShizukuState.PERMISSION_DENIED -> R.string.settings_shizuku_status_denied
+    ShizukuState.READY -> R.string.settings_shizuku_status_ready
 }

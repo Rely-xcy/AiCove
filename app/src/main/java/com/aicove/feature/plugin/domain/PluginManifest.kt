@@ -1,38 +1,5 @@
 package com.aicove.feature.plugin.domain
 
-/**
- * 宿主认识的插件能力。清单只能申请这里列出的能力，插件无法自定义新权限。
- * 本构建实现技能、子代理、工作区工具、AI 工具与生命周期 hook；其余能力在对应功能落地前一律按不支持拒绝。
- */
-enum class PluginPermission(val id: String) {
-    SKILLS_REGISTER("skills.register"),
-    AGENTS_REGISTER("agents.register"),
-    WORKSPACE_TOOLS("workspace.tools"),
-    /** 在插件页面执行一次性 Shell 命令；scope.ids 为使用该能力的设置页 id。 */
-    WORKSPACE_EXEC("workspace.exec"),
-    TOOLS_REGISTER("tools.register"),
-    AGENT_EVENTS("agent.events"),
-    MCP_REGISTER("mcp.register"),
-    MCP_CONNECT("mcp.connect"),
-    SETTINGS_PAGES("settings.pages");
-
-    companion object {
-        fun fromId(id: String): PluginPermission? = entries.firstOrNull { it.id == id }
-    }
-}
-
-/**
- * 一条权限申请。[ids] 为该权限覆盖的本插件贡献局部 ID（`scope.ids`）；[events] 只对
- * [PluginPermission.AGENT_EVENTS] 有意义，为该权限覆盖的生命周期事件（`scope.events`）。
- */
-data class PluginPermissionRequest(
-    val permission: PluginPermission,
-    val required: Boolean,
-    val reason: LocalizedText,
-    val ids: List<String>,
-    val events: List<String> = emptyList()
-)
-
 /** `contributes` 里指向包内 Markdown 文件的一条贡献。[file] 相对于包根目录。 */
 data class PluginContributionRef(val id: String, val file: String)
 
@@ -70,8 +37,26 @@ data class PluginWorkspaceToolRef(
     val pageFile: String
 )
 
-/** 插件业务逻辑入口：发布包里已打包的 JavaScript 文件，由隔离运行时加载。 */
-data class PluginRuntimeRef(val type: String, val entry: String)
+/** 插件运行时类型：`javascript` 用 node 启动，`python` 用 python3 启动。 */
+object PluginRuntimeTypes {
+    const val JAVASCRIPT = "javascript"
+    const val PYTHON = "python"
+
+    val ALL = setOf(JAVASCRIPT, PYTHON)
+}
+
+/** `contributes.runtime.dependencies` 声明的依赖输入。 */
+data class PluginDependencyRef(val tool: String, val file: String)
+
+/** 插件业务逻辑入口：容器内进程启动所需的信息。 */
+data class PluginRuntimeRef(
+    val type: String,
+    val entry: String,
+    val command: List<String>? = null,
+    val dependencies: PluginDependencyRef? = null,
+    /** 为 true 时进程不参与空闲回收，直到插件停用、卸载、版本替换或 App 进程结束。 */
+    val resident: Boolean = false
+)
 
 /** `contributes.tools` 声明的 AI 可调用工具。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
 data class PluginToolRef(
@@ -82,8 +67,23 @@ data class PluginToolRef(
     val handler: String
 )
 
+/**
+ * hook 的三种模式：`observe` 只观察并返回日志；`transform` 等待宿主应用结构化变更；
+ * `review` 只在宿主 ASK 分支做代审核决定。
+ */
+object PluginHookModes {
+    const val OBSERVE = "observe"
+    const val TRANSFORM = "transform"
+    const val REVIEW = "review"
+
+    val ALL = setOf(OBSERVE, TRANSFORM, REVIEW)
+}
+
 /** 宿主支持的插件生命周期事件；清单 `event` 只能取这里的值。 */
 object PluginHookEvents {
+    /** App 进程启动完成；用于常驻插件初始化自己的进程与服务。 */
+    const val APP_STARTED = "app.started"
+
     const val AGENT_RUN_STARTED = "agent.run.started"
     const val AGENT_RUN_FINISHED = "agent.run.finished"
     const val AGENT_REQUEST_STARTED = "agent.request.started"
@@ -92,22 +92,78 @@ object PluginHookEvents {
     const val AGENT_TOOL_FINISHED = "agent.tool.finished"
     const val AGENT_COMPACTION = "agent.compaction"
 
+    /** 一次工具调用执行前；可拒绝或改写参数，改写后重新走完整权限判断。 */
+    const val AGENT_TOOL_BEFORE = "agent.tool.before"
+
+    /** 一次工具调用成功结束后；可改写结果的 `data`。 */
+    const val AGENT_TOOL_AFTER = "agent.tool.after"
+
+    /** 每次实际发出 provider HTTP 请求前；可改写 URL、headers 与 JSON body。 */
+    const val AGENT_HTTP_BEFORE = "agent.http.before"
+
+    /** 宿主判定需要使用者确认后、弹窗前的代审核。 */
+    const val AGENT_PERMISSION_REVIEW = "agent.permission.review"
+
+    /** 只允许 `mode: "transform"` 的事件。 */
+    val TRANSFORM = setOf(AGENT_TOOL_BEFORE, AGENT_TOOL_AFTER, AGENT_HTTP_BEFORE)
+
+    /** 只允许 `mode: "review"` 的事件。 */
+    val REVIEW = setOf(AGENT_PERMISSION_REVIEW)
+
     val ALL = setOf(
+        APP_STARTED,
         AGENT_RUN_STARTED,
         AGENT_RUN_FINISHED,
         AGENT_REQUEST_STARTED,
         AGENT_REQUEST_FINISHED,
         AGENT_TOOL_STARTED,
         AGENT_TOOL_FINISHED,
-        AGENT_COMPACTION
+        AGENT_COMPACTION,
+        AGENT_TOOL_BEFORE,
+        AGENT_TOOL_AFTER,
+        AGENT_HTTP_BEFORE,
+        AGENT_PERMISSION_REVIEW
     )
 }
 
-/** `contributes.hooks` 声明的一条生命周期 hook。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
-data class PluginHookRef(val id: String, val event: String, val handler: String)
+/**
+ * `contributes.hooks` 声明的一条生命周期 hook。[handler] 是 runtime 导出的 handlers 表里的稳定键；
+ * [mode] 缺省为 [PluginHookModes.OBSERVE]，可写 hook 必须显式声明 `transform`。
+ */
+data class PluginHookRef(
+    val id: String,
+    val event: String,
+    val handler: String,
+    val mode: String = PluginHookModes.OBSERVE
+)
 
 /** `contributes.mcp` 声明的 MCP 配置文件；文件沿用现有 `{"mcpServers": {...}}` 结构。 */
 data class PluginMcpRef(val id: String, val file: String)
+
+/** 插件提供商当前支持的兼容格式；第一版只开放 OpenAI Chat Completions。 */
+object PluginProviderFormats {
+    const val OPENAI = "openai"
+
+    val ALL = setOf(OPENAI)
+}
+
+/**
+ * `contributes.providers` 声明的提供商：[baseUrl] 指向插件自行启动或明确提供的
+ * OpenAI 兼容服务，宿主复用现有 OpenAI 适配器请求，不内置新的上游协议。
+ */
+data class PluginProviderRef(
+    val id: String,
+    val name: LocalizedText,
+    val description: LocalizedText,
+    val format: String,
+    val baseUrl: String
+)
+
+/**
+ * `contributes.shizuku` 声明插件使用 Shizuku。使用者单独授权后，插件可在 Android 系统
+ * 直接执行任意命令；声明只保留用途说明。
+ */
+data class PluginShizukuRef(val purpose: String)
 
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
@@ -123,8 +179,6 @@ data class PluginManifest(
     val description: LocalizedText,
     val license: String,
     val pluginApi: String,
-    val structuredUi: String?,
-    val permissions: List<PluginPermissionRequest>,
     val skills: List<PluginContributionRef>,
     val agents: List<PluginContributionRef>,
     val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
@@ -133,19 +187,15 @@ data class PluginManifest(
     val tools: List<PluginToolRef> = emptyList(),
     val hooks: List<PluginHookRef> = emptyList(),
     val mcp: List<PluginMcpRef> = emptyList(),
+    val providers: List<PluginProviderRef> = emptyList(),
+    val shizuku: PluginShizukuRef? = null,
     val configPage: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
-            tools.size + hooks.size + mcp.size + (if (configPage != null) 1 else 0)
-
-    fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
-        permissions.firstOrNull { it.permission == permission }
-
-    /** 必须获得授权，插件才允许启用的能力。 */
-    val requiredPermissions: Set<PluginPermission>
-        get() = permissions.filter { it.required }.map { it.permission }.toSet()
+            tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
+            (if (configPage != null) 1 else 0)
 }
 
 /** 安装与加载过程中的失败原因。UI 按 [PluginErrorCode] 取本地化文案，[detail] 是语言无关的定位信息。 */
@@ -164,15 +214,12 @@ enum class PluginErrorCode {
     UNSUPPORTED_MANIFEST_VERSION,
     UNSUPPORTED_FIELD,
     UNSUPPORTED_CONTRIBUTION,
-    UNSUPPORTED_PERMISSION,
     API_INCOMPATIBLE,
     DUPLICATE_ID,
-    PERMISSION_SCOPE_MISMATCH,
     FILE_MISSING,
     CONTENT_INVALID,
     STORAGE_FAILED,
-    PREVIEW_EXPIRED,
-    PERMISSION_NOT_GRANTED
+    PREVIEW_EXPIRED
 }
 
 data class PluginError(val code: PluginErrorCode, val detail: String = "")

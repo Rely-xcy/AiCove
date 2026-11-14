@@ -102,7 +102,7 @@ fun TerminalScreen(
     val prepareState by viewModel.prepareState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val containerInit by viewModel.containerInit.collectAsStateWithLifecycle()
-    val tabs by viewModel.tabs.collectAsStateWithLifecycle()
+    val allTabs by viewModel.tabs.collectAsStateWithLifecycle()
     val activeTabId by viewModel.activeTabId.collectAsStateWithLifecycle()
     val revision by viewModel.revision.collectAsStateWithLifecycle()
     val creatingTab by viewModel.creatingTab.collectAsStateWithLifecycle()
@@ -114,6 +114,17 @@ fun TerminalScreen(
         viewModel.consumeTabError()
     }
     val terminalSettings by viewModel.terminalSettings.collectAsStateWithLifecycle()
+    val tabs = remember(allTabs, terminalSettings.showPluginTabs) {
+        if (terminalSettings.showPluginTabs) allTabs else allTabs.filter { it.ownerPluginId == null }
+    }
+    val visibleActiveTabId = activeTabId?.takeIf { id -> tabs.any { it.id == id } }
+        ?: tabs.firstOrNull()?.id
+    // 隐藏插件标签时 active 可能仍指向它；先切回可见标签，避免输入落到看不见的标签。
+    LaunchedEffect(visibleActiveTabId, activeTabId) {
+        if (visibleActiveTabId != null && visibleActiveTabId != activeTabId) {
+            viewModel.activate(visibleActiveTabId)
+        }
+    }
     var showToolsSheet by remember { mutableStateOf(false) }
 
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -182,14 +193,14 @@ fun TerminalScreen(
 
                     TabBar(
                         tabs = tabs,
-                        activeTabId = activeTabId,
+                        activeTabId = visibleActiveTabId,
                         creating = creatingTab,
                         onSelect = { viewModel.activate(it) },
                         onClose = { viewModel.closeTab(it) },
                         onNew = { viewModel.newTab() }
                     )
 
-                    val activeTab = tabs.firstOrNull { it.id == activeTabId }
+                    val activeTab = tabs.firstOrNull { it.id == visibleActiveTabId }
                     // 因连接断开而结束的会话：不单独标出来，用户看到的只是 Termux 那句「[Process completed]」
                     if (activeTab?.droppedByDisconnect == true) {
                         ConnectionDroppedBanner()
@@ -216,7 +227,7 @@ fun TerminalScreen(
                         }
                     }
 
-                    if (activeTabId != null) {
+                    if (visibleActiveTabId != null) {
                         ExtraKeysRow(viewModel)
                     }
                 }
@@ -230,7 +241,8 @@ fun TerminalScreen(
                 onSelectTheme = { viewModel.setTheme(it) },
                 onChangeFontSize = { viewModel.setFontSize(it) },
                 onChangeCursorStyle = { viewModel.setCursorStyle(it) },
-                onChangeFontPath = { viewModel.setFontPath(it) }
+                onChangeFontPath = { viewModel.setFontPath(it) },
+                onChangeShowPluginTabs = { viewModel.setShowPluginTabs(it) }
             )
         }
     }

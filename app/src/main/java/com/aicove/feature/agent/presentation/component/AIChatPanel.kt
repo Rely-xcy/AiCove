@@ -873,7 +873,8 @@ fun AIChatPanel(
     onboardingStep: OnboardingStep? = null,
     onSelectModelInOnboarding: (() -> Unit)? = null,
     onDismissModelSheetInOnboarding: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pluginTipContent: @Composable (Modifier) -> Unit = {}
 ) {
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
     val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
@@ -2256,6 +2257,7 @@ fun AIChatPanel(
                     if (it.size.height > 0) floatingLayerHeightPx = it.size.height
                 }
             ) {
+            pluginTipContent(Modifier.graphicsLayer { alpha = floatingPanelAlpha })
             Box(modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = floatingPanelAlpha }) {
                 StatusBanner(state = agentState)
             }

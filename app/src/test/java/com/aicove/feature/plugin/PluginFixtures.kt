@@ -29,11 +29,10 @@ object PluginFixtures {
         |You are a builder.
     """.trimMargin()
 
-    /** 同时提供技能（必要能力）与子代理（可选能力）的合法清单。 */
+    /** 同时提供技能与子代理的合法清单。 */
     fun manifest(
         version: String = "1.0.0",
         pluginApi: String = "^1.0.0",
-        agentsRequired: Boolean = false,
         extra: String = ""
     ): String = """
         {
@@ -46,11 +45,6 @@ object PluginFixtures {
           "description": "Demo plugin",
           "license": "MIT",
           "engines": {"pluginApi": "$pluginApi"},
-          "permissions": [
-            {"id": "skills.register", "required": true, "reason": "register skills", "scope": {"ids": ["notes"]}},
-            {"id": "agents.register", "required": $agentsRequired,
-             "reason": {"default": "register agents", "zh": "注册子代理"}, "scope": {"ids": ["builder"]}}
-          ],
           "contributes": {
             "skills": [{"id": "notes", "file": "$SKILL_FILE"}],
             "agents": [{"id": "builder", "file": "$AGENT_FILE"}]
@@ -68,7 +62,7 @@ object PluginFixtures {
         AGENT_FILE to agent
     )
 
-    /** 只贡献技能、只申请 skills.register 的清单。 */
+    /** 只贡献技能的合法清单。 */
     fun skillsOnlyManifest(): String = """
         {
           "manifestVersion": 1,
@@ -80,9 +74,6 @@ object PluginFixtures {
           "description": "Demo plugin",
           "license": "MIT",
           "engines": {"pluginApi": "^1.0.0"},
-          "permissions": [
-            {"id": "skills.register", "required": true, "reason": "register skills", "scope": {"ids": ["notes"]}}
-          ],
           "contributes": {"skills": [{"id": "notes", "file": "$SKILL_FILE"}]}
         }
     """.trimIndent()

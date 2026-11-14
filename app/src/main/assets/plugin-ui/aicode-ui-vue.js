@@ -125,6 +125,84 @@
     return html.join('');
   }
 
+  /* ── Markdown ── */
+  var markdownAssetState = {
+    ready: false,
+    loading: null,
+    themeLink: null,
+    highlightLink: null
+  };
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = src;
+      script.onload = function () { resolve(); };
+      script.onerror = function () { reject(new Error('failed to load ' + src)); };
+      document.head.appendChild(script);
+    });
+  }
+
+  function ensureMarkdownThemeLinks() {
+    if (markdownAssetState.themeLink) return;
+    markdownAssetState.themeLink = document.createElement('link');
+    markdownAssetState.themeLink.rel = 'stylesheet';
+    markdownAssetState.themeLink.id = 'aicode-markdown-theme';
+    document.head.appendChild(markdownAssetState.themeLink);
+    markdownAssetState.highlightLink = document.createElement('link');
+    markdownAssetState.highlightLink.rel = 'stylesheet';
+    markdownAssetState.highlightLink.id = 'aicode-highlight-theme';
+    document.head.appendChild(markdownAssetState.highlightLink);
+  }
+
+  function markdownThemeIsDark() {
+    var value = getComputedStyle(document.documentElement)
+      .getPropertyValue('--aicode-page-bg')
+      .trim();
+    var match = /^#([0-9a-fA-F]{6})$/.exec(value);
+    if (!match) return false;
+    var rgb = parseInt(match[1], 16);
+    var r = (rgb >> 16) & 255;
+    var g = (rgb >> 8) & 255;
+    var b = rgb & 255;
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+  }
+
+  function applyMarkdownTheme() {
+    if (!markdownAssetState.themeLink) return;
+    var dark = markdownThemeIsDark();
+    var markdown = '/__aicode/markdown/' +
+      (dark ? 'github-markdown-dark.css' : 'github-markdown-light.css');
+    var highlight = '/__aicode/markdown/' +
+      (dark ? 'highlight-github-dark.min.css' : 'highlight-github.min.css');
+    if (markdownAssetState.themeLink.getAttribute('href') !== markdown) {
+      markdownAssetState.themeLink.href = markdown;
+    }
+    if (markdownAssetState.highlightLink.getAttribute('href') !== highlight) {
+      markdownAssetState.highlightLink.href = highlight;
+    }
+  }
+
+  function ensureMarkdownAssets() {
+    ensureMarkdownThemeLinks();
+    applyMarkdownTheme();
+    if (markdownAssetState.ready) return Promise.resolve();
+    if (markdownAssetState.loading) return markdownAssetState.loading;
+    markdownAssetState.loading = Promise.all([
+      loadScript('/__aicode/markdown/marked.min.js'),
+      loadScript('/__aicode/markdown/purify.min.js'),
+      loadScript('/__aicode/markdown/highlight.min.js')
+    ]).then(function () {
+      markdownAssetState.ready = true;
+    }).catch(function (error) {
+      markdownAssetState.loading = null;
+      throw error;
+    });
+    return markdownAssetState.loading;
+  }
+
+  window.addEventListener('aicode:theme', applyMarkdownTheme);
+
   var AicodeBadge = defineComponent({
     name: 'AicodeBadge',
     props: {
@@ -153,7 +231,7 @@
     name: 'AicodeGroup',
     props: {
       title: { type: String, default: '' },
-      collapsible: { type: Boolean, default: true },
+      collapsible: { type: Boolean, default: false },
       expanded: { type: Boolean, default: true }
     },
     emits: ['update:expanded'],
@@ -162,9 +240,10 @@
         var showChevron = props.collapsible;
         var expanded = props.expanded;
         return h('div', { class: 'aicode-group' }, [
-          h('button', {
+          props.title ? h('button', {
             class: 'aicode-group-header',
             type: 'button',
+            'data-collapsible': String(showChevron),
             'data-expanded': showChevron ? String(expanded) : 'true',
             'aria-expanded': showChevron ? String(expanded) : 'true',
             onClick: function () {
@@ -173,7 +252,7 @@
           }, [
             h('span', null, props.title),
             showChevron ? h('span', { class: 'aicode-chevron', innerHTML: CHEVRON }) : null
-          ]),
+          ]) : null,
           h('div', {
             class: 'aicode-card',
             hidden: showChevron && !expanded
@@ -190,7 +269,7 @@
       subtitle: { type: String, default: '' },
       badge: { type: String, default: '' },
       badgeKind: { type: String, default: '' },
-      icon: { type: String, default: 'book' },
+      icon: { type: String, default: '' },
       chevron: { type: Boolean, default: true },
       selectable: { type: Boolean, default: false },
       selected: { type: Boolean, default: false }
@@ -211,10 +290,12 @@
               'data-checked': String(!!props.selected)
             })
             : null,
-          h('span', {
-            class: 'aicode-row-icon',
-            innerHTML: ICONS[props.icon] || ICONS.book
-          }),
+          props.icon
+            ? h('span', {
+              class: 'aicode-row-icon',
+              innerHTML: ICONS[props.icon] || ICONS.book
+            })
+            : null,
           h('span', { class: 'aicode-row-main' }, [
             h('span', { class: 'aicode-row-title' }, [
               h('span', { class: 'aicode-row-title-text' }, props.title),
@@ -226,11 +307,14 @@
             ]),
             h('span', { class: 'aicode-row-subtitle' }, props.subtitle)
           ]),
-          props.chevron ? h('span', { class: 'aicode-row-chevron' }, '›') : null
+          props.chevron ? h('span', { class: 'aicode-row-chevron', innerHTML: CHEVRON }) : null
         ]);
       };
     }
   });
+
+  var FIELD_CONTEXT = Symbol('AicodeField');
+  var nextFieldId = 0;
 
   var AicodeField = defineComponent({
     name: 'AicodeField',
@@ -238,14 +322,57 @@
       label: { type: String, default: '' }
     },
     setup: function (props, context) {
+      var field = Vue.reactive({
+        id: 'aicode-field-' + (++nextFieldId),
+        outlined: false,
+        filled: false,
+        disabled: false,
+        multiline: false,
+        password: false
+      });
+      Vue.provide(FIELD_CONTEXT, field);
+
       return function () {
-        return h('div', { class: 'aicode-outlined-field' }, [
-          props.label ? h('label', null, props.label) : null,
-          context.slots.default ? context.slots.default() : []
+        return h('div', {
+          class: field.outlined ? 'aicode-outlined-field aicode-text-field' : 'aicode-field',
+          'data-label': String(!!props.label),
+          'data-filled': String(field.filled),
+          'data-disabled': String(field.disabled),
+          'data-multiline': String(field.multiline),
+          'data-password': String(field.password)
+        }, [
+          props.label ? h('label', {
+            class: field.outlined ? 'aicode-field-label' : undefined,
+            for: field.outlined ? field.id : undefined
+          }, props.label) : null,
+          context.slots.default ? context.slots.default() : [],
+          field.outlined ? h('fieldset', {
+            class: 'aicode-field-outline',
+            'aria-hidden': 'true'
+          }, props.label ? [h('legend', null, [h('span', null, props.label)])] : []) : null
         ]);
       };
     }
   });
+
+  function useFieldControl(props, context, kind) {
+    var field = Vue.inject(FIELD_CONTEXT, null);
+    if (!field) return null;
+    var generatedId = field.id;
+
+    function sync() {
+      field.id = context.attrs.id || generatedId;
+      field.outlined = true;
+      field.filled = kind === 'select' || (props.modelValue != null && String(props.modelValue).length > 0);
+      field.disabled = props.disabled;
+      field.multiline = kind === 'textarea';
+      field.password = kind === 'input' && props.type === 'password';
+    }
+
+    Vue.watchEffect(sync);
+    Vue.onBeforeUpdate(sync);
+    return field;
+  }
 
   var AicodeSegmented = defineComponent({
     name: 'AicodeSegmented',
@@ -257,17 +384,37 @@
     emits: ['update:modelValue'],
     setup: function (props, context) {
       return function () {
-        return h('div', { class: 'aicode-segmented' }, props.options.map(function (option) {
-          return h('button', {
+        var options = props.options || [];
+        var selectedIndex = 0;
+        options.forEach(function (option, index) {
+          if (option.value === props.modelValue) selectedIndex = index;
+        });
+        var children = [];
+        if (options.length) {
+          children.push(h('span', {
+            class: 'aicode-segmented-thumb',
+            style: {
+              width: 'calc((100% - 6px) / ' + options.length + ')',
+              transform: 'translateX(' + (selectedIndex * 100) + '%)'
+            }
+          }));
+        }
+        options.forEach(function (option, index) {
+          children.push(h('button', {
             class: 'aicode-segment',
             type: 'button',
+            role: 'tab',
+            'aria-selected': String(props.modelValue === option.value),
             'aria-pressed': String(props.modelValue === option.value),
             disabled: props.disabled,
             onClick: function () {
               if (!props.disabled) context.emit('update:modelValue', option.value);
             }
-          }, option.label);
-        }));
+          }, option.label));
+        });
+        return h('div', {
+          class: 'aicode-segmented' + (props.disabled ? ' aicode-segmented-disabled' : '')
+        }, children);
       };
     }
   });
@@ -315,10 +462,47 @@
       text: { type: String, default: '' }
     },
     setup: function (props) {
+      var root = Vue.ref(null);
+      var enhanced = Vue.ref(false);
+
+      function highlight() {
+        if (!enhanced.value || !window.hljs || !root.value) return;
+        Array.prototype.forEach.call(root.value.querySelectorAll('pre code'), function (element) {
+          try {
+            window.hljs.highlightElement(element);
+          } catch (e) {
+            // 忽略单个代码块的高亮失败。
+          }
+        });
+      }
+
+      function html() {
+        var text = String(props.text || '');
+        if (enhanced.value && window.marked && window.DOMPurify) {
+          try {
+            var raw = window.marked.parse(text, { gfm: true, breaks: false });
+            return window.DOMPurify.sanitize(raw, { ADD_ATTR: ['align', 'target'] });
+          } catch (e) {
+            // 解析失败时退回内置解析器。
+          }
+        }
+        return renderMarkdown(text);
+      }
+
+      Vue.onMounted(function () {
+        ensureMarkdownAssets().then(function () {
+          enhanced.value = true;
+          Vue.nextTick(highlight);
+        }).catch(function () {});
+      });
+
+      Vue.onUpdated(highlight);
+
       return function () {
         return h('div', {
-          class: 'aicode-markdown',
-          innerHTML: renderMarkdown(props.text)
+          ref: root,
+          class: 'aicode-markdown markdown-body',
+          innerHTML: html()
         });
       };
     }
@@ -509,8 +693,21 @@
     }
   });
 
+  var EYE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>' +
+    '<circle cx="12" cy="12" r="3"></circle></svg>';
+
+  var EYE_OFF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94' +
+    'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-4.23 5.67' +
+    'M14.12 14.12a3 3 0 0 1-4.24-4.24"></path>' +
+    '<line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
   var AicodeInput = defineComponent({
     name: 'AicodeInput',
+    inheritAttrs: false,
     props: {
       modelValue: { type: String, default: '' },
       placeholder: { type: String, default: '' },
@@ -519,17 +716,57 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'input');
+      var inputRef = Vue.ref(null);
+      var passwordVisible = Vue.ref(false);
+
+      Vue.watch(function () { return props.type; }, function () {
+        passwordVisible.value = false;
+      });
+
+      function togglePassword() {
+        if (props.disabled) return;
+        var input = inputRef.value;
+        var focused = document.activeElement === input;
+        var start = input.selectionStart;
+        var end = input.selectionEnd;
+        var direction = input.selectionDirection;
+        passwordVisible.value = !passwordVisible.value;
+        if (focused) {
+          Vue.nextTick(function () {
+            input.setSelectionRange(start, end, direction);
+          });
+        }
+      }
+
       return function () {
-        return h('input', {
+        var password = props.type === 'password';
+        var input = h('input', Vue.mergeProps({
+          ref: inputRef,
           class: 'aicode-input',
-          type: props.type,
+          id: field ? field.id : undefined,
+          type: password && passwordVisible.value ? 'text' : props.type,
           value: props.modelValue,
           placeholder: props.placeholder,
           disabled: props.disabled,
           onInput: function (event) {
             context.emit('update:modelValue', event.target.value);
           }
-        });
+        }, context.attrs));
+        if (!password) return input;
+        return h('div', { class: 'aicode-password-field' }, [
+          input,
+          h('button', {
+            class: 'aicode-password-toggle',
+            type: 'button',
+            disabled: props.disabled,
+            'aria-label': passwordVisible.value ? 'Hide password' : 'Show password',
+            'aria-pressed': String(passwordVisible.value),
+            onPointerdown: function (event) { event.preventDefault(); },
+            onClick: togglePassword,
+            innerHTML: passwordVisible.value ? EYE_OFF_ICON : EYE_ICON
+          })
+        ]);
       };
     }
   });
@@ -543,9 +780,11 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'textarea');
       return function () {
         return h('textarea', {
           class: 'aicode-textarea',
+          id: field ? field.id : undefined,
           value: props.modelValue,
           placeholder: props.placeholder,
           disabled: props.disabled,
@@ -566,9 +805,11 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'select');
       return function () {
         return h('select', {
           class: 'aicode-select',
+          id: field ? field.id : undefined,
           value: props.modelValue,
           disabled: props.disabled,
           onChange: function (event) {
@@ -607,6 +848,114 @@
     }
   });
 
+  // 弹窗类组件的返回键栈：后打开的先消费，页面自己的 onBack 仍可共存。
+  var overlayStack = [];
+  var overlayBackWired = false;
+  var overlayRequest = Promise.resolve();
+  var lastOverlaySignature = '';
+  var overlaySyncScheduled = false;
+  var overlayScrollLocks = 0;
+  var overlayBodyOverflow = '';
+
+  function lockOverlayScroll() {
+    if (overlayScrollLocks === 0) {
+      overlayBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+    overlayScrollLocks++;
+  }
+
+  function unlockOverlayScroll() {
+    overlayScrollLocks--;
+    if (overlayScrollLocks === 0) document.body.style.overflow = overlayBodyOverflow;
+  }
+
+  function topOverlayRect() {
+    for (var i = overlayStack.length - 1; i >= 0; i--) {
+      var provider = overlayStack[i].rect;
+      if (!provider) continue;
+      var rect = provider();
+      if (rect && rect.width > 0 && rect.height > 0) return rect;
+    }
+    return null;
+  }
+
+  // WebView 内部弹层挡不住宿主绘制在最上层的背景图；上报弹层矩形，让宿主在背景图上挖洞。
+  function syncOverlayBackground() {
+    var active = overlayStack.length > 0;
+    var rect = active ? topOverlayRect() : null;
+    var signature = active
+      ? (rect
+        ? [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width),
+          Math.round(rect.height), Math.round(rect.topRadius), Math.round(rect.bottomRadius)].join(',')
+        : 'no-rect')
+      : 'off';
+    if (signature === lastOverlaySignature) return;
+    if (!window.aicode || !window.aicode.ui || !window.aicode.ui.setOverlay) return;
+    lastOverlaySignature = signature;
+    overlayRequest = overlayRequest.then(function () {
+      return window.aicode.ui.setOverlay(active, rect);
+    }).catch(function () {
+      lastOverlaySignature = '';
+    });
+  }
+
+  function scheduleOverlaySync() {
+    if (overlaySyncScheduled) return;
+    overlaySyncScheduled = true;
+    requestAnimationFrame(function () {
+      overlaySyncScheduled = false;
+      syncOverlayBackground();
+    });
+  }
+
+  // 弹层滑入/滑出/回弹时矩形在动，短时间内持续跟随，避免背景图短暂叠到弹层上。
+  function trackOverlayMotion(duration) {
+    var until = Date.now() + duration;
+    setTimeout(function tick() {
+      syncOverlayBackground();
+      if (overlayStack.length && Date.now() < until) setTimeout(tick, 30);
+    }, 16);
+  }
+
+  window.addEventListener('resize', function () {
+    if (overlayStack.length) scheduleOverlaySync();
+  });
+
+  function ensureOverlayBack() {
+    if (overlayBackWired || !window.aicode || !window.aicode.ui || !window.aicode.ui.onBack) return;
+    overlayBackWired = true;
+    window.aicode.ui.onBack(function () {
+      var top = overlayStack[overlayStack.length - 1];
+      if (!top) return false;
+      top.close();
+      return true;
+    });
+  }
+
+  function pushOverlay(close, rectProvider) {
+    ensureOverlayBack();
+    for (var i = 0; i < overlayStack.length; i++) {
+      if (overlayStack[i].close === close) return;
+    }
+    overlayStack.push({ close: close, rect: rectProvider || null });
+    scheduleOverlaySync();
+  }
+
+  function removeOverlay(close) {
+    for (var i = overlayStack.length - 1; i >= 0; i--) {
+      if (overlayStack[i].close === close) {
+        overlayStack.splice(i, 1);
+        break;
+      }
+    }
+    scheduleOverlaySync();
+  }
+
+  function isWideViewport() {
+    return window.innerWidth >= 600;
+  }
+
   var AicodeBottomSheet = defineComponent({
     name: 'AicodeBottomSheet',
     props: {
@@ -615,27 +964,200 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
-      function close() {
-        context.emit('update:modelValue', false);
+      var shown = Vue.ref(false);
+      var closing = Vue.ref(false);
+      var dragging = Vue.ref(false);
+      var offset = Vue.ref(0);
+      var maskOpacity = Vue.ref(1);
+      var sheetRef = Vue.ref(null);
+      var closeTimer = null;
+      var drag = null;
+      var bodyLocked = false;
+
+      function lockBody() {
+        if (bodyLocked) return;
+        lockOverlayScroll();
+        bodyLocked = true;
       }
 
+      function sheetRect() {
+        var el = sheetRef.value;
+        if (!el) return null;
+        var rect = el.getBoundingClientRect();
+        var wide = isWideViewport();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          topRadius: wide ? 16 : 28,
+          bottomRadius: wide ? 16 : 0,
+          coversBottom: true
+        };
+      }
+
+      function unlockBody() {
+        if (!bodyLocked) return;
+        unlockOverlayScroll();
+        bodyLocked = false;
+      }
+
+      function requestClose() {
+        if (!shown.value || closing.value) return;
+        closing.value = true;
+        dragging.value = false;
+        drag = null;
+        var height = sheetRef.value ? sheetRef.value.offsetHeight : window.innerHeight * 0.5;
+        offset.value = isWideViewport() ? 0 : height;
+        maskOpacity.value = 0;
+        scheduleOverlaySync();
+        trackOverlayMotion(260);
+        closeTimer = setTimeout(function () {
+          closeTimer = null;
+          shown.value = false;
+          closing.value = false;
+          offset.value = 0;
+          maskOpacity.value = 1;
+          unlockBody();
+          removeOverlay(requestClose);
+          context.emit('update:modelValue', false);
+        }, 220);
+      }
+
+      Vue.watch(function () {
+        return props.modelValue;
+      }, function (open) {
+        if (open) {
+          if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+          }
+          closing.value = false;
+          offset.value = 0;
+          maskOpacity.value = 1;
+          shown.value = true;
+          lockBody();
+          pushOverlay(requestClose, sheetRect);
+          trackOverlayMotion(300);
+        } else if (shown.value && !closing.value) {
+          requestClose();
+        }
+      }, { immediate: true });
+
+      function startDrag(event) {
+        if (isWideViewport() || !shown.value || closing.value) return;
+        if (event.button != null && event.button !== 0) return;
+        if (event.target && event.target.closest && event.target.closest('button')) return;
+        drag = {
+          startY: event.clientY,
+          lastY: event.clientY,
+          lastTime: Date.now(),
+          velocity: 0,
+          moved: false
+        };
+        dragging.value = true;
+        offset.value = 0;
+        if (event.currentTarget.setPointerCapture && event.pointerId != null) {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch (e) {
+            // 忽略不支持指针捕获的 WebView。
+          }
+        }
+        event.preventDefault();
+      }
+
+      function moveDrag(event) {
+        if (!drag) return;
+        var now = Date.now();
+        var delta = event.clientY - drag.startY;
+        if (Math.abs(delta) > 4) drag.moved = true;
+        if (delta < 0) delta = 0;
+        offset.value = delta;
+        maskOpacity.value = Math.max(0, 1 - Math.max(0, delta) / 280);
+        scheduleOverlaySync();
+        var elapsed = now - drag.lastTime;
+        if (elapsed > 0) {
+          var instantaneous = (event.clientY - drag.lastY) / elapsed;
+          drag.velocity = drag.velocity * 0.6 + instantaneous * 0.4;
+          drag.lastY = event.clientY;
+          drag.lastTime = now;
+        }
+        event.preventDefault();
+      }
+
+      function endDrag() {
+        if (!drag) return;
+        var wasMoved = drag.moved;
+        var velocity = drag.velocity;
+        var delta = Math.max(0, offset.value);
+        drag = null;
+        dragging.value = false;
+        if (!wasMoved) {
+          requestClose();
+          return;
+        }
+        var height = sheetRef.value ? sheetRef.value.offsetHeight : window.innerHeight * 0.5;
+        if (delta > Math.min(140, height * 0.28) || velocity > 0.55) {
+          requestClose();
+        } else {
+          offset.value = 0;
+          maskOpacity.value = 1;
+          trackOverlayMotion(260);
+        }
+      }
+
+      Vue.onUnmounted(function () {
+        if (closeTimer) clearTimeout(closeTimer);
+        unlockBody();
+        removeOverlay(requestClose);
+      });
+
       return function () {
-        if (!props.modelValue) return null;
+        if (!shown.value) return null;
         return h('div', {
           class: 'aicode-sheet-mask',
+          role: 'dialog',
+          'aria-modal': 'true',
           onClick: function (event) {
-            if (event.target === event.currentTarget) close();
+            if (event.target === event.currentTarget) requestClose();
           }
         }, [
-          h('div', { class: 'aicode-sheet' }, [
-            h('div', { class: 'aicode-sheet-handle' }),
-            h('div', { class: 'aicode-sheet-header' }, [
+          h('div', {
+            class: 'aicode-sheet-scrim',
+            style: { opacity: maskOpacity.value }
+          }),
+          h('div', {
+            ref: sheetRef,
+            class: 'aicode-sheet' + (dragging.value ? ' aicode-sheet-dragging' : ''),
+            style: { transform: 'translate3d(0, ' + offset.value + 'px, 0)' }
+          }, [
+            h('div', {
+              class: 'aicode-sheet-grabber',
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': '下拉关闭',
+              onPointerdown: startDrag,
+              onPointermove: moveDrag,
+              onPointerup: endDrag,
+              onPointercancel: endDrag,
+              onKeydown: function (event) {
+                if (event.key === 'Enter' || event.key === ' ') requestClose();
+              }
+            }, [h('div', { class: 'aicode-sheet-handle' })]),
+            h('div', {
+              class: 'aicode-sheet-header',
+              onPointerdown: startDrag,
+              onPointermove: moveDrag,
+              onPointerup: endDrag,
+              onPointercancel: endDrag
+            }, [
               h('h2', { class: 'aicode-sheet-title' }, props.title),
               h('button', {
                 class: 'aicode-icon-button',
                 type: 'button',
                 'aria-label': '关闭',
-                onClick: close
+                onClick: requestClose
               }, '×')
             ]),
             h('div', { class: 'aicode-sheet-body' }, context.slots.default ? context.slots.default() : [])
@@ -645,55 +1167,161 @@
     }
   });
 
+  var nextDialogId = 0;
+
   var AicodeDialog = defineComponent({
     name: 'AicodeDialog',
+    inheritAttrs: false,
     props: {
       modelValue: { type: Boolean, default: false },
       title: { type: String, default: '' },
       message: { type: String, default: '' },
       confirmText: { type: String, default: '确定' },
-      cancelText: { type: String, default: '取消' }
+      cancelText: { type: String, default: '取消' },
+      confirmDisabled: { type: Boolean, default: false }
     },
     emits: ['update:modelValue', 'confirm', 'cancel'],
     setup: function (props, context) {
+      var dialogRef = Vue.ref(null);
+      var titleId = 'aicode-dialog-title-' + (++nextDialogId);
+      var messageId = titleId + '-message';
+      var previousFocus = null;
+      var bodyLocked = false;
+      var resizeObserver = null;
+
       function close() {
         context.emit('update:modelValue', false);
       }
 
+      function cancel() {
+        context.emit('cancel');
+        close();
+      }
+
+      function dialogRect() {
+        var el = dialogRef.value;
+        if (!el) return null;
+        var rect = el.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          topRadius: 28,
+          bottomRadius: 28,
+          coversBottom: false
+        };
+      }
+
+      function release() {
+        if (resizeObserver) {
+          resizeObserver.disconnect();
+          resizeObserver = null;
+        }
+        if (bodyLocked) {
+          unlockOverlayScroll();
+          bodyLocked = false;
+        }
+        removeOverlay(cancel);
+        if (dialogRef.value && dialogRef.value.contains(document.activeElement)) {
+          document.activeElement.blur();
+          if (previousFocus && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
+        }
+        previousFocus = null;
+      }
+
+      Vue.watch(function () {
+        return props.modelValue;
+      }, function (open) {
+        if (!open) {
+          release();
+          return;
+        }
+        previousFocus = document.activeElement;
+        lockOverlayScroll();
+        bodyLocked = true;
+        pushOverlay(cancel, dialogRect);
+        Vue.nextTick(function () {
+          var dialog = dialogRef.value;
+          if (!props.modelValue || !dialog) return;
+          if (window.ResizeObserver) {
+            resizeObserver = new ResizeObserver(scheduleOverlaySync);
+            resizeObserver.observe(dialog);
+          }
+          var target = dialog.querySelector('[autofocus]:not(:disabled)') || dialog;
+          target.focus({ preventScroll: true });
+          scheduleOverlaySync();
+          trackOverlayMotion(180);
+        });
+      }, { immediate: true });
+
+      Vue.onBeforeUnmount(release);
+
+      function onKeydown(event) {
+        var top = overlayStack[overlayStack.length - 1];
+        if (!top || top.close !== cancel) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          cancel();
+        } else if (event.key === 'Tab') {
+          var dialog = dialogRef.value;
+          var focusable = dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]');
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      }
+
       return function () {
         if (!props.modelValue) return null;
-        return h('div', {
+        var form = !!context.slots.default;
+        return h(Vue.Teleport, { to: 'body' }, [h('div', Vue.mergeProps({
           class: 'aicode-dialog-mask',
           onClick: function (event) {
-            if (event.target === event.currentTarget) {
-              context.emit('cancel');
-              close();
-            }
-          }
-        }, [
-          h('div', { class: 'aicode-dialog' }, [
-            props.title ? h('h2', { class: 'aicode-dialog-title' }, props.title) : null,
-            props.message ? h('p', { class: 'aicode-dialog-message' }, props.message) : null,
+            if (event.target === event.currentTarget) cancel();
+          },
+          onKeydown: onKeydown
+        }, context.attrs), [
+          h('div', {
+            ref: dialogRef,
+            class: 'aicode-dialog' + (form ? ' aicode-dialog-form' : ''),
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': props.title ? titleId : undefined,
+            'aria-describedby': props.message ? messageId : undefined,
+            tabindex: -1
+          }, [
+            props.title ? h('h2', { id: titleId, class: 'aicode-dialog-title' }, props.title) : null,
+            props.message || form ? h('div', { class: 'aicode-dialog-body' }, [
+              props.message ? h('p', { id: messageId, class: 'aicode-dialog-message' }, props.message) : null,
+              form ? context.slots.default() : null
+            ]) : null,
             h('div', { class: 'aicode-dialog-actions' }, [
               h('button', {
-                class: 'aicode-button aicode-button-compact',
+                class: 'aicode-dialog-button',
                 type: 'button',
-                onClick: function () {
-                  context.emit('cancel');
-                  close();
-                }
+                onClick: cancel
               }, props.cancelText),
               h('button', {
-                class: 'aicode-button aicode-button-primary aicode-button-compact',
+                class: 'aicode-dialog-button',
                 type: 'button',
+                disabled: props.confirmDisabled,
                 onClick: function () {
+                  if (props.confirmDisabled) return;
                   context.emit('confirm');
                   close();
                 }
               }, props.confirmText)
             ])
           ])
-        ]);
+        ])]);
       };
     }
   });

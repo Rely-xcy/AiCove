@@ -316,6 +316,13 @@ class ContainerInstaller @Inject constructor(
     val aicodeDir: File
         get() = File(context.filesDir, com.aicove.core.branding.BrandPaths.HOST_DIR_NAME)
 
+    fun containerPathFor(file: File): String {
+        val root = aicodeDir.canonicalFile
+        val relative = runCatching { file.canonicalFile.relativeTo(root) }.getOrNull()
+            ?: return file.absolutePath
+        return com.aicove.core.branding.BrandPaths.CONFIG_ROOT + "/" + relative.invariantSeparatorsPath
+    }
+
     /**
      * proot 全套所在目录：APK 内 `lib/<abi>/lib*.so` 由安装器解压到此（见 build.gradle.kts 的
      * jniLibs sourceSet 与 useLegacyPackaging）。**不能改回 filesDir**——它是 App 目录里唯一

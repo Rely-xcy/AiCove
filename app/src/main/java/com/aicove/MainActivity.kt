@@ -114,7 +114,7 @@ import com.aicove.feature.plugin.presentation.drawer.ProjectToolsDrawer
 import com.aicove.feature.plugin.presentation.drawer.ProjectToolsViewModel
 import com.aicove.feature.plugin.presentation.drawer.ToolDetailScreen
 import com.aicove.feature.plugin.presentation.drawer.ToolUnavailableScreen
-import com.aicove.feature.plugin.data.toUiValues
+import androidx.compose.ui.graphics.luminance
 import com.aicove.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicove.feature.settings.data.repository.AppThemeMode
 import com.aicove.feature.settings.data.repository.BackgroundSettingsRepository
@@ -400,6 +400,7 @@ fun AppNavigation(
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
+    val pluginsViewModel: com.aicove.feature.plugin.presentation.PluginsViewModel = hiltViewModel()
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
@@ -756,6 +757,9 @@ fun AppNavigation(
                                 androidx.compose.ui.platform.LocalUriHandler provides fileUriHandler
                             ) {
                                 AIChatPanel(
+                                    pluginTipContent = { tipModifier ->
+                                        com.aicove.feature.plugin.presentation.PluginTipBanner(modifier = tipModifier)
+                                    },
                                     viewModel = agentViewModel,
                                     settingsViewModel = settingsViewModel,
                                     workspaceViewModel = workspaceViewModel,
@@ -857,9 +861,7 @@ fun AppNavigation(
                 )
             }
             composable("plugins") {
-                PluginManagementScreen(
-                    onNavigateBack = { navController.popBackStack() }
-                )
+                PluginManagementScreen(onNavigateBack = { navController.popBackStack() })
             }
             composable("plugin_all_tools") {
                 val allTools by projectToolsViewModel.allPluginTools.collectAsStateWithLifecycle()
@@ -882,23 +884,26 @@ fun AppNavigation(
                 val toolKey = backStackEntry.arguments?.getString("toolKey").orEmpty()
                 LaunchedEffect(toolKey) { projectToolsViewModel.selectToolByKey(toolKey) }
                 val tool by projectToolsViewModel.selectedTool.collectAsStateWithLifecycle()
-                val toolItem by projectToolsViewModel.selectedToolItem.collectAsStateWithLifecycle()
-                val runState by projectToolsViewModel.runState.collectAsStateWithLifecycle()
                 val languageTag = currentLanguageTag()
 
                 BackHandler { returnFromToolDetail() }
                 val selected = tool
+                val pageDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 if (selected != null) {
                     ToolDetailScreen(
                         tool = selected,
-                        savedParams = toolItem?.savedParams?.toUiValues() ?: emptyMap(),
                         languageTag = languageTag,
-                        runState = runState,
-                        onBack = returnFromToolDetail,
-                        onExecute = { _, template, params ->
-                            projectToolsViewModel.executeTool(selected, params, languageTag, template)
+                        bridgeFactory = { page, post, onClose ->
+                            pluginsViewModel.createWebBridge(
+                                page = page,
+                                pluginVersion = page.pluginVersion,
+                                languageTag = languageTag,
+                                theme = { if (pageDark) "dark" else "light" },
+                                onClosePage = onClose,
+                                post = post
+                            )
                         },
-                        onStop = projectToolsViewModel::stopCurrentRun,
+                        onBack = returnFromToolDetail,
                         onRemove = {
                             projectToolsViewModel.removeToolFromProject(toolKey)
                             returnFromToolDetail()
@@ -996,15 +1001,10 @@ fun AppNavigation(
                 onOpenToolDetail = { tool, item ->
                     reopenRightDrawerOnDetailBack = true
                     scope.launch { rightDrawerState.close() }
-                    projectToolsViewModel.selectTool(tool, item)
+                    projectToolsViewModel.selectTool(tool)
                     navController.navigate("plugin_tool_detail/${tool.key}")
                 },
-                onQuickRun = { tool, item ->
-                    scope.launch { rightDrawerState.close() }
-                    projectToolsViewModel.executeTool(tool, item.savedParams.toUiValues(), languageTag) {
-                        openWorkbench(WorkbenchPaneKind.TERMINAL)
-                    }
-                },
+
                 onOpenAllTools = {
                     scope.launch { rightDrawerState.close() }
                     navController.navigate("plugin_all_tools")

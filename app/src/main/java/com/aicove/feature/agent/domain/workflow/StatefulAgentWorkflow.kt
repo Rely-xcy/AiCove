@@ -5,6 +5,10 @@ import android.os.SystemClock
 import android.util.Base64
 import com.aicove.R
 import com.aicove.core.plugin.AgentLifecycleHooks
+import com.aicove.core.plugin.PermissionReviewDecision
+import com.aicove.core.plugin.PermissionReviewHookResult
+import com.aicove.core.plugin.ToolAfterHookResult
+import com.aicove.core.plugin.ToolBeforeHookResult
 import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
@@ -142,6 +146,8 @@ class StatefulAgentWorkflow @Inject constructor(
         const val USER_REJECTED_CODE = "USER_REJECTED"
         /** 写范围冲突的错误码：被拒的子代理据此识别「不是偶发错误」，派发方也能从结果里看出原因。 */
         const val WRITE_LEASE_CONFLICT_CODE = "WRITE_LEASE_CONFLICT"
+        const val PLUGIN_HOOK_DENIED = "PLUGIN_HOOK_DENIED"
+        const val PLUGIN_REVIEW_DENIED = "PLUGIN_REVIEW_DENIED"
 
         /**
          * 无界面 id 的插话落库行 id 前缀（拼接通知序号）：正常情况下插话来自队列条目、自带界面预生成的 id，
@@ -329,6 +335,9 @@ class StatefulAgentWorkflow @Inject constructor(
             val boundModel = session?.model
             if (!boundProviderId.isNullOrBlank()) {
                 val config = aiProviderRepository.getProviderById(boundProviderId)
+                if (config == null && boundProviderId.startsWith("plugin:")) {
+                    throw IllegalStateException(appContext.getString(R.string.plugin_provider_missing_bound, boundProviderId))
+                }
                 if (config != null && config.isEnabled && config.hasUsableApiKey) {
                     // 绑定的模型可能已被移出该 provider 的模型列表，此时绑定失效、继续往下回退默认模型
                     if (boundModel.isNullOrBlank()) return config
@@ -341,6 +350,9 @@ class StatefulAgentWorkflow @Inject constructor(
         val defaultModel = defaultModelSettingsRepository.getDefaultModel()
         if (defaultProviderId.isNotBlank() && defaultModel.isNotBlank()) {
             val config = aiProviderRepository.getProviderById(defaultProviderId)
+            if (config == null && defaultProviderId.startsWith("plugin:")) {
+                throw IllegalStateException(appContext.getString(R.string.plugin_provider_missing_default))
+            }
             if (config != null && config.isEnabled && config.hasUsableApiKey && defaultModel in config.models) {
                 return config.copy(selectedModel = defaultModel)
             }
@@ -1083,29 +1095,55 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 按**本轮**工具表解析（registry 里没有引擎模块提供的工具，如 team）：
                         // 本轮没给模型的工具就不能被调，不做 registry 兼容回退。
                         val tool = currentTools.firstOrNull { it.name == effect.toolCall.name }
-                        val argsPreview = JsonObject(effect.toolCall.arguments).toString().take(500)
-                        val checkResult = requestPermissionIfNeeded(
-                            tool = tool,
-                            toolName = effect.toolCall.name,
-                            caseHint = currentTools
-                                .firstOrNull { it.name.equals(effect.toolCall.name, ignoreCase = true) }
-                                ?.name,
-                            callId = effect.toolCall.id,
-                            arguments = effect.toolCall.arguments,
-                            argsPreview = argsPreview,
-                            // 用 goal 感知的有效模式：goal 激活期间按 AUTO 放行（保留灾难性安全防护）
-                            mode = currentContext.permissionMode,
-                            sessionId = currentContext.sessionId,
-                            onEvent = { send(it) }
-                        )
-
-                        if (!checkResult.approved) {
-                            val rawResult = ToolResult.Error(checkResult.denyReason, checkResult.errorCode).toTransportString()
-                            send(AgentEvent.ToolCallFinished(effect.toolCall.id, effect.toolCall.name, rawResult, true, argsPreview))
+                        var toolCall = effect.toolCall
+                        // 插件 beforeToolCall 可写 hook：先于权限检查执行，允许改写参数或拒绝调用。
+                        val hookDecision = if (tool != null && hookSessionId != null) {
+                            agentLifecycleHooks.beforeToolCall(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                callId = toolCall.id,
+                                toolName = toolCall.name,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                arguments = JsonObject(toolCall.arguments)
+                            )
+                        } else null
+                        if (hookDecision?.denied == true) {
+                            val denyReason = hookDecision.denyReason ?: appContext.getString(R.string.plugin_hook_denied)
+                            val denyArgsPreview = JsonObject(toolCall.arguments).toString().take(500)
+                            send(AgentEvent.ToolCallFinished(toolCall.id, toolCall.name, ToolResult.Error(denyReason, PLUGIN_HOOK_DENIED).toTransportString(), true, denyArgsPreview))
+                            actionQueue.addLast(AgentAction.PermissionEvaluated(toolCall, false, denyArgsPreview, denyReason, PLUGIN_HOOK_DENIED))
                         } else {
-                            send(AgentEvent.ToolCallStarted(effect.toolCall.id, effect.toolCall.name, argsPreview))
+                            val resolvedArgs = hookDecision?.arguments ?: toolCall.arguments
+                            toolCall = toolCall.copy(arguments = resolvedArgs)
+                            val argsPreview = JsonObject(resolvedArgs).toString().take(500)
+                            val checkResult = requestPermissionIfNeeded(
+                                tool = tool,
+                                toolName = effect.toolCall.name,
+                                caseHint = currentTools
+                                    .firstOrNull { it.name.equals(effect.toolCall.name, ignoreCase = true) }
+                                    ?.name,
+                                callId = toolCall.id,
+                                arguments = resolvedArgs,
+                                argsPreview = argsPreview,
+                                // 用 goal 感知的有效模式：goal 激活期间按 AUTO 放行（保留灾难性安全防护）
+                                mode = currentContext.permissionMode,
+                                sessionId = currentContext.sessionId,
+                                runId = hookRunId,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                onEvent = { send(it) }
+                            )
+
+                            if (!checkResult.approved) {
+                                val rawResult = ToolResult.Error(checkResult.denyReason, checkResult.errorCode).toTransportString()
+                                send(AgentEvent.ToolCallFinished(toolCall.id, toolCall.name, rawResult, true, argsPreview))
+                            } else {
+                                send(AgentEvent.ToolCallStarted(toolCall.id, toolCall.name, argsPreview))
+                            }
+                            actionQueue.addLast(AgentAction.PermissionEvaluated(toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
                         }
-                        actionQueue.addLast(AgentAction.PermissionEvaluated(effect.toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
                     }
                     is AgentSideEffect.CancelToolBatch -> {
                         // 整批取消：已批准未执行的工具补发完成事件（内容为未执行），
@@ -1240,6 +1278,24 @@ class StatefulAgentWorkflow @Inject constructor(
                                 } else {
                                     currentContext = newCtx
                                     rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newCtx.mode))
+                                }
+                            }
+                            // 插件 afterToolCall 可写 hook：仅对成功结果执行，允许改写返回数据。
+                            if (!isError && hookSessionId != null) {
+                                toolResultSuccessData(rawResult)?.let { data ->
+                                    val transform = agentLifecycleHooks.afterToolCall(
+                                        sessionId = hookSessionId,
+                                        runId = hookRunId,
+                                        callId = toolCall.id,
+                                        toolName = toolCall.name,
+                                        mode = currentContext.mode.name,
+                                        scope = hookScope,
+                                        agentName = hookAgentName,
+                                        result = data
+                                    )
+                                    transform.data?.let { replaced ->
+                                        rawResult = replaceToolResultData(rawResult, replaced)
+                                    }
                                 }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
@@ -2131,6 +2187,9 @@ class StatefulAgentWorkflow @Inject constructor(
         argsPreview: String,
         mode: AgentMode,
         sessionId: String?,
+        runId: String,
+        scope: String,
+        agentName: String?,
         onEvent: suspend (AgentEvent) -> Unit
     ): PermissionCheckResult {
         if (tool == null) {
@@ -2175,6 +2234,29 @@ class StatefulAgentWorkflow @Inject constructor(
             ToolPermissionPolicyEngine.Verdict.ALLOW -> PermissionCheckResult(true)
             ToolPermissionPolicyEngine.Verdict.DENY -> PermissionCheckResult(false)
             ToolPermissionPolicyEngine.Verdict.ASK -> {
+                // 模式切换仍由本人确认；高危 ASK（Shizuku、elevate、配置修改、
+                // 删除子代理、危险 rm）同样进入代审核链。
+                if (tool.name != "planMode") {
+                    val review = agentLifecycleHooks.reviewPermission(
+                        runId = runId,
+                        sessionId = sessionId,
+                        mode = mode.name,
+                        scope = scope,
+                        agentName = agentName,
+                        callId = callId,
+                        toolName = tool.name,
+                        arguments = JsonObject(arguments)
+                    )
+                    when (review.decision) {
+                        PermissionReviewDecision.ALLOW -> return PermissionCheckResult(true)
+                        PermissionReviewDecision.DENY -> return PermissionCheckResult(
+                            approved = false,
+                            denyReason = review.reason ?: appContext.getString(R.string.plugin_review_denied),
+                            errorCode = PLUGIN_REVIEW_DENIED
+                        )
+                        PermissionReviewDecision.PASS -> Unit
+                    }
+                }
                 val base = tool.buildPermissionRequest(callId, arguments, argsPreview)
                 val request = base.copy(
                     title = eval.askTitle ?: base.title,
@@ -2243,4 +2325,24 @@ internal fun appendPlanModeNotice(rawToolResult: String, notice: String): String
     val result = Json.parseToJsonElement(rawToolResult).jsonObject
     val data = result.getValue("data").jsonPrimitive.content
     return JsonObject(result + ("data" to JsonPrimitive("$data\n\n${notice.trim()}"))).toString()
+}
+
+/**
+ * 从工具传输字符串中提取成功结果的 data 字段（仅 status=success 时返回非 null）。
+ * afterToolCall hook 的入参：只改写成功结果的数据，失败结果原样保留。
+ */
+internal fun toolResultSuccessData(raw: String): JsonElement? = runCatching {
+    val parsed = Json.parseToJsonElement(raw).jsonObject
+    if (parsed["status"]?.jsonPrimitive?.content != "success") return null
+    parsed["data"]
+}.getOrNull()
+
+/**
+ * 把 [newData] 写回工具传输字符串的 data 字段，保持 status/error 等其它字段不变。
+ * 调用方负责只在 hook 返回了改写后的数据时才调用本方法。
+ */
+internal fun replaceToolResultData(raw: String, newData: JsonElement): String {
+    val parsed = Json.parseToJsonElement(raw).jsonObject.toMutableMap()
+    parsed["data"] = newData
+    return Json.encodeToString(JsonObject(parsed))
 }

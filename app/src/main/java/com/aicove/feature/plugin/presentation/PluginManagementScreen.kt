@@ -23,7 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicove.R
@@ -32,6 +31,7 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Plus
 
+/** 插件安装包 MIME 类型白名单。 */
 private val PluginPackageMimeTypes = arrayOf(
     "application/zip",
     "application/x-zip-compressed",
@@ -53,6 +53,11 @@ fun PluginManagementScreen(
 ) {
     val plugins by viewModel.plugins.collectAsStateWithLifecycle()
     val loaded by viewModel.loaded.collectAsStateWithLifecycle()
+    val shizukuGrantedIds by viewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
+    val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
+    val dependencyStates by viewModel.dependencyStates.collectAsStateWithLifecycle()
+    val devMode by viewModel.devMode.collectAsStateWithLifecycle()
+    val devProjects by viewModel.devProjects.collectAsStateWithLifecycle()
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val languageTag = currentLanguageTag()
@@ -76,13 +81,19 @@ fun PluginManagementScreen(
                 title = { Text(stringResource(R.string.settings_plugins)) },
                 navigationIcon = {
                     IconButton(onClick = navigateBack) {
-                        Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
+                        Icon(
+                            imageVector = FeatherIcons.ArrowLeft,
+                            contentDescription = stringResource(R.string.common_back)
+                        )
                     }
                 },
                 actions = {
                     if (selectedPluginId == null) {
                         IconButton(onClick = { picker.launch(PluginPackageMimeTypes) }) {
-                            Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.plugins_import))
+                            Icon(
+                                imageVector = FeatherIcons.Plus,
+                                contentDescription = stringResource(R.string.plugins_import)
+                            )
                         }
                     }
                 },
@@ -104,16 +115,20 @@ fun PluginManagementScreen(
                     loaded = loaded,
                     onOpenDetail = { selectedPluginId = it.id },
                     onToggleEnabled = { item, enabled -> viewModel.setEnabled(item.id, enabled) },
-                    onUninstall = { viewModel.uninstall(it.id) }
+                    onUninstall = { viewModel.uninstall(it.id) },
+                    devMode = devMode,
+                    devRootPath = viewModel.devRootPath,
+                    devProjects = devProjects,
+                    onSetDevMode = viewModel::setDevMode,
+                    onRefreshDevProjects = viewModel::refreshDevProjects,
+                    onInstallDevProject = viewModel::installDevProject
                 )
             } else {
                 val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                val depState = dependencyStates[plugin.id]
                 PluginDetailSection(
                     plugin = plugin,
                     onToggleEnabled = { viewModel.setEnabled(plugin.id, it) },
-                    onTogglePermission = { permission, granted ->
-                        viewModel.setGranted(plugin.id, permission, granted)
-                    },
                     onUninstall = {
                         viewModel.uninstall(plugin.id)
                         selectedPluginId = null
@@ -128,7 +143,12 @@ fun PluginManagementScreen(
                             post = post
                         )
                     },
-                    onClosePage = { selectedPluginId = null }
+                    onClosePage = { selectedPluginId = null },
+                    dependencyState = depState,
+                    onPrepareDependencies = { viewModel.prepareDependencies(plugin.id) },
+                    shizukuGranted = plugin.content.shizuku != null && plugin.id in shizukuGrantedIds,
+                    shizukuState = shizukuState,
+                    onSetShizukuGranted = { viewModel.setShizukuGranted(plugin, it) }
                 )
             }
         }

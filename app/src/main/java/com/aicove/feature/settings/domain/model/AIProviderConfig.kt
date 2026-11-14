@@ -56,6 +56,12 @@ data class AIProviderConfig(
      */
     val scriptParams: Map<String, String> = emptyMap()
 ) {
+    val pluginProviderId: String?
+        get() = id.takeIf { it.startsWith("plugin:") }
+            ?.removePrefix("plugin:")
+            ?.substringBefore(':')
+            ?.takeIf { it.isNotEmpty() }
+
     /** 实际生效的模型：优先 selectedModel，其次 defaultModel。 */
     val effectiveModel: String
         get() = selectedModel.ifBlank { defaultModel }

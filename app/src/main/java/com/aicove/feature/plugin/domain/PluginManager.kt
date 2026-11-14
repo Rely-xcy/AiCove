@@ -2,6 +2,7 @@ package com.aicove.feature.plugin.domain
 
 import android.content.Context
 import com.aicove.core.util.FileLogger
+import com.aicove.feature.agent.domain.container.ContainerInstaller
 import com.aicove.feature.agent.domain.skill.Skill
 import com.aicove.feature.agent.domain.subagent.AgentDefinition
 import com.aicove.feature.plugin.data.ExtractedPackage
@@ -9,6 +10,8 @@ import com.aicove.feature.plugin.data.PackageReadResult
 import com.aicove.feature.plugin.data.PluginPackageReader
 import com.aicove.feature.plugin.data.PluginRecord
 import com.aicove.feature.plugin.data.PluginRegistryStore
+import com.aicove.feature.plugin.runtime.PluginDependencyPreparer
+import com.aicove.feature.plugin.runtime.PluginDependencyResult
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
@@ -49,16 +52,9 @@ data class InstalledPlugin(
 ) {
     val id: String get() = record.id
 
-    val granted: Set<PluginPermission> =
-        record.grants.mapNotNull { PluginPermission.fromId(it) }.toSet()
-
-    /** 清单要求必须授权、但目前尚未授权的能力。 */
-    val missingRequired: Set<PluginPermission>
-        get() = manifest?.requiredPermissions.orEmpty() - granted
-
-    /** 启用且状态正常且必要能力齐全，其贡献才会生效。 */
+    /** 启用且状态正常、清单可读时，它声明的全部贡献都生效。 */
     val isActive: Boolean
-        get() = record.enabled && status == PluginStatus.OK && manifest != null && missingRequired.isEmpty()
+        get() = record.enabled && status == PluginStatus.OK && manifest != null
 }
 
 /** 已通过校验、等待使用者确认安装的暂存包。 */
@@ -83,29 +79,39 @@ sealed interface PluginInstallResult {
 }
 
 /**
- * 插件的安装、启停、授权与贡献聚合。
+ * 插件的安装、启停与贡献聚合。
  *
- * 插件包与授权记录都保存在手机端 `filesDir/plugins`，该目录没有绑定进 PRoot 容器，也不经
- * [com.aicove.feature.workspace.domain.FileAccessProvider]，不随 SSH 模式迁到远端。
- * 本构建只加载声明式贡献（技能、子代理），不执行任何插件代码。
+ * 插件包与数据保存在容器内全局配置目录 `~/.aicode/plugins`（宿主侧为 [ContainerInstaller.aicodeDir]，
+ * 由 PRoot 绑定到容器内 `/root/.aicode`），本地容器里的命令可以直接访问插件文件与将来的依赖。
+ * 安装记录留在宿主私有目录，不随包进入容器，避免容器内进程改写启停状态。SSH 模式下插件仍只在手机端。
  */
 @Singleton
 class PluginManager internal constructor(
-    rootDir: File,
+    private val rootDir: File,
     private val hostApi: SemVer,
-    private val clock: () -> Long
+    private val clock: () -> Long,
+    private val registryFile: File = File(rootDir, "registry.json"),
+    private val legacyRootDir: File? = null,
+    private val dependencyPreparer: PluginDependencyPreparer? = null
 ) {
     @Inject
-    constructor(@ApplicationContext context: Context) : this(
-        File(context.filesDir, "plugins"),
+    constructor(
+        @ApplicationContext context: Context,
+        installer: ContainerInstaller,
+        dependencyPreparer: PluginDependencyPreparer
+    ) : this(
+        File(installer.aicodeDir, PLUGINS_DIR),
         PluginApi.VERSION,
-        System::currentTimeMillis
+        System::currentTimeMillis,
+        File(context.filesDir, REGISTRY_FILE),
+        File(context.filesDir, PLUGINS_DIR),
+        dependencyPreparer
     )
 
     private val installedDir = File(rootDir, "installed")
     private val stagingDir = File(rootDir, "staging")
     private val dataRoot = File(rootDir, "data")
-    private val store = PluginRegistryStore(File(rootDir, "registry.json"))
+    private val store = PluginRegistryStore(registryFile)
     private val reader = PluginPackageReader()
 
     private val mutex = Mutex()
@@ -140,9 +146,10 @@ class PluginManager internal constructor(
         if (loaded) return
         synchronized(loadLock) {
             if (loaded) return
+            migrateLegacyRoot()
             // 进程重启后不可能存在进行中的安装，暂存目录里的都是残留
             stagingDir.deleteRecursively()
-            val records = store.load()
+            val records = loadRecords()
             publish(records.map { loadInstalled(it) })
             sweepOrphans(records.map { it.id }.toSet())
             loaded = true
@@ -150,11 +157,11 @@ class PluginManager internal constructor(
         }
     }
 
-    /** 当前生效的插件技能：已启用、必要能力齐全且授予了 `skills.register`。 */
+    /** 当前生效的插件技能：插件启用即可用。 */
     fun activeSkills(): List<Skill> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.SKILLS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { plugin -> plugin.content.skills.map { it.skill } }
     }
 
@@ -164,11 +171,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { plugin -> plugin.content.skills.map { it.skill } }
     }
 
-    /** 当前生效的插件子代理定义，条件同 [activeSkills]，对应 `agents.register`。 */
+    /** 当前生效的插件子代理定义，条件同 [activeSkills]。 */
     fun activeAgents(): List<AgentDefinition> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.AGENTS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { plugin -> plugin.content.agents.map { it.definition } }
     }
 
@@ -181,11 +188,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { plugin -> plugin.content.agents.map { it.definition } }
     }
 
-    /** 当前生效的插件工作区工具：已启用且授予了 `workspace.tools`。 */
+    /** 当前生效的插件工作区工具：插件启用即可用。 */
     fun activeWorkspaceTools(): List<PluginWorkspaceTool> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.WORKSPACE_TOOLS in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.workspaceTools }
     }
 
@@ -198,11 +205,45 @@ class PluginManager internal constructor(
     /** 插件专属数据目录，对应桥里的 `data://` 根。 */
     fun dataDirFor(pluginId: String): File = File(dataRoot, pluginId)
 
-    /** 当前生效的插件 AI 工具：已启用且授予了 `tools.register`。 */
+    /** 开发者侧载目录，容器内对应 `~/.aicode/plugin-dev`。 */
+    val devDir: File
+        get() = File(rootDir.parentFile ?: rootDir, DEV_DIR).apply { mkdirs() }
+
+    /**
+     * 在本地容器、插件安装目录里准备依赖；长操作不持锁，失败时保留未准备状态。
+     * 没有运行时的纯声明式插件与没有依赖声明的运行时直接视为无需准备。
+     */
+    suspend fun prepareDependencies(id: String): PluginDependencyResult = withContext(Dispatchers.IO) {
+        ensureLoaded()
+        val plugin = _plugins.value.firstOrNull { it.id == id }
+            ?: return@withContext PluginDependencyResult.Failed("插件不存在")
+        val runtime = plugin.content.runtime
+            ?: return@withContext PluginDependencyResult.Failed("插件没有运行时，无需依赖")
+        val preparer = dependencyPreparer
+            ?: return@withContext PluginDependencyResult.Failed("依赖准备不可用")
+        val result = preparer.prepare(runtime)
+        mutateRecords { current ->
+            current.map { installed ->
+                if (installed.id != id) installed else {
+                    val record = when (result) {
+                        is PluginDependencyResult.Ready -> installed.record.copy(
+                            dependenciesReady = true,
+                            dependenciesHash = result.hash
+                        )
+                        else -> installed.record.copy(dependenciesReady = false, dependenciesHash = null)
+                    }
+                    installed.copy(record = record)
+                }
+            }
+        }
+        result
+    }
+
+    /** 当前生效的插件 AI 工具：插件启用即可用。 */
     fun activeTools(): List<PluginTool> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.TOOLS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.tools }
     }
 
@@ -212,11 +253,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.tools }
     }
 
-    /** 当前生效的插件生命周期 hook：已启用且授予了 `agent.events`。 */
+    /** 当前生效的插件生命周期 hook：插件启用即可用。 */
     fun activeHooks(): List<PluginHook> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.AGENT_EVENTS in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.hooks }
     }
 
@@ -226,15 +267,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.hooks }
     }
 
-    /** 当前生效的插件 MCP server：注册与连接两项权限都已授予。 */
+    /** 当前生效的插件 MCP server：插件启用即可用。 */
     fun activeMcpServers(): List<PluginMcpServer> {
         ensureLoaded()
         return _plugins.value
-            .filter {
-                it.isActive &&
-                    PluginPermission.MCP_REGISTER in it.granted &&
-                    PluginPermission.MCP_CONNECT in it.granted
-            }
+            .filter { it.isActive }
             .flatMap { it.content.mcp }
     }
 
@@ -297,25 +334,18 @@ class PluginManager internal constructor(
     }
 
     /**
-     * 安装暂存包。[granted] 是使用者在确认界面勾选的能力：必须覆盖全部必要能力，且不能超出清单申请的范围。
-     * 同 ID 已安装时整体替换，授权按本次确认重新设定，不继承旧授权。
+     * 安装暂存包。插件清单里的贡献随启用生效，安装不再逐项授权。
+     * 同 ID 已安装时整体替换。
      */
-    suspend fun install(token: String, granted: Set<PluginPermission>): PluginInstallResult =
+    suspend fun install(token: String): PluginInstallResult =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 ensureLoaded()
                 val pending = staged[token]
                     ?: return@withLock PluginInstallResult.Failed(PluginError(PluginErrorCode.PREVIEW_EXPIRED))
                 val manifest = pending.manifest
-                val declared = manifest.permissions.map { it.permission }.toSet()
-                val missing = manifest.requiredPermissions - granted
-                if (missing.isNotEmpty() || !declared.containsAll(granted)) {
-                    return@withLock PluginInstallResult.Failed(
-                        PluginError(PluginErrorCode.PERMISSION_NOT_GRANTED, missing.joinToString { it.id })
-                    )
-                }
                 try {
-                    commitInstall(token, pending, granted)
+                    commitInstall(token, pending)
                     PluginInstallResult.Installed(manifest.id)
                 } catch (e: IOException) {
                     FileLogger.e(TAG, "安装插件失败: ${manifest.id}", e)
@@ -324,7 +354,7 @@ class PluginManager internal constructor(
             }
         }
 
-    private fun commitInstall(token: String, pending: StagedPackage, granted: Set<PluginPermission>) {
+    private fun commitInstall(token: String, pending: StagedPackage) {
         val manifest = pending.manifest
         installedDir.mkdirs()
         val target = File(installedDir, manifest.id)
@@ -338,8 +368,7 @@ class PluginManager internal constructor(
             installedAt = clock(),
             origin = ORIGIN_LOCAL,
             archiveSha256 = pending.pkg.archiveSha256,
-            manifestSha256 = pending.pkg.manifestSha256,
-            grants = granted.map { it.id }.sorted()
+            manifestSha256 = pending.pkg.manifestSha256
         )
 
         var movedOld = false
@@ -376,15 +405,6 @@ class PluginManager internal constructor(
     suspend fun setEnabled(id: String, enabled: Boolean): Boolean = updateRecord(id) { record, _ ->
         record.copy(enabled = enabled)
     }
-
-    /** 授予或撤销单项能力。清单没有申请过的能力不会被授予。 */
-    suspend fun setGranted(id: String, permission: PluginPermission, granted: Boolean): Boolean =
-        updateRecord(id) { record, plugin ->
-            if (plugin.manifest?.requestFor(permission) == null) return@updateRecord record
-            val grants = record.grants.toMutableSet()
-            if (granted) grants += permission.id else grants -= permission.id
-            record.copy(grants = grants.sorted())
-        }
 
     private suspend fun updateRecord(
         id: String,
@@ -440,8 +460,66 @@ class PluginManager internal constructor(
         }
         return when (val content = PluginContentLoader.load(dir, manifest)) {
             is ContentLoadResult.Failed -> InstalledPlugin(record, PluginStatus.CORRUPTED, manifest, PluginContent(), content.errors)
-            is ContentLoadResult.Ok -> InstalledPlugin(record, PluginStatus.OK, manifest, content.content)
+            is ContentLoadResult.Ok -> InstalledPlugin(
+                refreshDependencyState(record, content.content),
+                PluginStatus.OK,
+                manifest,
+                content.content
+            )
         }
+    }
+
+    /** 依赖文件被改动后，准备状态失效；这里只修正视图，不写盘。 */
+    private fun refreshDependencyState(record: PluginRecord, content: PluginContent): PluginRecord {
+        val dependency = content.runtime?.dependencies ?: return record.copy(dependenciesReady = true)
+        val hash = runCatching {
+            PluginPackageReader.sha256Hex(dependency.file.readBytes())
+        }.getOrNull() ?: return record.copy(dependenciesReady = false)
+        return if (record.dependenciesHash == hash) record.copy(dependenciesReady = true)
+        else record.copy(dependenciesReady = false)
+    }
+
+    /**
+     * 旧版本把插件放在 `filesDir/plugins`，安装记录也在包目录内。迁移后包进容器，记录留宿主私有。
+     * 迁移失败时保留旧目录，下次启动重试；这里不删除尚未确认搬走的数据。
+     */
+    private fun migrateLegacyRoot() {
+        val legacy = legacyRootDir ?: return
+        // renameTo 要求目标父目录存在，插件可能先于容器初始化被访问。
+        rootDir.parentFile?.mkdirs()
+        if (!rootDir.exists() && legacy.isDirectory) {
+            if (!legacy.renameTo(rootDir)) {
+                FileLogger.w(TAG, "插件目录迁移失败，继续使用旧目录: ${legacy.absolutePath}")
+                return
+            }
+        }
+        val insideRegistry = File(rootDir, "registry.json")
+        val source = when {
+            insideRegistry.isFile -> insideRegistry
+            File(legacy, "registry.json").isFile -> File(legacy, "registry.json")
+            else -> null
+        }
+        if (!registryFile.exists() && source != null) {
+            registryFile.parentFile?.mkdirs()
+            if (!source.renameTo(registryFile)) {
+                // 目标目录不可写或跨挂载点时 rename 会失败；先保证记录还能读到，再等下次清理。
+                runCatching { source.copyTo(registryFile, overwrite = true) }
+                    .onFailure { FileLogger.w(TAG, "插件安装记录迁移失败: ${source.absolutePath}", it) }
+            }
+        }
+        // 迁移后包目录不该再留一份记录，否则容器内进程可以改写它。
+        if (registryFile.exists() && insideRegistry.isFile) insideRegistry.delete()
+        if (legacy.isDirectory && legacy.listFiles().isNullOrEmpty()) legacy.delete()
+    }
+
+    /**
+     * 记录尚未搬到宿主私有目录时（迁移未完成），退回到包目录里的副本读取，
+     * 避免把已安装插件当成孤儿清掉。
+     */
+    private fun loadRecords(): List<PluginRecord> {
+        if (registryFile.isFile) return store.load()
+        val inside = File(rootDir, "registry.json")
+        return if (inside.isFile) PluginRegistryStore(inside).load() else emptyList()
     }
 
     /** 没有安装记录的目录不具备任何授权，直接清掉（多半是安装中途崩溃留下的）。 */
@@ -458,6 +536,9 @@ class PluginManager internal constructor(
     companion object {
         private const val TAG = "PluginManager"
         private const val REPLACED_SUFFIX = ".replaced"
+        private const val PLUGINS_DIR = "plugins"
+        private const val DEV_DIR = "plugin-dev"
+        private const val REGISTRY_FILE = "plugin-registry.json"
         const val ORIGIN_LOCAL = "local"
     }
 }

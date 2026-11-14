@@ -63,10 +63,9 @@ fun ProjectToolsDrawer(
     workspacePath: String,
     tools: List<ProjectToolItem>,
     pluginToolsMap: Map<String, PluginWorkspaceTool>,
-    languageTag: String,
+    languageTag: String = "zh-CN",
     listState: LazyListState = rememberLazyListState(),
     onOpenToolDetail: (PluginWorkspaceTool, ProjectToolItem?) -> Unit,
-    onQuickRun: (PluginWorkspaceTool, ProjectToolItem) -> Unit,
     onOpenAllTools: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -105,11 +104,6 @@ fun ProjectToolsDrawer(
                             onClick = {
                                 if (pluginTool != null) {
                                     onOpenToolDetail(pluginTool, item)
-                                }
-                            },
-                            onRun = {
-                                if (pluginTool != null) {
-                                    onQuickRun(pluginTool, item)
                                 }
                             }
                         )
@@ -178,7 +172,7 @@ private fun ProjectHeaderCard(
             IconButton(onClick = onOpenSettings) {
                 Icon(
                     imageVector = FeatherIcons.Settings,
-                    contentDescription = stringResource(R.string.plugins_all_tools),
+                    contentDescription = "全部配置",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
@@ -192,8 +186,7 @@ private fun ProjectHeaderCard(
 private fun ToolListItemRow(
     item: ProjectToolItem,
     available: Boolean,
-    onClick: () -> Unit,
-    onRun: () -> Unit
+    onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -221,7 +214,7 @@ private fun ToolListItemRow(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = resolveToolIcon(item.icon),
+                    imageVector = resolveToolIcon(item.iconName),
                     contentDescription = null,
                     tint = iconColor,
                     modifier = Modifier.size(22.dp)
@@ -232,54 +225,28 @@ private fun ToolListItemRow(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = item.name,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (available) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (!available) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = stringResource(R.string.plugin_tool_unavailable),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                } else if (item.description.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = item.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
-            Spacer(modifier = Modifier.width(Spacing.xs))
-
-            // 右侧「运行」快捷胶囊按钮
-            Button(
-                onClick = onRun,
-                enabled = available,
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                modifier = Modifier.height(34.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.plugins_quick_run),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
+            if (available) {
+                Icon(
+                    imageVector = FeatherIcons.Play,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }

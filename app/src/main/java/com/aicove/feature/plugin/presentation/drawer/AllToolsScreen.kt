@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +52,7 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.ChevronRight
+import compose.icons.feathericons.MoreVertical
 import compose.icons.feathericons.Search
 
 /**
@@ -61,7 +63,7 @@ import compose.icons.feathericons.Search
 fun AllToolsScreen(
     availableTools: List<PluginWorkspaceTool>,
     enabledToolKeys: Set<String>,
-    languageTag: String,
+    languageTag: String = "zh-CN",
     onBack: () -> Unit,
     onAddTool: (PluginWorkspaceTool) -> Unit,
     onViewDetail: (PluginWorkspaceTool) -> Unit
@@ -93,6 +95,15 @@ fun AllToolsScreen(
                             imageVector = FeatherIcons.ArrowLeft,
                             contentDescription = stringResource(R.string.common_back),
                             modifier = Modifier.size(22.dp)
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {}) {
+                        Icon(
+                            imageVector = FeatherIcons.MoreVertical,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 },
@@ -207,24 +218,28 @@ private fun AllToolItemRow(
                 )
             }
 
-            Spacer(modifier = Modifier.width(Spacing.md))
+            Spacer(modifier = Modifier.width(Spacing.sm))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = tool.title.resolve(languageTag),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${tool.category} · ${tool.description.resolve(languageTag)}",
+                    text = tool.description.resolve(languageTag),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = tool.category,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
 

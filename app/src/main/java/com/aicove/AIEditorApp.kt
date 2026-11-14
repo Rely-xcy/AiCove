@@ -174,6 +174,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var pluginToolManager: PluginToolManager
 
+    @Inject
+    lateinit var pluginHookDispatcher: com.aicove.feature.plugin.runtime.PluginHookDispatcher
+
     /** MCP 配置仓库：启动即监听 mcp.json 外部直接编辑，改动数秒内刷新列表并触发重连。 */
     @Inject
     lateinit var mcpConfigRepository: com.aicove.feature.agent.domain.mcp.McpConfigRepository
@@ -439,8 +442,14 @@ class AIEditorApp : Application(), Configuration.Provider {
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。
         mcpManager.start()
-        // 插件 AI 工具与 MCP 共用 ToolRegistry；安装、启停、撤权时由 manager 增量同步。
+        // 插件 AI 工具与 MCP 共用 ToolRegistry；安装、启停时由 manager 增量同步。
         pluginToolManager.start(appScope)
+        appScope.launch {
+            val appVersion = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull().orEmpty()
+            pluginHookDispatcher.dispatchAppStarted(appVersion)
+        }
         // 权限规则由 App 启动即常驻订阅（AI 评估随时要读到最新规则）；MCP 配置与技能列表
         // 改由各自消费方（McpManager / 设置页）按需订阅，无需在这里拉起。
         appScope.launch { permissionRulesRepository.startWatching() }
@@ -853,6 +862,16 @@ class AIEditorApp : Application(), Configuration.Provider {
                 setShowBadge(false)
             }
             notificationManager.createNotificationChannel(approvalChannel)
+
+            val pluginChannel = NotificationChannel(
+                "plugin_events",
+                getString(R.string.notification_channel_plugin_events),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.notification_channel_plugin_events_desc)
+                setShowBadge(true)
+            }
+            notificationManager.createNotificationChannel(pluginChannel)
         }
     }
 }

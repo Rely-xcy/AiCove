@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_provider_missing_bound">插件提供商「%1$s」已被删除，或提供它的插件已停用/卸载，请重新选择模型</string>
+    <string name="plugin_provider_missing_default">默认插件提供商已被删除，或提供它的插件已停用/卸载，请重新选择模型</string>
+    <string name="plugin_hook_denied">插件阻止了该工具调用</string>
+    <string name="plugin_review_denied">插件代审核拒绝了该工具调用</string>
+</resources>
