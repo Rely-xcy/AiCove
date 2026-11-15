@@ -168,6 +168,8 @@ class AIAgentViewModelSystemNotificationQueueTest {
         containerEngine = mockk(relaxed = true),
         sessionUseCase = mockk(relaxed = true),
         messagePersistenceUseCase = mockk(relaxed = true),
+        agentChatRequestBus = mockk(relaxed = true),
+        agentRunStateStore = mockk(relaxed = true),
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk<TerminalSessionManager>(relaxed = true).also { m ->
             every { m.tabFinishedEvents } returns MutableSharedFlow()

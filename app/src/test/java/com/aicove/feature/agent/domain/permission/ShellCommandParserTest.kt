@@ -165,7 +165,7 @@ class ShellCommandParserTest {
     fun devNullRedirection_isAnalyzable() {
         // `2>/dev/null` 丢弃输出，不产生任何文件写入，不应降级为不可静态判定
         val analysis = ShellCommandParser.analyze("grep -rn \"x\" app 2>/dev/null")
-        assertTrue(analysis.analyzable, "blockers=${analysis.blockers}")
+        assertTrue("blockers=${analysis.blockers}", analysis.analyzable)
         // fd 前缀 `2` 不是命令 token，否则会污染程序名与删除目标判定
         assertEquals(listOf("grep", "-rn", "x", "app", "/dev/null"), analysis.segments.single())
     }
@@ -174,7 +174,7 @@ class ShellCommandParserTest {
     fun fdDuplication_isAnalyzable() {
         // `2>&1` 目标是 fd 复制，不是文件路径
         val analysis = ShellCommandParser.analyze("python3 -c \"print(1)\" 2>&1")
-        assertTrue(analysis.analyzable, "blockers=${analysis.blockers}")
+        assertTrue("blockers=${analysis.blockers}", analysis.analyzable)
         assertEquals(listOf("python3", "-c", "print(1)"), analysis.segments.single())
     }
 

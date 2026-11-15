@@ -137,6 +137,8 @@ class AIAgentViewModelBrowseRefreshTest {
         containerEngine = mockk(relaxed = true),
         sessionUseCase = mockk(relaxed = true),
         messagePersistenceUseCase = mockk(relaxed = true),
+        agentChatRequestBus = mockk(relaxed = true),
+        agentRunStateStore = mockk(relaxed = true),
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk(relaxed = true) { every { tabFinishedEvents } returns MutableSharedFlow() },
         remoteTerminalSessionManager = mockk(relaxed = true),

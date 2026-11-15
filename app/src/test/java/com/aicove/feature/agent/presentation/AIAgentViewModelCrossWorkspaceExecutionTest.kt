@@ -129,6 +129,8 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             containerEngine = mockk(relaxed = true),
             sessionUseCase = sessionUseCase,
             messagePersistenceUseCase = mockk(relaxed = true),
+            agentChatRequestBus = mockk(relaxed = true),
+            agentRunStateStore = mockk(relaxed = true),
             planApprovalManager = mockk(relaxed = true),
             terminalSessionManager = mockk<TerminalSessionManager>(relaxed = true) {
                 every { tabFinishedEvents } returns MutableSharedFlow()
