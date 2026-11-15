@@ -99,6 +99,7 @@ import com.aicove.feature.settings.presentation.component.SettingsDivider
 import com.aicove.core.ui.CollapsibleGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsGroup
 import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
+import com.aicove.core.plugin.PluginSlotEntry
 import com.aicove.feature.settings.presentation.component.SettingsRow
 import com.aicove.feature.settings.presentation.component.settingsPageBackground
 import com.aicove.feature.agent.domain.model.ChatSession
@@ -180,6 +181,9 @@ fun ChatDrawerContent(
     onClearClipboard: () -> Unit,
     onNavigateToBrowser: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
+    pluginEntries: List<PluginSlotEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onOpenPluginPage: (PluginSlotEntry) -> Unit = {},
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -375,6 +379,20 @@ fun ChatDrawerContent(
                     onPasteEntry = onPasteEntry,
                     onClearClipboard = onClearClipboard
                 )
+            }
+        }
+
+        if (pluginEntries.isNotEmpty()) {
+            SettingsGroup {
+                pluginEntries.take(3).forEachIndexed { index, entry ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.Package,
+                        title = entry.title,
+                        subtitle = entry.pluginId,
+                        onClick = { onOpenPluginPage(entry) }
+                    )
+                }
             }
         }
 
