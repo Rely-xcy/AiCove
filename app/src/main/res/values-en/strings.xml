@@ -1687,6 +1687,7 @@
     <string name="provider_headers_manage">Manage</string>
     <string name="provider_headers_empty">No headers yet; add one below</string>
     <string name="provider_headers_count">%1$d headers configured</string>
+    <string name="provider_headers_templates">Client templates</string>
     <string name="provider_response_api">Response API (new)</string>
     <string name="provider_interactions_api">Interactions API (new)</string>
     <string name="provider_models_count">Models (%1$s)</string>

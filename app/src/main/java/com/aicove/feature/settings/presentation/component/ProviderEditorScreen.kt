@@ -3025,6 +3025,17 @@ private fun ProviderHeadersSheet(
                     .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // 常用编程客户端的标识头模板：点一下追加到列表，已存在的同名头不重复添加。
+                HeaderTemplateRow(
+                    templates = HeaderTemplates.ALL,
+                    onApply = { template ->
+                        template.headers.forEach { (name, value) ->
+                            if (headers.none { it.first.equals(name, ignoreCase = true) }) {
+                                headers.add(name to value)
+                            }
+                        }
+                    }
+                )
                 Surface(
                     onClick = { headers.add("" to "") },
                     shape = RoundedCornerShape(10.dp),
