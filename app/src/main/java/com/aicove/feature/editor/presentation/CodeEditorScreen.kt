@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -82,14 +83,16 @@ import compose.icons.feathericons.Eye
 import compose.icons.feathericons.Save
 import compose.icons.feathericons.Settings
 import compose.icons.feathericons.X
-import io.github.rosemoe.sora.event.ContentChangeEvent
+import com.aicove.feature.plugin.domain.PluginUiEntry
+import com.aicove.feature.plugin.presentation.PluginEntryContext
 import io.github.rosemoe.sora.event.ScrollEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
 import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
 import io.github.rosemoe.sora.text.UndoManager
-import io.github.rosemoe.sora.widget.CodeEditor
+import io.github.rosemoe.sora.widget.component.EditorTextActionWindow
+import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import kotlin.math.abs
 
@@ -113,6 +116,9 @@ fun CodeEditorScreen(
     initialLine: Int = 0,
     embedded: Boolean = false,
     leaveGuard: EditorLeaveGuard? = null,
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onPluginEntry: (PluginUiEntry, PluginEntryContext) -> Unit = { _, _ -> },
     viewModel: CodeEditorViewModel = hiltViewModel()
 ) {
     LaunchedEffect(path) { viewModel.load(path) }
@@ -214,6 +220,51 @@ fun CodeEditorScreen(
         val editor = editorRef.value ?: return
         pendingSaveText = editor.text.toString()
         viewModel.save(pendingSaveText)
+    }
+
+    // 插件槽位上下文：文件路径 + 当前选区；没选中文本时不传 selection。
+    val buildPluginContext: () -> PluginEntryContext = {
+        val editor = editorRef.value
+        val cursor = editor?.cursor
+        val left = cursor?.left()
+        val right = cursor?.right()
+        val selected = if (cursor != null && cursor.isSelected && left != null && right != null) {
+            val from = minOf(left.index, right.index)
+            val to = minOf(maxOf(left.index, right.index), from + MAX_PLUGIN_SELECTION_CHARS)
+            runCatching { editor.text.substring(from, to) }.getOrNull()
+        } else {
+            null
+        }
+        PluginEntryContext(
+            path = path,
+            selection = selected,
+            language = path.substringAfterLast('.', "").ifBlank { null },
+            lineStart = if (selected != null && left != null && right != null) {
+                minOf(left.line, right.line) + 1
+            } else null,
+            lineEnd = if (selected != null && left != null && right != null) {
+                maxOf(left.line, right.line) + 1
+            } else null
+        )
+    }
+
+    // 把插件动作挂到选中文本的浮动菜单里；入口与回调随组合更新。
+    val latestPluginEntries = rememberUpdatedState(pluginEntries)
+    val latestPluginLanguage = rememberUpdatedState(pluginLanguageTag)
+    val latestOnPluginEntry = rememberUpdatedState(onPluginEntry)
+    val latestBuildPluginContext = rememberUpdatedState(buildPluginContext)
+    LaunchedEffect(editorRef.value) {
+        val editor = editorRef.value ?: return@LaunchedEffect
+        editor.replaceComponent(
+            EditorTextActionWindow::class.java,
+            PluginTextActionWindow(
+                hostEditor = editor,
+                entriesProvider = { latestPluginEntries.value },
+                languageTagProvider = { latestPluginLanguage.value },
+                contextProvider = { latestBuildPluginContext.value() },
+                onEntry = { entry, context -> latestOnPluginEntry.value(entry, context) }
+            )
+        )
     }
 
     fun handleBack() {
@@ -893,3 +944,6 @@ private fun scrollVerticallyTo(editor: CodeEditor, offsetY: Int) {
     scroller.abortAnimation()
     editor.invalidate()
 }
+
+/** 传给插件动作/页面的选中文本上限，避免大型选区撑爆 JSON 与页面桥。 */
+private const val MAX_PLUGIN_SELECTION_CHARS = 16_000
