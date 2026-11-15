@@ -64,9 +64,8 @@ class PluginIndexClient @Inject constructor(
     suspend fun fetchIndex(source: PluginIndexSource, forceRefresh: Boolean = false): PluginIndexSnapshot =
         withContext(Dispatchers.IO) {
             val cached = cacheFile(source)
-            val url = accelerated(source.indexUrl)
             val bytes = try {
-                getBytes(url, MAX_INDEX_BYTES, noCache = forceRefresh)
+                fetchWithMirrors(source.indexUrl, MAX_INDEX_BYTES, noCache = forceRefresh)
             } catch (e: IOException) {
                 if (forceRefresh) throw e
                 val fallback = readCache(cached) ?: throw e
@@ -76,6 +75,40 @@ class PluginIndexClient @Inject constructor(
             writeCache(cached, bytes)
             PluginIndexSnapshot(index, stale = false, fetchedAt = System.currentTimeMillis())
         }
+
+    /**
+     * 按候选顺序尝试抓取，前一个失败（超时/连不上/非 2xx）就换下一个。
+     * 全部失败时抛最后一个异常——调用方据此回退磁盘缓存。
+     */
+    private suspend fun fetchWithMirrors(
+        url: String,
+        maxBytes: Long,
+        noCache: Boolean,
+        expectedSize: Long? = null
+    ): ByteArray {
+        val candidates = mirrorCandidates(url)
+        var last: IOException? = null
+        for (candidate in candidates) {
+            try {
+                return getBytes(candidate, maxBytes, noCache = noCache, expectedSize = expectedSize)
+            } catch (e: IOException) {
+                last = e
+            }
+        }
+        throw last ?: IOException("no mirror candidate for $url")
+    }
+
+    /**
+     * 该 URL 可尝试的完整地址列表。非 GitHub 主机不加速，只返回原地址；
+     * GitHub 主机按「用户自定义 → 内置候选 → 直连」依次展开。
+     */
+    private suspend fun mirrorCandidates(url: String): List<String> {
+        val host = runCatching { URI(url).host?.lowercase() }.getOrNull()
+        if (host == null || host !in MIRRORED_HOSTS) return listOf(url)
+        return storeSettings.mirrorCandidates.first().map { prefix ->
+            if (prefix.isEmpty()) url else prefix.trimEnd('/') + "/" + url
+        }
+    }
 
     fun isCompatible(plugin: PluginIndexPlugin): Boolean {
         val minimum = plugin.minAppVersion?.let { SemVer.parse(it) ?: return false } ?: return true
@@ -130,19 +163,10 @@ class PluginIndexClient @Inject constructor(
         if (asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
             throw PluginIndexException("资产大小非法: ${asset.size}")
         }
-        val bytes = getBytes(accelerated(asset.url), asset.size, noCache = true, expectedSize = asset.size)
+        val bytes = fetchWithMirrors(asset.url, asset.size, noCache = true, expectedSize = asset.size)
         val file = File(context.cacheDir, "plugin-${sha256(bytes).take(16)}.zip")
         file.writeBytes(bytes)
         DownloadedPluginPackage(file, asset)
-    }
-
-    /** 配置了镜像加速时给 GitHub 地址加上前缀；其他主机的索引仓库保持原地址。 */
-    private suspend fun accelerated(url: String): String {
-        val mirror = storeSettings.downloadMirror.first().trim()
-        if (mirror.isEmpty()) return url
-        val host = runCatching { URI(url).host?.lowercase() }.getOrNull() ?: return url
-        if (host !in MIRRORED_HOSTS) return url
-        return mirror.trimEnd('/') + "/" + url
     }
 
     private fun assetName(id: String, version: String): String = "${id}_$version.zip"

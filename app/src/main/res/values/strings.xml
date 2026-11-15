@@ -926,6 +926,7 @@
     <string name="chat_retrying">正在重试 %1$s/%2$s</string>
     <string name="chat_key_switched">已切换到第 %1$d/%2$d 个 Key</string>
     <string name="chat_goal_label">目标·%1$s</string>
+    <string name="chat_goal_label_turns">目标·%1$s·已跑 %2$d 轮</string>
     <string name="chat_goal_status_active">进行中</string>
     <string name="chat_goal_status_paused">已暂停</string>
     <string name="chat_goal_status_completed">已完成</string>

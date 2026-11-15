@@ -1310,7 +1310,11 @@ private fun GoalBannerRow(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.chat_goal_label, statusLabel),
+                    text = if (goal.turnCount > 0) {
+                        stringResource(R.string.chat_goal_label_turns, statusLabel, goal.turnCount)
+                    } else {
+                        stringResource(R.string.chat_goal_label, statusLabel)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = accent,
                     maxLines = 1

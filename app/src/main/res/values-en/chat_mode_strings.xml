@@ -3,4 +3,6 @@
     <string name="chat_mode_managed">Managed</string>
     <string name="chat_managed_goal_hint">Describe the goal; the AI will keep working toward it</string>
     <string name="chat_managed_start">Start</string>
+    <string name="chat_managed_update">Update goal</string>
+    <string name="chat_managed_resume">Resume</string>
 </resources>

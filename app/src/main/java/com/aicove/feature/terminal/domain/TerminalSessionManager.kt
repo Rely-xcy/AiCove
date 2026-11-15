@@ -53,6 +53,8 @@ class TerminalSessionManager @Inject constructor(
 ) : TerminalSessionProvider {
     private companion object {
         const val TAG = "TerminalSessionManager"
+        /** 标签默认标题 `term-N`；[nextTitle] 据此找当前占用的编号。 */
+        val TAB_TITLE = Regex("^term-(\\d+)$")
         const val TRANSCRIPT_ROWS = 2000
         /** 每个标签的原始输出有界队列容量（块数）；消费端不跟随时丢弃最旧块，不在内存里无界累积。 */
         const val OUTPUT_CHANNEL_CAPACITY = 64
@@ -132,7 +134,7 @@ class TerminalSessionManager @Inject constructor(
         addTab(
             TerminalTab(
                 id = id,
-                title = id,
+                title = nextTitle(),
                 session = session,
                 isBackground = false,
                 command = null,
@@ -204,7 +206,7 @@ class TerminalSessionManager @Inject constructor(
         addTab(
             TerminalTab(
                 id = id,
-                title = title ?: id,
+                title = title ?: nextTitle(),
                 session = session,
                 isBackground = true,
                 command = command,
@@ -236,7 +238,7 @@ class TerminalSessionManager @Inject constructor(
         addTab(
             TerminalTab(
                 id = id,
-                title = title ?: id,
+                title = title ?: nextTitle(),
                 session = session,
                 isBackground = true,
                 command = command,
@@ -381,6 +383,21 @@ class TerminalSessionManager @Inject constructor(
     }
 
     private fun nextId(): String = "term-${idCounter.incrementAndGet()}"
+
+    /**
+     * 新标签的显示编号：取当前标签里未被占用的最小正整数。
+     *
+     * 以前标题直接用自增 id，关掉标签后编号只增不减（关掉 term-1 再新建变 term-3），
+     * 跟实际开着几个终端对不上。id 仍用 [nextId] 保证唯一，只有显示标题走这里。
+     */
+    private fun nextTitle(): String {
+        val used = _tabs.value.mapNotNull { tab ->
+            TAB_TITLE.find(tab.title)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }.toSet()
+        var n = 1
+        while (n in used) n++
+        return "term-$n"
+    }
 
     /**
      * 完成兜底监控：termux 的会话结束依赖 PTY 读到 EOF，而 proot 宿主进程在 Android 上可能

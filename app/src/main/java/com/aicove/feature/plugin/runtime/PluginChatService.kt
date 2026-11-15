@@ -293,7 +293,7 @@ class PluginChatService @Inject constructor(
         }
         val text = PluginHostPaths.requireString(params, "text")
         val append = (params["append"] as? JsonPrimitive)?.booleanOrNull == true
-        if (!agentChatRequestBus.submit(
+        if (!requestBus.submit(
                 AgentChatRequest.SetDraft(sessionId = sessionId, text = text, append = append)
             )
         ) {

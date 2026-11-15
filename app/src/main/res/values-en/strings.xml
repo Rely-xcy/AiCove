@@ -926,6 +926,7 @@
     <string name="chat_retrying">Retrying %1$s/%2$s</string>
     <string name="chat_key_switched">Switched to key %1$d of %2$d</string>
     <string name="chat_goal_label">Goal · %1$s</string>
+    <string name="chat_goal_label_turns">Goal · %1$s · %2$d turns</string>
     <string name="chat_goal_status_active">Active</string>
     <string name="chat_goal_status_paused">Paused</string>
     <string name="chat_goal_status_completed">Completed</string>

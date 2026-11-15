@@ -88,8 +88,18 @@ internal fun ChatModeMenu(
     var editGoal by remember { mutableStateOf(false) }
     var goalText by remember { mutableStateOf(TextFieldValue()) }
     val managed = goal?.status == GoalStatus.ACTIVE
-    val accent = if (managed) MaterialTheme.colorScheme.primary else modeContainerColor(mode)
-    val accentText = if (managed) MaterialTheme.colorScheme.onPrimary else modeContentColor(mode)
+    // 有目标但不在运行（暂停/受阻/耗尽）也要在按钮上体现，否则用户以为目标没了。
+    val hasGoal = goal != null && goal.text.isNotBlank()
+    val accent = when {
+        managed -> MaterialTheme.colorScheme.primary
+        hasGoal -> MaterialTheme.semanticColors.buttonMutedBg
+        else -> modeContainerColor(mode)
+    }
+    val accentText = when {
+        managed -> MaterialTheme.colorScheme.onPrimary
+        hasGoal -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> modeContentColor(mode)
+    }
     Box {
         Surface(
             shape = RoundedCornerShape(Radius.pill),
@@ -97,7 +107,14 @@ internal fun ChatModeMenu(
             onClick = { expanded = true }
         ) {
             Text(
-                text = if (managed) stringResource(R.string.chat_mode_managed) else mode.name,
+                text = when {
+                    managed -> stringResource(R.string.chat_mode_managed)
+                    hasGoal -> stringResource(
+                        if (goal?.status == GoalStatus.PAUSED) R.string.chat_goal_status_paused
+                        else R.string.chat_goal_status_blocked
+                    )
+                    else -> mode.name
+                },
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = accentText,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = Spacing.xs)
@@ -187,10 +204,17 @@ internal fun ChatModeMenu(
                 )
             },
             confirmButton = {
+                // 按钮文案随现有目标状态变：没有目标是「开始托管」，运行中/暂停中是「更新目标」；
+                // 用同一个「开始托管」会让人以为会从头重跑。
+                val actionLabel = when {
+                    goal == null || goal.text.isBlank() -> R.string.chat_managed_start
+                    goal.status == GoalStatus.PAUSED -> R.string.chat_managed_resume
+                    else -> R.string.chat_managed_update
+                }
                 TextButton(enabled = goalText.text.isNotBlank(), onClick = {
                     onSetGoal(goalText.text.trim())
                     editGoal = false
-                }) { Text(stringResource(R.string.chat_managed_start)) }
+                }) { Text(stringResource(actionLabel)) }
             },
             dismissButton = {
                 TextButton(onClick = { editGoal = false }) { Text(stringResource(R.string.common_cancel)) }

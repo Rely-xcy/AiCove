@@ -43,6 +43,9 @@ private const val EXIT_MARKER_PREFIX = "[command exited: "
 private const val EXIT_MARKER_POLL_MS = 1_000L
 private const val EXIT_MARKER_GRACE_MS = 1_500L
 
+/** 标签默认标题 `term-N`；[nextTitle] 据此找当前占用的编号。 */
+private val TAB_TITLE = Regex("^term-(\\d+)$")
+
 /**
  * 远程 SSH 终端会话管理器：用 sshj shell channel 驱动 [TerminalSession]（接 [SshShellBackend]），
  * 与本地 [TerminalSessionManager]（fork PTY 进程）共用同一套 UI/工具接口。
@@ -209,7 +212,7 @@ class RemoteTerminalSessionManager @Inject constructor(
         }
         val tab = TerminalTab(
             id = id,
-            title = title ?: id,
+            title = title ?: nextTitle(),
             session = termSession,
             isBackground = isBackground,
             command = command,
@@ -315,6 +318,19 @@ class RemoteTerminalSessionManager @Inject constructor(
     }
 
     private fun nextId(): String = "term-${idCounter.incrementAndGet()}"
+
+    /**
+     * 新标签的显示编号：取当前标签里未被占用的最小正整数。
+     * 与本地版一致：以前标题直接用自增 id，关掉标签后编号只增不减。
+     */
+    private fun nextTitle(): String {
+        val used = _tabs.value.mapNotNull { tab ->
+            TAB_TITLE.find(tab.title)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }.toSet()
+        var n = 1
+        while (n in used) n++
+        return "term-$n"
+    }
 
     private fun addTab(tab: TerminalTab) {
         _tabs.value = _tabs.value + tab
