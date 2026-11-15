@@ -1,6 +1,6 @@
 package com.aicove.feature.plugin.data.index
 
-import com.aicode.feature.plugin.domain.LocalizedText
+import com.aicove.feature.plugin.domain.LocalizedText
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
