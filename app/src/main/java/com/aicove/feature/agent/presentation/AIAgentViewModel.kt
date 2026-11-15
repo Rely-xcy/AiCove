@@ -94,6 +94,8 @@ import com.aicove.feature.agent.domain.tool.mode.PlanApprovalRequest
 import com.aicove.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicove.feature.agent.domain.tool.vscreen.VSCREEN_TOOL_PREFIX
 import com.aicove.feature.agent.domain.tool.question.UserQuestionAnswer
+import com.aicove.feature.agent.domain.session.AgentChatRequest
+import com.aicove.feature.agent.domain.session.AgentChatRequestBus
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
 import kotlinx.coroutines.flow.Flow
@@ -169,6 +171,7 @@ class AIAgentViewModel @Inject constructor(
     private val containerEngine: LinuxContainerEngine,
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
+    private val agentChatRequestBus: AgentChatRequestBus,
     private val planApprovalManager: PlanApprovalManager,
     private val terminalSessionManager: TerminalSessionManager,
     private val remoteTerminalSessionManager: RemoteTerminalSessionManager,
@@ -215,6 +218,9 @@ class AIAgentViewModel @Inject constructor(
      */
     private val pendingAssistantTextStop = mutableMapOf<String, Boolean>()
     private val sessionJobs = mutableMapOf<String, Job>()
+
+    /** 插件会话请求的消费者标识；重复 attach/detach 保持幂等。 */
+    private val chatRequestConsumerId = UUID.randomUUID().toString()
 
     /**
      * goal 自主循环的「连续空回合」计数：自动续跑回合若既无工具调用也无可见正文，
@@ -1354,6 +1360,26 @@ class AIAgentViewModel @Inject constructor(
     }
 
     init {
+        // 插件通过宿主 API 创建会话后，发送消息/停止/切换仍交给聊天页执行，
+        // 复用这里的授权、运行状态、通知与队列逻辑。
+        agentChatRequestBus.attach(chatRequestConsumerId)
+        viewModelScope.launch {
+            try {
+                while (true) {
+                    val request = agentChatRequestBus.receive()
+                    try {
+                        handleAgentChatRequest(request)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        FileLogger.w(TAG, "处理插件会话请求失败: $request", e)
+                    }
+                }
+            } finally {
+                agentChatRequestBus.detach(chatRequestConsumerId)
+            }
+        }
+
         // 冷启动收尾：上次进程被杀时残留的「执行中」工具回填为「已中断」。在后台执行，不阻塞首屏与会话展示。
         viewModelScope.launch(Dispatchers.IO) {
             sessionUseCase.initColdStartCleanup()
@@ -1523,6 +1549,27 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** 消费插件会话请求：发送走与手动输入相同的入队/执行路径，停止与切换复用现有动作。 */
+    private suspend fun handleAgentChatRequest(request: AgentChatRequest) {
+        when (request) {
+            is AgentChatRequest.Send -> {
+                if (sessionUseCase.getSessionById(request.sessionId) == null) return
+                enqueueAgentRequest(
+                    request = request.text,
+                    projectRoot = request.workspacePath,
+                    targetSessionId = request.sessionId
+                )
+            }
+            is AgentChatRequest.Stop -> stopAgentSession(request.sessionId)
+            is AgentChatRequest.Select -> selectSession(request.sessionId)
+        }
+    }
+
+    override fun onCleared() {
+        agentChatRequestBus.detach(chatRequestConsumerId)
+        super.onCleared()
     }
 
     /** 子代理开始运行：卡片立刻进入「运行中」，不必等工具结果回来。 */
