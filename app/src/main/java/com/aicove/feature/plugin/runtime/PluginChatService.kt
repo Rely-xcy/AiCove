@@ -88,7 +88,14 @@ class PluginChatService @Inject constructor(
 
     suspend fun createSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
+        // 允许指定目标工作区（如本地/远程切换）；不传则用当前工作区
+        val requested = optionalString(params, "workspacePath")?.trim()?.takeIf { it.isNotEmpty() }
+        val workspace = if (requested == null) {
+            requireWorkspace()
+        } else {
+            requested.takeIf { path -> workspaceRepository.workspaces.value.any { it.path == path } }
+                ?: throw paramInvalid("unknown workspace")
+        }
         val title = optionalString(params, "title")?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.also { if (it.length > MAX_TITLE_CHARS) throw paramInvalid("title too long") }

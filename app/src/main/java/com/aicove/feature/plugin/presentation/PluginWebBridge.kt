@@ -14,6 +14,8 @@ import com.aicove.feature.plugin.domain.PluginSettingsPage
 import com.aicove.feature.plugin.runtime.PluginEventBus
 import com.aicove.feature.plugin.runtime.PluginProcessException
 import com.aicove.feature.plugin.runtime.PluginChatService
+import com.aicove.feature.workspace.domain.model.Workspace
+import com.aicove.feature.workspace.domain.model.WorkspaceType
 import com.aicove.feature.plugin.runtime.PluginRuntimeManager
 import com.aicove.feature.plugin.runtime.PluginShizukuException
 import com.aicove.feature.plugin.runtime.PluginShizukuRunner
@@ -68,6 +70,7 @@ class PluginWebBridge(
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
     private val chatService: PluginChatService,
+    private val workspacesProvider: () -> List<Workspace>,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -169,6 +172,7 @@ class PluginWebBridge(
         "chat.delete" -> chatService.deleteSession(page.pluginId, params)
         "chat.runState" -> chatService.getRunState(page.pluginId, params)
         "chat.waitRun" -> chatService.waitForRun(page.pluginId, params)
+        "workspaces.list" -> listWorkspaces()
         "bash" -> bash(params)
         "shizuku.exec" -> shizukuExec(params)
         "tip" -> tip(params)
@@ -288,6 +292,19 @@ class PluginWebBridge(
     }
 
     /** 一次性 Shell 命令：在插件页面所属工作区执行，输出与退出码原样返回。 */
+    private fun listWorkspaces(): JsonElement = buildJsonObject {
+        val current = workspacePath()
+        put("current", current)
+        put("workspaces", JsonArray(workspacesProvider().map { workspace ->
+            buildJsonObject {
+                put("name", workspace.name)
+                put("path", workspace.path)
+                put("remote", workspace.type == WorkspaceType.REMOTE)
+                put("available", workspace.available)
+            }
+        }))
+    }
+
     private suspend fun bash(params: JsonObject): JsonElement {
         val command = PluginHostPaths.requireString(params, "command")
         if (command.isBlank()) throw PluginHostException("PARAM_INVALID", "empty command")

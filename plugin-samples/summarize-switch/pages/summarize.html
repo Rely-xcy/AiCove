@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>总结并切换会话</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 16px 32px;
+    }
+    .title { font-size: 17px; font-weight: 600; margin: 0; }
+    .hint { color: var(--aicode-on-surface-variant); font-size: 13px; margin: 0; }
+    .card {
+      background: var(--aicode-surface);
+      border: 1px solid var(--aicode-outline);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .row label { flex: 1; }
+    select, input {
+      background: var(--aicode-surface-variant);
+      color: var(--aicode-on-surface);
+      border: 1px solid var(--aicode-outline);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+      width: 100%;
+    }
+    button.primary {
+      background: var(--aicode-primary);
+      color: var(--aicode-on-primary);
+      border: none;
+      border-radius: 12px;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 600;
+      width: 100%;
+    }
+    button.primary[disabled] { opacity: 0.5; }
+    .summary {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--aicode-surface-variant);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      max-height: 42vh;
+      overflow: auto;
+    }
+    .status { font-size: 13px; color: var(--aicode-on-surface-variant); }
+    .error { color: var(--aicode-error); }
+  </style>
+</head>
+<body>
+<div id="app" class="page" v-cloak>
+  <div>
+    <h1 class="title">总结并切换会话</h1>
+    <p class="hint">把当前会话总结成要点，新建一个带这份上下文的会话并切换过去。</p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label for="source">要总结的会话</label>
+    </div>
+    <select id="source" v-model="sourceId">
+      <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.title }}</option>
+    </select>
+
+    <div class="row">
+      <label for="workspace">新会话放在</label>
+    </div>
+    <select id="workspace" v-model="workspacePath">
+      <option v-for="w in workspaces" :key="w.path" :value="w.path">
+        {{ w.name }}{{ w.remote ? ' · 远程' : '' }}
+      </option>
+    </select>
+
+    <div class="row">
+      <label for="title">新会话标题</label>
+    </div>
+    <input id="title" v-model="newTitle" placeholder="留空则自动生成" />
+  </div>
+
+  <button class="primary" :disabled="busy || !sourceId || !workspacePath" @click="run">
+    {{ busy ? '处理中…' : '总结并新建会话' }}
+  </button>
+
+  <p v-if="status" class="status" :class="{ error: failed }">{{ status }}</p>
+
+  <div v-if="summary" class="card">
+    <div class="row"><label>生成的要点</label></div>
+    <div class="summary">{{ summary }}</div>
+  </div>
+</div>
+
+<script src="/__aicode/aicode.js"></script>
+<script>
+new Vue({
+  el: '#app',
+  data: {
+    sessions: [],
+    workspaces: [],
+    sourceId: '',
+    workspacePath: '',
+    newTitle: '',
+    busy: false,
+    status: '',
+    failed: false,
+    summary: ''
+  },
+  async mounted() {
+    await this.load();
+  },
+  methods: {
+    async load() {
+      try {
+        const sessionResult = await aicode.chat.sessions({});
+        this.sessions = (sessionResult && sessionResult.sessions) || [];
+        if (this.sessions.length) this.sourceId = this.sessions[0].id;
+
+        const workspaceResult = await aicode.workspaces.list();
+        this.workspaces = (workspaceResult && workspaceResult.workspaces) || [];
+        const current = (workspaceResult && workspaceResult.current) || '';
+        this.workspacePath = current || (this.workspaces[0] && this.workspaces[0].path) || '';
+      } catch (e) {
+        this.fail('读取会话列表失败：' + ((e && e.message) || e));
+      }
+    },
+
+    async run() {
+      if (this.busy || !this.sourceId || !this.workspacePath) return;
+      this.busy = true;
+      this.failed = false;
+      this.summary = '';
+      this.status = '正在读取当前会话…';
+      try {
+        const messageResult = await aicode.chat.messages({
+          sessionId: this.sourceId,
+          limit: 400
+        });
+        const messages = (messageResult && messageResult.messages) || [];
+        if (!messages.length) {
+          this.fail('这个会话还没有消息，没什么可总结的。');
+          return;
+        }
+
+        this.status = '正在生成要点…';
+        const transcript = this.buildTranscript(messages);
+        const created = await aicode.chat.create({
+          title: this.newTitle.trim() || '会话续接',
+          mode: 'BUILD',
+          workspacePath: this.workspacePath
+        });
+        const session = created && created.session;
+        if (!session || !session.id) {
+          this.fail('新建会话失败。');
+          return;
+        }
+
+        const prompt = this.buildPrompt(transcript);
+        await aicode.chat.send({ sessionId: session.id, text: prompt });
+
+        this.status = '已新建会话，等待模型给出要点…';
+        await aicode.chat.waitRun(session.id, 120000);
+
+        const after = await aicode.chat.messages({ sessionId: session.id, limit: 50 });
+        const reply = this.lastAssistantText((after && after.messages) || []);
+        this.summary = reply || '（模型没有返回内容，可切过去手动追问。）';
+
+        await aicode.chat.open(session.id);
+        this.status = '已切换到新会话。';
+      } catch (e) {
+        this.fail('执行失败：' + ((e && e.message) || e));
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    buildTranscript(messages) {
+      const lines = [];
+      for (const m of messages) {
+        if (m.role !== 'user' && m.role !== 'assistant') continue;
+        const text = (m.content || '').trim();
+        if (!text) continue;
+        const who = m.role === 'user' ? '用户' : '助手';
+        lines.push(who + '：' + text);
+      }
+      const joined = lines.join('\n\n');
+      // 上下文窗口有限，只保留末尾部分，优先最近的对话
+      return joined.length > 24000 ? joined.slice(joined.length - 24000) : joined;
+    },
+
+    buildPrompt(transcript) {
+      return [
+        '下面是上一个会话的完整记录。请把它总结成可以独立继续工作的要点，包含：',
+        '1. 正在做的任务与目标；2. 已经完成的内容；3. 关键决定与约定；4. 尚未解决的问题；5. 下一步建议。',
+        '用简洁的中文要点列表，不要复述原文，不要客套。',
+        '',
+        '--- 会话记录开始 ---',
+        transcript,
+        '--- 会话记录结束 ---'
+      ].join('\n');
+    },
+
+    lastAssistantText(messages) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === 'assistant' && (m.content || '').trim()) return m.content.trim();
+      }
+      return '';
+    },
+
+    fail(message) {
+      this.failed = true;
+      this.status = message;
+    }
+  }
+});
+</script>
+</body>
+</html>

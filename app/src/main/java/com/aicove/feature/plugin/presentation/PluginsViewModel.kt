@@ -435,6 +435,7 @@ class PluginsViewModel @Inject constructor(
             shizukuRunner = shizukuRunner,
             tipManager = tipManager,
             chatService = chatService,
+            workspacesProvider = { workspaceRepository.workspaces.value },
             theme = theme,
             onClosePage = onClosePage,
             post = post

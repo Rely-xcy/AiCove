@@ -1,0 +1,34 @@
+{
+  "manifestVersion": 1,
+  "id": "aicove.summarize-switch",
+  "name": {
+    "zh-CN": "总结并切换会话",
+    "en": "Summarize & Switch"
+  },
+  "version": "1.0.0",
+  "publisher": "aicove",
+  "repository": "https://github.com/Rely-xcy/AiCove",
+  "description": {
+    "zh-CN": "一键把当前会话总结成要点，新建一个带上下文的会话并切换过去。支持指定新会话在本地还是远程工作区。",
+    "en": "Summarize the current session into key points, then create and switch to a new session carrying that context. Choose whether the new session lives in a local or remote workspace."
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "icon": "zap",
+  "contributes": {
+    "uiEntries": [
+      {
+        "id": "summarize",
+        "title": {
+          "zh-CN": "总结并切换会话",
+          "en": "Summarize & Switch"
+        },
+        "slot": "drawer.footer",
+        "page": "pages/summarize.html",
+        "icon": "zap"
+      }
+    ]
+  }
+}

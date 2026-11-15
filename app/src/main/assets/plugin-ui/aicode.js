@@ -187,6 +187,52 @@
         return call('fs.stat', { path: String(path) });
       }
     },
+    chat: {
+      sessions: function (options) {
+        return call('chat.sessions', options || {});
+      },
+      create: function (options) {
+        return call('chat.create', options || {});
+      },
+      messages: function (options) {
+        return call('chat.messages', options || {});
+      },
+      send: function (options) {
+        return call('chat.send', options || {});
+      },
+      stop: function (sessionId) {
+        return call('chat.stop', { sessionId: String(sessionId) });
+      },
+      open: function (sessionId) {
+        return call('chat.open', { sessionId: String(sessionId) });
+      },
+      get: function (sessionId) {
+        return call('chat.get', { sessionId: String(sessionId) });
+      },
+      rename: function (sessionId, title) {
+        return call('chat.rename', { sessionId: String(sessionId), title: String(title) });
+      },
+      pin: function (sessionId, pinned) {
+        return call('chat.pin', { sessionId: String(sessionId), pinned: !!pinned });
+      },
+      remove: function (sessionId) {
+        return call('chat.delete', { sessionId: String(sessionId) });
+      },
+      runState: function (sessionId) {
+        return call('chat.runState', { sessionId: String(sessionId) });
+      },
+      waitRun: function (sessionId, timeoutMs) {
+        return call('chat.waitRun', {
+          sessionId: String(sessionId),
+          timeoutMs: timeoutMs == null ? undefined : Number(timeoutMs)
+        });
+      }
+    },
+    workspaces: {
+      list: function () {
+        return call('workspaces.list', {});
+      }
+    },
     applyTheme: function (variables) {
       Object.keys(variables || {}).forEach(function (key) {
         document.documentElement.style.setProperty(key, variables[key]);
