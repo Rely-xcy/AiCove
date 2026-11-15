@@ -94,6 +94,12 @@ class DelegatingFileAccess @Inject constructor(
 
     override fun readBytes(path: String): ByteArray = call { delegate().readBytes(path) }
 
+    override fun readBytes(path: String, maxBytes: Long): ByteArray =
+        call { delegate().readBytes(path, maxBytes) }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        call { delegate().resolvePath(path, followFinalLink) }
+
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) =
         call { delegate().writeBytes(path, bytes, overwrite) }
 

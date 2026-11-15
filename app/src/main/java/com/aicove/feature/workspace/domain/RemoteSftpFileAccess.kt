@@ -19,9 +19,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.RemoteFile
+import net.schmizz.sshj.sftp.Response.StatusCode
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.SFTPException
 import net.schmizz.sshj.xfer.FilePermission
@@ -33,7 +35,9 @@ import java.io.InputStreamReader
 import java.nio.charset.Charset
 import java.nio.file.Paths
 import java.nio.file.FileAlreadyExistsException
+import java.nio.file.FileSystemLoopException
 import java.nio.file.NoSuchFileException
+import java.util.ArrayDeque
 import java.util.EnumSet
 import javax.inject.Inject
 
@@ -44,6 +48,9 @@ private const val IO_CHUNK = 32 * 1024
 
 /** `readFile` / `readBytes` 的远程文件大小上限（字节）：超过即抛 [RemoteOutputTooLargeException]，避免整篇读进内存。 */
 private const val MAX_REMOTE_READ_BYTES = 8L * 1024 * 1024
+
+/** 逐段解析符号链接的最大跳数；超过视为循环，避免恶意链接把解析拖死。 */
+private const val MAX_SYMLINK_HOPS = 40
 
 /** 远程文件超过上限时抛出：调用方据此给出「内容过大」提示，而不是误判为文件不存在。 */
 class RemoteOutputTooLargeException(message: String) : IOException(message)
@@ -161,7 +168,9 @@ class RemoteSftpFileAccess @Inject constructor(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        if (e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException) {
+        if (e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException &&
+            e !is FileReadTooLargeException && e !is FileSystemLoopException
+        ) {
             // 丢弃通道必须放 NonCancellable：本协程可能已被并发取消，[invalidateChannel] 的
             // `withLock` 会在拿锁前就抛 CancellationException，通道丢不掉、旧 client 一直留着。
             // 留一条日志：通道何时因何被丢是远程异常的现场证据（取消不再走这条路径）。
@@ -287,6 +296,69 @@ class RemoteSftpFileAccess @Inject constructor(
     }
 
     override fun readBytes(path: String): ByteArray = readAll(toRemotePath(path))
+
+    override fun readBytes(path: String, maxBytes: Long): ByteArray = withSftp { sftp ->
+        val remote = toRemotePath(path)
+        val attrs = sftp.statExistence(remote) ?: throw NoSuchFileException(File(remote))
+        if (attrs.type == FileMode.Type.DIRECTORY) throw IOException("是目录，无法按文件读取: $remote")
+        if (attrs.size > maxBytes) throw FileReadTooLargeException(maxBytes)
+        RemoteFileInputStream(sftp.open(remote)).use { it.readBytesBounded(maxBytes) }
+    }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        withSftp { resolveRemotePath(it, toRemotePath(path), followFinalLink) }
+
+    /**
+     * 逐段解析远程路径（含符号链接），返回可用于相等/祖先比较的绝对路径。
+     * 先试服务端 canonicalize；不支持或路径不存在时回退逐段解析。
+     * 不能先词法消除 `..`：`link/..` 的含义由链接目标决定，不是字符串截断。
+     */
+    private fun resolveRemotePath(sftp: SFTPClient, path: String, followFinalLink: Boolean): String {
+        val trimmed = path.trimEnd('/').ifEmpty { "/" }
+        val leaf = trimmed.substringAfterLast('/')
+        val preserveLeaf = !followFinalLink && leaf.isNotEmpty() && leaf != "." && leaf != ".."
+        val parent = trimmed.substringBeforeLast('/', "").ifEmpty { "/" }
+        try {
+            val canonical = sftp.canonicalize(if (preserveLeaf) parent else path)
+            return if (preserveLeaf) canonical.trimEnd('/') + "/" + leaf else canonical
+        } catch (e: SFTPException) {
+            if (e.statusCode != StatusCode.NO_SUCH_FILE && e.statusCode != StatusCode.NO_SUCH_PATH &&
+                e.statusCode != StatusCode.OP_UNSUPPORTED
+            ) throw e
+        }
+        val pending = ArrayDeque(path.split('/').filter { it.isNotEmpty() })
+        var current = "/"
+        var links = 0
+        while (pending.isNotEmpty()) {
+            val part = pending.removeFirst()
+            when (part) {
+                "." -> continue
+                ".." -> {
+                    current = current.substringBeforeLast('/', "").ifEmpty { "/" }
+                    continue
+                }
+            }
+            val candidate = current.trimEnd('/') + "/" + part
+            if ((followFinalLink || pending.isNotEmpty()) &&
+                lstatOrNull(sftp, candidate)?.type == FileMode.Type.SYMLINK
+            ) {
+                if (++links > MAX_SYMLINK_HOPS) throw FileSystemLoopException(path)
+                val target = sftp.readlink(candidate)
+                if (target.startsWith('/')) current = "/"
+                target.split('/').filter { it.isNotEmpty() }.asReversed().forEach(pending::addFirst)
+            } else {
+                current = candidate
+            }
+        }
+        return current
+    }
+
+    private fun lstatOrNull(sftp: SFTPClient, path: String): FileAttributes? = try {
+        sftp.lstat(path)
+    } catch (e: SFTPException) {
+        if (e.statusCode != StatusCode.NO_SUCH_FILE && e.statusCode != StatusCode.NO_SUCH_PATH) throw e
+        null
+    }
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val remote = toRemotePath(path)

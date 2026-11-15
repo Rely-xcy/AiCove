@@ -2,6 +2,8 @@ package com.aicove.testutil
 
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import com.aicove.feature.workspace.domain.FileEntry
+import com.aicove.feature.workspace.domain.FileReadTooLargeException
+import com.aicove.feature.workspace.domain.readBytesBounded
 import com.aicove.feature.workspace.domain.sha256Fingerprint
 import java.io.File
 import java.io.FileOutputStream
@@ -75,6 +77,16 @@ class TestFileAccessProvider : FileAccessProvider {
     }
 
     override fun readBytes(path: String): ByteArray = File(path).readBytes()
+
+    override fun readBytes(path: String, maxBytes: Long): ByteArray {
+        val file = File(path)
+        if (file.length() > maxBytes) throw FileReadTooLargeException(maxBytes)
+        return file.inputStream().use { it.readBytesBounded(maxBytes) }
+    }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        runCatching { File(path).absoluteFile.toPath().toRealPath().toString() }
+            .getOrElse { File(path).absolutePath }
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val file = File(path)

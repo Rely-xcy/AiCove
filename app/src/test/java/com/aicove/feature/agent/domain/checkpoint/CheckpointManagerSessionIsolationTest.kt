@@ -423,6 +423,9 @@ class CheckpointManagerSessionIsolationTest {
             if (!file.exists()) throw java.nio.file.NoSuchFileException(path)
             return file.readBytes()
         }
+        override fun readBytes(path: String, maxBytes: Long): ByteArray = readBytes(path)
+        override fun resolvePath(path: String, followFinalLink: Boolean): String =
+            File(path).absolutePath
         override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
             File(path).parentFile?.mkdirs()
             File(path).writeBytes(bytes)
