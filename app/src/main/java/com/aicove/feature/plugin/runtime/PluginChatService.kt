@@ -275,6 +275,33 @@ class PluginChatService @Inject constructor(
         }
     }
 
+    /**
+     * 把文本写入某个会话的输入框草稿（`sessionId` 为空时用当前会话）。
+     * 只改草稿，不发送；真正发出去仍由用户在聊天页点发送或调 [sendMessage]。
+     */
+    suspend fun setDraft(pluginId: String, params: JsonObject): JsonElement {
+        ensureActive(pluginId)
+        val workspace = requireWorkspace()
+        val requestedId = optionalString(params, "sessionId")?.trim()?.takeIf { it.isNotEmpty() }
+        // 不传 sessionId 时用当前工作区里最近更新的会话；传了就必须属于当前工作区，
+        // 避免把草稿写进用户看不到的会话。
+        val sessionId = if (requestedId == null) {
+            chatSessionDao.getRootSessionsByWorkspaceOnce(workspace).firstOrNull()?.id
+                ?: throw paramInvalid("no session in current workspace")
+        } else {
+            requireSession(requestedId, workspace).id
+        }
+        val text = PluginHostPaths.requireString(params, "text")
+        val append = (params["append"] as? JsonPrimitive)?.booleanOrNull == true
+        if (!agentChatRequestBus.submit(
+                AgentChatRequest.SetDraft(sessionId = sessionId, text = text, append = append)
+            )
+        ) {
+            throw PluginHostException("CHAT_UI_UNAVAILABLE", "chat page is not open")
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
     suspend fun listApprovals(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
         val workspace = requireWorkspace()

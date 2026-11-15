@@ -82,7 +82,24 @@ Keep them off by default. Enable only when you've confirmed the official direct 
 ## Other Options
 
 ::: v-pre
-- **Custom request headers**: append custom headers to all requests of this vendor, fully overriding same-named defaults (e.g. setting `User-Agent` replaces the default UA). Values support `{{SESSION_ID}}` (current session id) and `{{API_KEY}}` (the key actually used this time) placeholders, substituted before sending. Only needed when a relay gateway validates specific headers.
+- **Custom request headers**: append custom headers to all requests of this vendor, fully overriding same-named defaults (e.g. setting `User-Agent` replaces the default UA). Only needed when a relay gateway validates specific headers.
+
+  The sheet has a **client templates** row at the bottom: tap one to append that client's identifying headers (same-named entries are not duplicated). Available: Codex CLI, DeepSeek Harness, Claude Code. Templates only carry static identifiers and format-valid dynamic values — they do not fake account ids or attestation fields tied to a specific account.
+
+  Placeholders are substituted when the request is sent:
+
+  | Placeholder | Meaning |
+  | :--- | :--- |
+  | `{{SESSION_ID}}` | Current session id (empty when there is no session) |
+  | `{{API_KEY}}` | The key actually used this time |
+  | `{{SESSION_UUID}}` | UUID derived stably from the session id, fixed within a session |
+  | `{{UUID}}` | Standard UUID v4, regenerated per request |
+  | `{{UUID_HEX}}` | Same as above, 32 hex chars without dashes |
+  | `{{TIMESTAMP}}` | Current Unix time in milliseconds |
+  | `{{ISO8601}}` | Current UTC time in ISO-8601 |
+  | `{{RANDOM_8}}` / `{{RANDOM_16}}` | Random hex string |
+
+  Headers within the same request share one generated value: setting both `x-client-request-id: {{UUID}}` and `x-codex-window-id: {{UUID}}` yields the exact same UUID, so the two ids never disagree.
 - **Custom dashboard script**: show a balance or usage card above the input box for this vendor. Scripts live in `~/.aicode/scripts/`, support Python, Bash and Node, and can be tested with "Run Test" in the edit page.
 - **Script arguments**: inject extra environment variable `AICODE_KEY_<KEY>` into the dashboard script. Values support placeholders like `{{PROVIDER_API_KEY}}` (current key), `{{BASE_URL}}`, `{{MODEL}}`, substituted before the script runs.
 :::

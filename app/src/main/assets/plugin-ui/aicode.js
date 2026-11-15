@@ -229,6 +229,14 @@
           sessionId: String(sessionId),
           timeoutMs: timeoutMs == null ? undefined : Number(timeoutMs)
         });
+      },
+      setDraft: function (text, options) {
+        var opts = options || {};
+        return call('chat.setDraft', {
+          sessionId: opts.sessionId == null ? undefined : String(opts.sessionId),
+          text: String(text),
+          append: !!opts.append
+        });
       }
     },
     workspaces: {

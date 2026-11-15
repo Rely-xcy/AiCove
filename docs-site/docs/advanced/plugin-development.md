@@ -503,19 +503,19 @@ const off = aicode.events.on((event) => {
 - **随插件启用**：属于插件自身的专属配置 UI，启用插件即可加载使用；
 - **WebView 能力一致**：自动注入 App 全套主题 Token（CSS 变量、暗黑/浅色模式平滑同步），并提供 `window.aicode` 桥接接口读写私有数据目录（`data://`）。
 
-### 2. 设置主菜单入口（`settingsPages`）
+### 2. 宿主槽位入口（`uiEntries`）
 
-若插件希望在宿主主设置的某个分组下注册独立功能页面（如添加一个通用的记忆管理页、文档演示页等），使用 `contributes.settingsPages`：
+插件可以在宿主 UI 的指定槽位注册页面或动作入口（如设置页某个分组、侧栏底部、聊天顶栏菜单），使用 `contributes.uiEntries`：
 
 ```json
 {
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "memory",
         "title": { "zh-CN": "记忆管理", "en": "Memory" },
-        "anchor": "settings.ai",
-        "page": "ui/memory.html",
+        "slot": "settings.ai",
+        "page": "pages/memory.html",
         "icon": "book"
       }
     ]
@@ -523,18 +523,35 @@ const off = aicode.events.on((event) => {
 }
 ```
 
-`anchor` 只能取下列值，宿主按它把入口放进对应的设置分组：
+`slot` 只能取下列值，宿主按它把入口放进对应位置：
 
-| 值 | 分组 |
+| 值 | 位置 |
 | --- | --- |
-| `settings.general` | 通用 |
-| `settings.ai` | AI 配置 |
-| `settings.environment` | 运行环境 |
-| `settings.permissions` | 权限与后台 |
-| `settings.data` | 数据与诊断 |
-| `settings.help` | 帮助与关于 |
+| `settings.general` | 设置 · 通用 |
+| `settings.ai` | 设置 · AI 配置 |
+| `settings.environment` | 设置 · 运行环境 |
+| `settings.permissions` | 设置 · 权限与后台 |
+| `settings.data` | 设置 · 数据与诊断 |
+| `settings.help` | 设置 · 帮助与关于 |
+| `drawer.footer` | 聊天侧栏底部（设置入口上方） |
+| `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
 
-`page` 必须是包内的 `.html` / `.htm` 文件，最大 512 KiB。安装后设置页对应分组末尾会出现入口，副标题标明插件来源；停用或卸载插件后入口消失。
+`page` 必须是包内的 `.html` / `.htm` 文件，最大 512 KiB。**单个插件在每个槽位最多 2 个入口**，超出会在解析阶段直接拒绝。侧栏与顶栏菜单各最多展示 3 个入口。停用或卸载插件后入口消失。
+
+> 旧版清单里的 `contributes.settingsPages` + `anchor` 已换成 `uiEntries` + `slot`，旧写法不再被识别。
+
+### 编辑器选区动作
+
+编辑器选中文本后，浮动菜单里会多出一个「插件」按钮，点开列出当前插件提供的动作。动作以 `handler` 形式在插件常驻进程里执行，宿主把选区上下文作为参数传进去：
+
+| 字段 | 含义 |
+| --- | --- |
+| `path` | 当前文件路径 |
+| `selection` | 选中的文本，上限 16000 字符 |
+| `language` | 文件扩展名推断出的语言 |
+| `lineStart` / `lineEnd` | 选区的起止行号（从 1 开始） |
+
+动作执行完可以用 `aicode.chat.setDraft` 把结果写回输入框，由用户决定是否发送。
 
 ### 页面里的宿主接口
 
@@ -542,12 +559,31 @@ const off = aicode.events.on((event) => {
 
 | 方法 | 作用 |
 | --- | --- |
-| `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名 |
+| `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名，以及 `home` / `workspace` / `dataDir` 三个真实路径 |
+| `aicode.chat.sessions(options?)` | 列出当前工作区的会话，返回 `{ sessions }` |
+| `aicode.chat.create({title?, mode?, workspacePath?})` | 新建会话；`workspacePath` 可指定落在哪个工作区，不传用当前工作区 |
+| `aicode.chat.messages({sessionId, limit?, before?, after?})` | 读取消息，返回 `{ sessionId, messages, hasMore }` |
+| `aicode.chat.send({sessionId, text})` | 向会话发一条用户消息并启动 AI 轮次，走聊天页现有队列与授权链路 |
+| `aicode.chat.stop(sessionId)` | 停止该会话正在跑的轮次 |
+| `aicode.chat.open(sessionId)` | 把该会话切换为聊天页当前会话 |
+| `aicode.chat.get(sessionId)` | 取单个会话详情 |
+| `aicode.chat.rename(sessionId, title)` | 重命名会话 |
+| `aicode.chat.pin(sessionId, pinned)` | 置顶/取消置顶 |
+| `aicode.chat.remove(sessionId)` | 删除会话及其消息 |
+| `aicode.chat.runState(sessionId)` | 查询该会话是否还在跑，返回 `{ running, status, error?, startedAt?, finishedAt? }` |
+| `aicode.chat.waitRun(sessionId, timeoutMs?)` | 等该会话跑完再返回，超时返回最后一次快照 |
+| `aicode.workspaces.list()` | 列出工作区，返回 `{ current, workspaces: [{name, path, remote, available}] }` |
 | `aicode.fs.read(path)` | 读取文件，返回 `{ content, size }` |
 | `aicode.fs.write(path, content)` | 写入文件（原子写） |
 | `aicode.fs.list(path)` | 列出目录，返回 `{ entries: [{ name, isDir, size }] }` |
 | `aicode.fs.delete(path)` | 删除文件或目录 |
 | `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
+| `aicode.fs.mkdir(path)` | 创建目录（含父目录），已存在视为成功 |
+| `aicode.fs.append(path, content)` | 在现有内容后追加 |
+| `aicode.fs.readBinary(path)` | 读原始字节，返回 `{ base64, size }` |
+| `aicode.fs.writeBinary(path, base64)` | 写入 Base64 解码后的字节 |
+| `aicode.fs.rename(from, to)` | 移动/重命名，不能把目录移进自身 |
+| `aicode.fs.copy(from, to, overwrite?)` | 复制文件或目录，不能复制进自身 |
 | `aicode.toast(message)` | 轻提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话内显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；插件声明用途且已单独授权后直接执行，`options.timeout` 以秒计 |
@@ -681,9 +717,8 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | plugin.json 缺少 / 无效字段 | 提示里会写出具体路径 |
 | 此版本不支持的字段 / 内容类型 | 用了目前未实现的能力，如 `providers`、`permissionReviewer` |
 | hooks 声明了 handler 却没有运行时 | 带 handler 的贡献都需要 `runtime`，在清单里补上 `dist/main.js` 入口 |
-| `settingsPages` 的 `anchor` 无效 | 只能取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` |
-| `settingsPages` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
-| `settings-pages.register` 范围与页面不一致 | `scope.ids` 要覆盖全部 `settingsPages` 的 id，多写没声明的 id 也会被拒绝 |
-| `workspace.commands` 范围与页面不一致 | `scope.ids` 填的页面 id 必须来自自己的 `contributes.settingsPages`，多写没声明的 id 会被拒绝 |
+| `uiEntries` 的 `slot` 无效 | 只能取 `settings.*` 六个分组或 `drawer.footer` / `chat.header.menu` |
+| `uiEntries` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
+| `uiEntries` 单槽位入口超过 2 个 | 同一槽位最多 2 个入口，超出拒绝安装 |
 | 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object`、MCP 文件没有有效 server |
 | 清单引用的文件不存在 | `file` 路径与压缩包里的实际路径不符，注意大小写 |

@@ -182,6 +182,7 @@ class PluginWebBridge(
         "chat.delete" -> chatService.deleteSession(page.pluginId, params)
         "chat.runState" -> chatService.getRunState(page.pluginId, params)
         "chat.waitRun" -> chatService.waitForRun(page.pluginId, params)
+        "chat.setDraft" -> chatService.setDraft(page.pluginId, params)
         "workspaces.list" -> listWorkspaces()
         "bash" -> bash(params)
         "shizuku.exec" -> shizukuExec(params)
