@@ -2564,35 +2564,35 @@ fun AIChatPanel(
                 )
             }
 
-            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给一个明确的遮罩，
-            // 避免用户以为没点上而反复点。
-            if (isRewinding) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                        .pointerInput(Unit) { detectTapGestures { } },
-                    contentAlignment = Alignment.Center
+            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给个明确提示，
+            // 避免用户以为没点上而反复点。不做全屏遮罩：回退是后台动作，不该盖住整个聊天界面。
+            AnimatedVisibility(
+                visible = isRewinding,
+                enter = fadeIn() + slideInVertically { -it / 2 },
+                exit = fadeOut() + slideOutVertically { -it / 2 },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = Spacing.sm)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.semanticColors.cardSurface,
+                    shadowElevation = 3.dp
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.semanticColors.cardSurface
+                    Row(
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Text(
-                                text = stringResource(R.string.checkpoint_rewinding),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = stringResource(R.string.checkpoint_rewinding),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }

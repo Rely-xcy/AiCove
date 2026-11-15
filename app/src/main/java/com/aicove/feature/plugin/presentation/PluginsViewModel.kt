@@ -11,6 +11,7 @@ import com.aicove.feature.agent.domain.shizuku.ShizukuState
 import com.aicove.feature.plugin.data.PluginDevPackageBuilder
 import com.aicove.feature.plugin.data.PluginDevSettingsRepository
 import com.aicove.feature.plugin.data.PluginShizukuPermissionRepository
+import com.aicove.core.plugin.PluginSlotEntry
 import com.aicove.feature.plugin.domain.PluginManifestParser
 import com.aicove.feature.plugin.domain.ManifestParseResult
 import com.aicove.feature.plugin.domain.InstalledPlugin
@@ -112,6 +113,36 @@ class PluginsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
+
+    /** 当前系统语言；插件标题按它解析。ViewModel 里不能调 Composable 的 currentLanguageTag()。 */
+    private val languageTagFlow = MutableStateFlow(
+        context.resources.configuration.locales[0]?.toLanguageTag().orEmpty().ifBlank { "zh-CN" }
+    )
+
+    /**
+     * 按槽位取已启用插件的入口，供侧栏与顶栏菜单渲染。
+     *
+     * 只取启用中的入口；标题在这里就按当前语言解析好，
+     * 因为 core 层的 [PluginSlotEntry] 不能依赖 feature/plugin 的 LocalizedText。
+     */
+    fun slotEntries(slot: String): StateFlow<List<PluginSlotEntry>> =
+        combine(manager.plugins, languageTagFlow) { plugins, languageTag ->
+            plugins
+                .filter { it.isActive }
+                .flatMap { plugin ->
+                    plugin.content.uiEntries
+                        .filter { it.slot == slot }
+                        .map { entry ->
+                            PluginSlotEntry(
+                                pluginId = entry.pluginId,
+                                localId = entry.localId,
+                                title = entry.title.resolve(languageTag),
+                                icon = entry.icon
+                            )
+                        }
+                }
+                .take(3)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val loaded: StateFlow<Boolean> = manager.isLoaded
 

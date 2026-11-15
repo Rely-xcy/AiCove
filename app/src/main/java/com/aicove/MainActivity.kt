@@ -111,6 +111,7 @@ import com.aicove.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aicove.feature.onboarding.presentation.OnboardingOverlay
 import com.aicove.feature.onboarding.presentation.OnboardingTargetRegistry
 import com.aicove.feature.plugin.presentation.PluginManagementScreen
+import com.aicove.feature.plugin.presentation.PluginPageHost
 import com.aicove.feature.plugin.presentation.PluginWebViewCache
 import com.aicove.feature.plugin.presentation.currentLanguageTag
 import com.aicove.feature.plugin.presentation.drawer.AllToolsScreen
@@ -415,6 +416,10 @@ fun AppNavigation(
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
     val pluginsViewModel: com.aicove.feature.plugin.presentation.PluginsViewModel = hiltViewModel()
+    // 侧栏底部的插件入口（uiEntries 声明 slot=drawer.footer）
+    val drawerPluginEntries by pluginsViewModel
+        .slotEntries(com.aicove.feature.plugin.domain.PluginUiSlots.DRAWER_FOOTER)
+        .collectAsStateWithLifecycle()
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
@@ -722,6 +727,13 @@ fun AppNavigation(
                 navController.navigate("settings")
                 if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
             },
+            pluginEntries = drawerPluginEntries,
+            onOpenPluginPage = { entry ->
+                // entryKey 形如 "pluginId:localId"，冒号在路径参数里会被当分隔符，必须编码
+                val key = android.net.Uri.encode("${entry.pluginId}:${entry.localId}")
+                navController.navigate("plugin_slot_page/$key")
+                if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
+            },
             searchQuery = chatSearchQuery,
             searchState = chatSearchState,
             onSearchQueryChange = { agentViewModel.updateChatSearchQuery(it) },
@@ -888,6 +900,30 @@ fun AppNavigation(
             }
             composable("plugins") {
                 PluginManagementScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            // 插件槽位入口（侧栏底部 / 聊天顶栏菜单）打开对应插件页面。
+            // 参数是 "pluginId:localId"，从已启用插件的内容里找回入口定义。
+            composable("plugin_slot_page/{entryKey}") { backStackEntry ->
+                val entryKey = backStackEntry.arguments?.getString("entryKey").orEmpty()
+                val installed by pluginsViewModel.plugins.collectAsStateWithLifecycle()
+                val languageTag = currentLanguageTag()
+                val entry = remember(installed, entryKey, languageTag) {
+                    installed.asSequence()
+                        .filter { it.isActive }
+                        .flatMap { plugin -> plugin.content.uiEntries.asSequence() }
+                        .firstOrNull { "${it.pluginId}:${it.localId}" == entryKey }
+                }
+                if (entry == null) {
+                    // 插件被停用/卸载后入口已失效，直接退回上一层而不是停在空白页
+                    LaunchedEffect(entryKey) { navController.popBackStack() }
+                } else {
+                    PluginPageHost(
+                        entry = entry,
+                        languageTag = languageTag,
+                        pluginsViewModel = pluginsViewModel,
+                        onClose = { navController.popBackStack() }
+                    )
+                }
             }
             composable("plugin_all_tools") {
                 val allTools by projectToolsViewModel.allPluginTools.collectAsStateWithLifecycle()
