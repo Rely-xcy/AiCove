@@ -676,7 +676,7 @@ internal fun ChatInputBar(
                         }
                     }
                     UploadIconButton(
-                        enabled = !isBusy,
+                        enabled = true,
                         icon = FeatherIcons.Plus,
                         contentDescription = stringResource(R.string.chat_add_attachment),
                         onClick = { showAttachmentSheet = true }
@@ -690,8 +690,8 @@ internal fun ChatInputBar(
 
     if (showAttachmentSheet) {
         AttachmentSheet(
-            canUploadFiles = canUploadFiles && !isBusy,
-            canUploadImages = canUploadImages && !isBusy,
+            canUploadFiles = canUploadFiles,
+            canUploadImages = canUploadImages,
             onUploadFile = {
                 showAttachmentSheet = false
                 onUploadFile()
