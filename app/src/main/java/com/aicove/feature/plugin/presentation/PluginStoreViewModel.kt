@@ -16,6 +16,7 @@ import com.aicove.feature.plugin.domain.PluginManager
 import com.aicove.feature.plugin.domain.PluginPreview
 import com.aicove.feature.plugin.domain.PluginPreviewResult
 import com.aicove.feature.plugin.domain.SemVer
+import com.aicove.feature.plugin.runtime.PluginProviderRegistrar
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +80,8 @@ data class PluginStoreUiState(
 class PluginStoreViewModel @Inject constructor(
     private val client: PluginIndexClient,
     private val sourceRepository: PluginIndexSourceRepository,
-    private val manager: PluginManager
+    private val manager: PluginManager,
+    private val pluginProviderRegistrar: PluginProviderRegistrar
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PluginStoreUiState())
@@ -219,6 +221,7 @@ class PluginStoreViewModel @Inject constructor(
                             }
                             return@launch
                         }
+                        val expectedRepository = if (item.official) null else item.plugin.repository
                         val official = item.official
                         _state.update {
                             it.copy(
@@ -233,7 +236,7 @@ class PluginStoreViewModel @Inject constructor(
                                         repository = item.plugin.repository,
                                         official = official
                                     ),
-                                    expectedRepository = if (official) null else item.plugin.repository,
+                                    expectedRepository = expectedRepository,
                                     sourceLabel = item.source.name,
                                     officialSource = official
                                 )
@@ -278,8 +281,54 @@ class PluginStoreViewModel @Inject constructor(
         }
     }
 
-    fun consumePreview() {
+    fun dismissPreview() {
+        val preview = _state.value.preview ?: return
         _state.update { it.copy(preview = null) }
+        viewModelScope.launch(Dispatchers.IO) { manager.discard(preview.preview.token) }
+    }
+
+    fun confirmInstall() {
+        val preview = _state.value.preview ?: return
+        if (_state.value.installingPluginId != null) return
+        _state.update { it.copy(installingPluginId = preview.preview.manifest.id, error = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = manager.install(preview.preview.token, preview.origin)) {
+                is com.aicove.feature.plugin.domain.PluginInstallResult.Installed -> {
+                    runCatching { pluginProviderRegistrar.sync(result.pluginId) }
+                        .onFailure { FileLogger.e(TAG, "同步插件提供商失败: ${result.pluginId}", it) }
+                    _state.update { current ->
+                        val version = preview.preview.manifest.version.toString()
+                        val installedItems = current.items.map { item ->
+                            if (item.plugin.id == result.pluginId) {
+                                item.copy(
+                                    installedVersion = version,
+                                    updateAvailable = isNewer(item.plugin.version, version)
+                                )
+                            } else item
+                        }
+                        current.copy(
+                            items = installedItems,
+                            updatesByPluginId = updatesOf(installedItems),
+                            preview = null,
+                            installingPluginId = null,
+                            error = null
+                        )
+                    }
+                }
+                is com.aicove.feature.plugin.domain.PluginInstallResult.Failed -> {
+                    _state.update {
+                        it.copy(
+                            installingPluginId = null,
+                            error = PluginStoreError(
+                                code = PluginStoreErrorCode.PREVIEW_FAILED,
+                                pluginError = result.error,
+                                pluginId = preview.preview.manifest.id
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun isNewer(candidate: String?, installed: String?): Boolean {

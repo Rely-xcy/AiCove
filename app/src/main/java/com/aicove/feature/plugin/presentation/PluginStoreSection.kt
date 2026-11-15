@@ -1,6 +1,7 @@
 package com.aicove.feature.plugin.presentation
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,8 +23,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +45,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -62,6 +68,7 @@ import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsRow
 import com.aicove.feature.settings.presentation.component.openUrl
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Book
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.CloudOff
@@ -110,22 +117,16 @@ private val UnofficialBadgeText: Color
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PluginStoreSection(
-    onShowPreview: (PluginStorePreview) -> Unit = {},
-    onOpenDetail: (PluginStoreItem) -> Unit = {},
     viewModel: PluginStoreViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var selectedItem by remember { mutableStateOf<PluginStoreItem?>(null) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val languageTag = currentLanguageTag()
+    val pageBackground = MaterialTheme.semanticColors.pageBackground
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(state.preview) {
-        state.preview?.let { preview ->
-            onShowPreview(preview)
-            viewModel.consumePreview()
-        }
-    }
     LaunchedEffect(viewModel) {
         viewModel.refreshResult.collect { failed ->
             val message = if (failed > 0) {
@@ -153,15 +154,35 @@ internal fun PluginStoreSection(
     // 安装/下载错误归属具体插件，只在该插件详情页展示；整页错误只处理索引错误。
     val indexError = state.error?.takeIf { it.pluginId == null }
 
-    PullToRefreshBox(
-        isRefreshing = state.refreshing,
-        onRefresh = viewModel::refresh,
-        modifier = Modifier.fillMaxSize()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = state.refreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    drawContent()
+                    if (selectedItem == null) {
+                        val fadeHeight = 136.dp.toPx()
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.32f to pageBackground.copy(alpha = 0.24f),
+                                0.68f to pageBackground.copy(alpha = 0.72f),
+                                1f to pageBackground,
+                                startY = size.height - fadeHeight,
+                                endY = size.height
+                            ),
+                            topLeft = Offset(0f, size.height - fadeHeight),
+                            size = androidx.compose.ui.geometry.Size(size.width, fadeHeight)
+                        )
+                    }
+                }
+        ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = 112.dp),
+            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = 136.dp),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             when {
@@ -217,12 +238,25 @@ internal fun PluginStoreSection(
                                 StorePluginRow(
                                     item = item,
                                     languageTag = languageTag,
-                                    onClick = { onOpenDetail(item) }
+                                    onClick = { selectedItem = item }
                                 )
                             }
                         }
                     }
                 }
+            }
+        }
+        }
+        selectedItem?.let { item ->
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.semanticColors.pageBackground
+            ) {
+                PluginStoreDetailSection(
+                    item = item,
+                    onBack = { selectedItem = null },
+                    viewModel = viewModel
+                )
             }
         }
     }
@@ -238,6 +272,7 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = Spacing.lg, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -308,7 +343,7 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
 @Composable
 internal fun PluginStoreDetailSection(
     item: PluginStoreItem,
-    onShowPreview: (PluginStorePreview) -> Unit,
+    onBack: () -> Unit,
     viewModel: PluginStoreViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -319,111 +354,130 @@ internal fun PluginStoreDetailSection(
     val languageTag = currentLanguageTag()
     val installing = state.installingPluginId == latest.plugin.id
 
-    LaunchedEffect(state.preview) {
-        // 预览是全局单槽状态；只弹出当前插件的预览，避免 A 的安装结果覆盖到 B 的详情页。
-        val preview = state.preview?.takeIf { it.preview.manifest.id == latest.plugin.id }
-            ?: return@LaunchedEffect
-        onShowPreview(preview)
-        viewModel.consumePreview()
-    }
+    val preview = state.preview?.takeIf { it.preview.manifest.id == latest.plugin.id }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.lg)
-            .padding(top = Spacing.md, bottom = Spacing.xl)
-    ) {
-        StoreHeaderCard(item = latest, languageTag = languageTag)
-
-        SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.Tag,
-                title = stringResource(R.string.plugins_store_detail_version),
-                trailing = { StoreInfoValue(pluginVersionText(latest.plugin.version)) }
-            )
-            if (latest.plugin.tags.isNotEmpty()) {
-                SettingsDivider()
-                SettingsRow(
-                    icon = FeatherIcons.Package,
-                    title = stringResource(R.string.plugins_store_detail_tags),
-                    trailing = { StoreInfoValue(latest.plugin.tags.joinToString(" · ")) }
-                )
-            }
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Server,
-                title = stringResource(R.string.plugins_store_detail_index_source),
-                trailing = { StoreInfoValue(latest.source.name) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Github,
-                title = stringResource(R.string.plugins_store_detail_source),
-                onClick = { openUrl(context, latest.plugin.repository) }
-            )
-            latest.plugin.license?.let { license ->
-                SettingsDivider()
-                SettingsRow(
-                    icon = FeatherIcons.Book,
-                    title = stringResource(R.string.plugins_store_detail_license),
-                    trailing = { StoreInfoValue(license) }
-                )
-            }
-            latest.plugin.homepage?.let { homepage ->
-                SettingsDivider()
-                SettingsRow(
-                    icon = FeatherIcons.Globe,
-                    title = stringResource(R.string.plugins_store_detail_homepage),
-                    onClick = { openUrl(context, homepage) }
-                )
-            }
-        }
-
-        Button(
-            onClick = { viewModel.install(latest) },
-            enabled = latest.compatible && !installing &&
-                (latest.installedVersion == null || latest.updateAvailable),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = Spacing.lg)
+    BackHandler(onBack = onBack)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (installing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(Spacing.sm))
+            IconButton(onClick = onBack) {
+                Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
             }
             Text(
-                when {
-                    installing -> stringResource(R.string.plugins_installing)
-                    !latest.compatible -> latest.plugin.minAppVersion?.let { minimum ->
-                        stringResource(R.string.plugins_store_requires_min_version, minimum)
-                    } ?: stringResource(R.string.plugins_store_incompatible)
-                    latest.installedVersion != null && !latest.updateAvailable ->
-                        stringResource(R.string.plugins_store_installed)
-                    latest.updateAvailable -> stringResource(R.string.plugins_store_update)
-                    else -> stringResource(R.string.plugins_store_install)
+                text = latest.plugin.name.resolve(languageTag),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.lg)
+        ) {
+            StoreHeaderCard(item = latest, languageTag = languageTag)
+            SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
+            SettingsGroup {
+                SettingsRow(
+                    icon = FeatherIcons.Tag,
+                    title = stringResource(R.string.plugins_store_detail_version),
+                    trailing = { StoreInfoValue(pluginVersionText(latest.plugin.version)) }
+                )
+                if (latest.plugin.tags.isNotEmpty()) {
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.Package,
+                        title = stringResource(R.string.plugins_store_detail_tags),
+                        trailing = { StoreInfoValue(latest.plugin.tags.joinToString(" · ")) }
+                    )
                 }
-            )
+                SettingsDivider()
+                SettingsRow(
+                    icon = FeatherIcons.Server,
+                    title = stringResource(R.string.plugins_store_detail_index_source),
+                    trailing = { StoreInfoValue(latest.source.name) }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    icon = FeatherIcons.Github,
+                    title = stringResource(R.string.plugins_store_detail_source),
+                    onClick = { openUrl(context, latest.plugin.repository) }
+                )
+                latest.plugin.license?.let { license ->
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.Book,
+                        title = stringResource(R.string.plugins_store_detail_license),
+                        trailing = { StoreInfoValue(license) }
+                    )
+                }
+                latest.plugin.homepage?.let { homepage ->
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.Globe,
+                        title = stringResource(R.string.plugins_store_detail_homepage),
+                        onClick = { openUrl(context, homepage) }
+                    )
+                }
+            }
         }
-        val installError = state.error?.takeIf {
-            it.pluginId == latest.plugin.id &&
-                (it.code == PluginStoreErrorCode.DOWNLOAD_FAILED ||
-                    it.code == PluginStoreErrorCode.NO_COMPATIBLE_RELEASE ||
-                    it.code == PluginStoreErrorCode.PREVIEW_FAILED)
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg)) {
+            val installError = state.error?.takeIf {
+                it.pluginId == latest.plugin.id &&
+                    (it.code == PluginStoreErrorCode.DOWNLOAD_FAILED ||
+                        it.code == PluginStoreErrorCode.NO_COMPATIBLE_RELEASE ||
+                        it.code == PluginStoreErrorCode.PREVIEW_FAILED)
+            }
+            if (installError != null) {
+                Text(
+                    text = storeErrorMessage(installError),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = Spacing.xs, vertical = Spacing.xs)
+                )
+            }
+            Button(
+                onClick = { viewModel.install(latest) },
+                enabled = latest.compatible && !installing &&
+                    (latest.installedVersion == null || latest.updateAvailable),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (installing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                }
+                Text(
+                    when {
+                        installing -> stringResource(R.string.plugins_installing)
+                        !latest.compatible -> latest.plugin.minAppVersion?.let { minimum ->
+                            stringResource(R.string.plugins_store_requires_min_version, minimum)
+                        } ?: stringResource(R.string.plugins_store_incompatible)
+                        latest.installedVersion != null && !latest.updateAvailable ->
+                            stringResource(R.string.plugins_store_installed)
+                        latest.updateAvailable -> stringResource(R.string.plugins_store_update)
+                        else -> stringResource(R.string.plugins_store_install)
+                    }
+                )
+            }
         }
-        if (installError != null) {
-            Text(
-                text = storeErrorMessage(installError),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = Spacing.sm, start = Spacing.xs, end = Spacing.xs)
-            )
-        }
+    }
+    preview?.let {
+        PluginPreviewSheet(
+            preview = it.preview,
+            installing = installing,
+            error = state.error?.takeIf { error -> error.pluginId == it.preview.manifest.id }?.pluginError,
+            onInstall = viewModel::confirmInstall,
+            onDismiss = viewModel::dismissPreview
+        )
     }
 }
 

@@ -50,7 +50,9 @@ internal fun PluginImportHost(viewModel: PluginsViewModel) {
         PluginImportState.Reading -> ProgressDialog(R.string.plugins_reading)
         is PluginImportState.Failed -> ImportFailedDialog(current.errors, onDismiss = viewModel::dismissImport)
         is PluginImportState.Preview -> PluginPreviewSheet(
-            state = current,
+            preview = current.preview,
+            installing = current.installing,
+            error = current.error,
             onInstall = viewModel::confirmInstall,
             onDismiss = viewModel::dismissImport
         )
@@ -93,12 +95,13 @@ private fun ImportFailedDialog(errors: List<PluginError>, onDismiss: () -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PluginPreviewSheet(
-    state: PluginImportState.Preview,
+internal fun PluginPreviewSheet(
+    preview: PluginPreview,
+    installing: Boolean,
+    error: PluginError?,
     onInstall: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val preview = state.preview
     val manifest = preview.manifest
     val languageTag = currentLanguageTag()
 
@@ -178,7 +181,7 @@ private fun PluginPreviewSheet(
                 }
             }
 
-            state.error?.let { error ->
+            error?.let { error ->
                 Text(
                     text = pluginErrorMessage(error),
                     style = MaterialTheme.typography.bodyMedium,
@@ -191,12 +194,12 @@ private fun PluginPreviewSheet(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onDismiss, enabled = !state.installing) {
+                TextButton(onClick = onDismiss, enabled = !installing) {
                     Text(stringResource(R.string.common_cancel))
                 }
                 Spacer(Modifier.width(Spacing.sm))
-                Button(onClick = onInstall, enabled = !state.installing) {
-                    if (state.installing) {
+                Button(onClick = onInstall, enabled = !installing) {
+                    if (installing) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
                         Text(
