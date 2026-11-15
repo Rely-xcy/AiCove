@@ -572,6 +572,7 @@ const off = aicode.events.on((event) => {
 | `aicode.chat.remove(sessionId)` | 删除会话及其消息 |
 | `aicode.chat.runState(sessionId)` | 查询该会话是否还在跑，返回 `{ running, status, error?, startedAt?, finishedAt? }` |
 | `aicode.chat.waitRun(sessionId, timeoutMs?)` | 等该会话跑完再返回，超时返回最后一次快照 |
+| `aicode.chat.setDraft(text, {sessionId?, append?})` | 把文本写进该会话的输入框草稿，只改草稿不发送；不传 `sessionId` 用当前工作区最近更新的会话 |
 | `aicode.workspaces.list()` | 列出工作区，返回 `{ current, workspaces: [{name, path, remote, available}] }` |
 | `aicode.fs.read(path)` | 读取文件，返回 `{ content, size }` |
 | `aicode.fs.write(path, content)` | 写入文件（原子写） |
