@@ -62,6 +62,17 @@ class PlanApprovalManager @Inject constructor(
         }
     }
 
+    /**
+     * 取某会话当前的待决计划审批（插件会话 API 用）。
+     * 与 [pendingApproval] 的区别：后者只给 UI 展示最早进入的那一个，这里按会话取。
+     */
+    fun pendingForSession(sessionId: String): PlanApprovalRequest? = synchronized(lock) {
+        pending.entries.firstOrNull { (_, entry) -> entry.sessionId == sessionId }
+            ?.let { (id, entry) ->
+                PlanApprovalRequest(reason = entry.reason, sessionId = entry.sessionId, id = id)
+            }
+    }
+
     /** UI 回传用户选择，唤醒最早挂起的 [awaitApproval]。 */
     fun resolve(choice: PlanApprovalChoice) {
         val id = pendingApproval.value?.id ?: return

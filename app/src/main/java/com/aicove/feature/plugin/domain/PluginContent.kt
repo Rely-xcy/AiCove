@@ -48,6 +48,9 @@ data class PluginSettingsPage(
     val pluginVersion: String = ""
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
+
+    /** WebView/页面桥缓存键：插件版本变化后强制创建新实例，避免继续使用旧页面。 */
+    val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
 }
 
 /** 槽位入口：页面文件已校验存在于 [installDir]，由宿主 WebView 加载。 */
