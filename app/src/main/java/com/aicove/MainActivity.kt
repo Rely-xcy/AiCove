@@ -119,6 +119,7 @@ import com.aicove.feature.plugin.presentation.drawer.ProjectToolsViewModel
 import com.aicove.feature.plugin.presentation.drawer.ToolDetailScreen
 import com.aicove.feature.plugin.presentation.drawer.ToolUnavailableScreen
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.stringResource
 import com.aicove.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicove.feature.settings.data.repository.AppThemeMode
 import com.aicove.feature.settings.data.repository.BackgroundSettingsRepository
@@ -135,6 +136,7 @@ import com.aicove.feature.settings.presentation.component.settingsPageBackground
 import com.aicove.feature.terminal.domain.TerminalKeepaliveService
 import com.aicove.feature.terminal.presentation.TerminalViewModel
 import com.aicove.feature.terminal.presentation.component.TerminalScreen
+import com.aicove.feature.workspace.domain.model.WorkspaceType
 import com.aicove.feature.workspace.presentation.WorkspaceViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -468,7 +470,12 @@ fun AppNavigation(
     // 侧边栏需要的数据。
     val currentWorkspace by workspaceViewModel.current.collectAsStateWithLifecycle()
     val workspaces by workspaceViewModel.workspaces.collectAsStateWithLifecycle()
-    val workspaceNames = remember(workspaces) { workspaces.associate { it.path to it.name } }
+    val remoteSuffix = stringResource(R.string.chat_workspace_remote_suffix)
+    val workspaceNames = remember(workspaces, remoteSuffix) {
+        workspaces.associate {
+            it.path to if (it.type == WorkspaceType.REMOTE) it.name + remoteSuffix else it.name
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(currentWorkspace) {
         // 远程模式连接未就绪时 currentWorkspace 为 null，不触发 setWorkspace，避免空路径点燃 session 加载
         val path = currentWorkspace?.path ?: return@LaunchedEffect
