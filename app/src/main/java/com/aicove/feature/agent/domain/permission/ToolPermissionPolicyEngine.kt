@@ -287,11 +287,18 @@ class ToolPermissionPolicyEngine @Inject constructor(
         (args[ELEVATE_ARG] as? JsonPrimitive)?.content?.trim()?.lowercase() == "true"
 
     /**
-     * 该命令是否疑似破坏性（仅在命令不可静态判定时使用）：含输出重定向、`-delete`
-     * 或常见破坏性程序名。宁可多问，不误放。
+     * 该命令是否疑似破坏性（仅在命令不可静态判定时使用）。
+     *
+     * 只看「写到哪里 / 删什么」，不看「有没有 `>`」：`2>/dev/null`、`cmd > log.txt`、
+     * `grep ... | head` 这类日常写法里 `>` 极其常见，按字符存在性判定会把正常命令全判成
+     * 破坏性，导致授权弹窗频繁误报、AI 只能反复重试。真正的风险是写到工作区外的绝对路径、
+     * 写到家目录、或用 `>` 覆盖已有文件，以及 `-delete` 与破坏性程序名。
      */
-    private fun looksDestructive(command: String): Boolean =
-        command.contains('>') || command.contains("-delete") || DESTRUCTIVE_PROGRAM.containsMatchIn(command)
+    private fun looksDestructive(command: String): Boolean {
+        if (command.contains("-delete") || DESTRUCTIVE_PROGRAM.containsMatchIn(command)) return true
+        // 仅当输出重定向的目标越出工作区（绝对路径 / `~` / 含 `..`）时才算破坏性。
+        return ShellCommandParser.analyze(command).blockers.any { it.startsWith("输出重定向到工作区外") }
+    }
 
     /**
      * 不可静态判定时的拦截原因：附带具体触发构造。

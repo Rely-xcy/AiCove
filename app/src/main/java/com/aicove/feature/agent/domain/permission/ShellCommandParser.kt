@@ -41,12 +41,18 @@ object ShellCommandParser {
      *
      * `~` 与 `..` 不会被 shell 视为「相对 cwd 的安全路径」：前者展开到家目录，后者可逐级
      * 走出工作区。这类目标一律降级为不可静态判定，避免 `echo x > ~/.bashrc` 被白名单放行。
+     *
+     * 例外：[DEV_NULL_TARGETS] 是丢弃输出的惯用写法，写不到任何真实文件，不算越界。
      */
     private fun isEscapingRedirectTarget(target: String): Boolean {
         val t = target.trim()
+        if (t in DEV_NULL_TARGETS) return false
         if (t.startsWith("/") || t.startsWith("~")) return true
         return t.split("/").any { it == ".." }
     }
+
+    /** 丢弃输出/输入的设备路径：`2>/dev/null` 这类写法不产生任何文件写入。 */
+    private val DEV_NULL_TARGETS = setOf("/dev/null", "/dev/stdout", "/dev/stderr")
 
     /** 段首环境赋值形如 `NAME=value`。 */
     private val ENV_ASSIGN = Regex("^[A-Za-z_][A-Za-z0-9_]*=.*$")
@@ -148,8 +154,34 @@ object ShellCommandParser {
                         c == '&' -> { flushSegment(); i += if (i + 1 < n && command[i + 1] == '&') 2 else 1 }
                         c == '|' -> { flushSegment(); i += if (i + 1 < n && command[i + 1] == '|') 2 else 1 }
                         // 重定向：算子本身不入 token；输出重定向标记，待目标 token 判定是否越界。
-                        c == '>' -> { flushToken(); i += if (i + 1 < n && command[i + 1] == '>') 2 else 1; expectRedirectTarget = true }
-                        c == '<' -> { flushToken(); i++ }
+                        // `2>` 这类 fd 前缀（纯数字且紧贴算子）不当作命令 token，否则 `2` 会
+                        // 被当成程序名留在段里，影响程序名匹配与删除目标判定。
+                        c == '>' -> {
+                            if (tokenStarted && token.all { it.isDigit() }) {
+                                token.setLength(0)
+                                tokenStarted = false
+                            } else {
+                                flushToken()
+                            }
+                            i += if (i + 1 < n && command[i + 1] == '>') 2 else 1
+                            // `2>&1` / `>&2`：目标是 fd 复制，不是文件路径，跳过 `&N` 且不标记待判定。
+                            if (i < n && command[i] == '&') {
+                                i++
+                                while (i < n && command[i].isDigit()) i++
+                                expectRedirectTarget = false
+                            } else {
+                                expectRedirectTarget = true
+                            }
+                        }
+                        c == '<' -> {
+                            if (tokenStarted && token.all { it.isDigit() }) {
+                                token.setLength(0)
+                                tokenStarted = false
+                            } else {
+                                flushToken()
+                            }
+                            i++
+                        }
                         c.isWhitespace() -> { flushToken(); i++ }
                         else -> { token.append(c); tokenStarted = true; i++ }
                     }
