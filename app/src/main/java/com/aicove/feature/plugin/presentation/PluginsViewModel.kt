@@ -27,6 +27,7 @@ import com.aicove.feature.plugin.runtime.PluginProviderRegistrar
 import com.aicove.feature.plugin.runtime.PluginRuntimeManager
 import com.aicove.feature.plugin.runtime.PluginShizukuRunner
 import com.aicove.feature.plugin.runtime.PluginTerminalRunner
+import com.aicove.feature.plugin.runtime.PluginChatService
 import com.aicove.feature.plugin.runtime.PluginTipManager
 import com.aicove.feature.workspace.data.repository.WorkspaceRepository
 import com.aicove.feature.workspace.domain.FileAccessProvider
@@ -102,6 +103,7 @@ class PluginsViewModel @Inject constructor(
     private val shizukuManager: ShizukuManager,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
+    private val chatService: PluginChatService,
     private val devSettingsRepository: PluginDevSettingsRepository
 ) : ViewModel() {
 
@@ -432,6 +434,7 @@ class PluginsViewModel @Inject constructor(
             terminalRunner = pluginTerminalRunner,
             shizukuRunner = shizukuRunner,
             tipManager = tipManager,
+            chatService = chatService,
             theme = theme,
             onClosePage = onClosePage,
             post = post

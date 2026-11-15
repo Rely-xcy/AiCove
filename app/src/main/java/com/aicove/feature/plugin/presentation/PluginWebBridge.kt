@@ -13,6 +13,7 @@ import com.aicove.feature.plugin.domain.PluginManager
 import com.aicove.feature.plugin.domain.PluginSettingsPage
 import com.aicove.feature.plugin.runtime.PluginEventBus
 import com.aicove.feature.plugin.runtime.PluginProcessException
+import com.aicove.feature.plugin.runtime.PluginChatService
 import com.aicove.feature.plugin.runtime.PluginRuntimeManager
 import com.aicove.feature.plugin.runtime.PluginShizukuException
 import com.aicove.feature.plugin.runtime.PluginShizukuRunner
@@ -66,6 +67,7 @@ class PluginWebBridge(
     private val terminalRunner: PluginTerminalRunner,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
+    private val chatService: PluginChatService,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -155,6 +157,18 @@ class PluginWebBridge(
         "fs.list" -> hostPaths.list(PluginHostPaths.requireString(params, "path"))
         "fs.delete" -> hostPaths.delete(PluginHostPaths.requireString(params, "path"))
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
+        "chat.sessions" -> chatService.listSessions(page.pluginId, params)
+        "chat.create" -> chatService.createSession(page.pluginId, params)
+        "chat.messages" -> chatService.listMessages(page.pluginId, params)
+        "chat.send" -> chatService.sendMessage(page.pluginId, params)
+        "chat.stop" -> chatService.stop(page.pluginId, params)
+        "chat.open" -> chatService.openSession(page.pluginId, params)
+        "chat.get" -> chatService.getSession(page.pluginId, params)
+        "chat.rename" -> chatService.renameSession(page.pluginId, params)
+        "chat.pin" -> chatService.pinSession(page.pluginId, params)
+        "chat.delete" -> chatService.deleteSession(page.pluginId, params)
+        "chat.runState" -> chatService.getRunState(page.pluginId, params)
+        "chat.waitRun" -> chatService.waitForRun(page.pluginId, params)
         "bash" -> bash(params)
         "shizuku.exec" -> shizukuExec(params)
         "tip" -> tip(params)
