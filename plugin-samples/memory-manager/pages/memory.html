@@ -171,8 +171,8 @@
   (function () {
     'use strict';
 
-    var GLOBAL_ROOT = 'aicode://memory';
-    var PROJECT_ROOT = 'workspace://.aicode/memory';
+    var GLOBAL_ROOT = '';
+    var PROJECT_ROOT = '';
 
     var app = Vue.createApp({
       data: function () {
@@ -441,9 +441,18 @@
         }
       },
 
-      mounted: function () {
+      mounted: async function () {
         if (aicode.ui && aicode.ui.onBack) {
           aicode.ui.onBack(this.handleBack);
+        }
+        // 文件路径现在是执行环境的真实绝对路径；根目录从宿主 context 拿，
+        // 本地是容器内路径，SSH 是远端路径，插件不用自己拼。
+        try {
+          var context = await aicode.context();
+          if (context && context.home) GLOBAL_ROOT = context.home + '/.aicode/memory';
+          if (context && context.workspace) PROJECT_ROOT = context.workspace + '/.aicode/memory';
+        } catch (e) {
+          // context 拿不到时保留空根，listScope 会返回空列表而不是崩掉
         }
         this.loadAll();
       }

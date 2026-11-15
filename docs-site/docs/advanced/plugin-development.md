@@ -84,9 +84,9 @@ AiCove 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 
 插件启用后，清单声明的技能、子代理、AI 工具、工作区工具、设置页、hook 和 MCP 都会生效，不再逐项授权。安装确认只展示它会提供什么。
 
-- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，可以执行 `aicode.bash`、用 `aicode.terminal` 创建共享终端标签，也可以用 `aicode.invoke` 调用同一插件常驻进程的 handler。
+- 插件页面通过宿主桥读写真实绝对路径与 `data://`（插件自己的数据目录），可以执行 `aicode.bash`、用 `aicode.terminal` 创建共享终端标签，也可以用 `aicode.invoke` 调用同一插件常驻进程的 handler。
 - 命令与 MCP 进程内部不受宿主路径限制；只安装你信任来源的插件。
-- `aicode://` 下的 `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件给自己扩权或读取密钥。
+- 路径是当前执行环境的真实路径（本地为容器内，SSH 为远端），`~` 展开到 home，裸相对路径挂到工作区根；`data://` 是插件自己的数据目录。
 - 插件 AI 工具与 hook 在本地容器的插件子进程中运行，可以读写自己目录与授权范围内的文件、执行命令、访问网络；host API 的路径限制只约束这些接口，不约束进程自身。
 - 后续如果接入 Shizuku 这类宿主能真正拦截的系统能力，会单独增加确认开关。
 
@@ -238,7 +238,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCove 在本地容器
 | 宿主 → 插件 | `tool.invoke` | `params: {handler, args}`，返回 `result` |
 | 宿主 → 插件 | `hook.invoke` | `params: {handler, args}`，返回 `result` |
 | 宿主 → 插件 | `ui.invoke` | 插件页面调用常驻进程：`params: {handler, args}`，返回 `result` |
-| 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
+| 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 真实绝对路径或 `data://` |
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
 | 插件 → 宿主 | `host.terminal.run` / `poll` / `stop` / `close` | 创建、轮询、停止、关闭共享终端标签，参数与页面桥 `terminal.*` 一致 |
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
@@ -573,12 +573,12 @@ const off = aicode.events.on((event) => {
 
 路径必须以虚拟根开头：
 
-| 根 | 位置 | 读写 |
+| 路径 | 含义 | 读写 |
 | --- | --- | --- |
-| `data://` | 插件自己的数据目录，卸载时清理 | 读写 |
-| `plugin://` | 插件安装目录 | 只读 |
-| `workspace://` | 当前工作区 | 读写 |
-| `aicode://` | 全局 `.aicode` 目录 | 读写 |
+| `data://` | 插件自己的数据目录，卸载时清理，与插件 ID 和执行环境解耦 | 读写 |
+| 绝对路径 | 当前执行环境的真实路径：本地为容器内路径（如 `/root/workspace/a.txt`），SSH 为远端服务器路径 | 读写 |
+| `~/...` | 展开到当前环境的 home | 读写 |
+| 裸相对路径 | 挂到工作区根 | 读写 |
 
 单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。
 

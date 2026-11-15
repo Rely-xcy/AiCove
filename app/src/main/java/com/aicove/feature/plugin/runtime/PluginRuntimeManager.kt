@@ -176,10 +176,10 @@ class PluginRuntimeManager @Inject constructor(
         params: JsonObject
     ): JsonElement {
         val paths = PluginHostPaths(
-            dataDir = pluginManager.dataDirFor(pluginId),
-            installDir = runtime.installDir,
             fileAccess = fileAccess,
-            homeResolver = homeResolver
+            homeResolver = homeResolver,
+            workspaceRoot = { workspaceRepository.currentPath() },
+            pluginId = pluginId
         )
         return when (method) {
             "host.fs.read" -> paths.read(PluginHostPaths.requireString(params, "path"))

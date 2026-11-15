@@ -56,7 +56,6 @@ import kotlinx.serialization.json.put
 class PluginWebBridge(
     private val context: Context,
     private val page: PluginSettingsPage,
-    private val dataDir: File,
     private val pluginVersion: String,
     private val languageTag: String,
     private val workspaceName: String,
@@ -78,7 +77,12 @@ class PluginWebBridge(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val hostPaths = PluginHostPaths(dataDir, page.installDir, fileAccess, homeResolver)
+    private val hostPaths = PluginHostPaths(
+        fileAccess = fileAccess,
+        homeResolver = homeResolver,
+        workspaceRoot = workspacePath,
+        pluginId = page.pluginId
+    )
     @Volatile private var overlayActive = false
     private val eventSubscription = eventBus.subscribe(page.pluginId) { event ->
         val script = "window.__aicodeEvent(${jsString(event.toString())})"
@@ -132,6 +136,11 @@ class PluginWebBridge(
             put("languageTag", languageTag)
             put("theme", theme())
             put("workspaceName", workspaceName)
+            // 插件用真实路径工作，这三个值告诉它当前环境的根在哪：
+            // home 用于 `~` 展开的对照，workspace 是裸相对路径的基准，dataDir 是 data:// 的落点。
+            put("home", homeResolver.home())
+            put("workspace", workspacePath())
+            put("dataDir", PluginHostPaths.dataRoot(homeResolver, page.pluginId))
         }
 
         "toast" -> {

@@ -14,13 +14,3 @@ data class PluginEntryContext(
     val lineStart: Int? = null,
     val lineEnd: Int? = null
 )
-
-/** 把容器路径转成插件宿主路径；工作区内使用 `workspace://`，其余原样返回。 */
-fun pluginHostPath(raw: String?, workspaceRoot: String?): String? {
-    if (raw.isNullOrBlank() || "://" in raw) return raw
-    val root = workspaceRoot?.trimEnd('/').orEmpty()
-    if (root.isNotEmpty() && raw.startsWith("$root/")) {
-        return "workspace://" + raw.removePrefix("$root/")
-    }
-    return raw
-}
