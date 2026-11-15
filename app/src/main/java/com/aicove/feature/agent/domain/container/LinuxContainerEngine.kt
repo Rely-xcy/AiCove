@@ -537,8 +537,8 @@ class LinuxContainerEngine @Inject constructor(
             // 旧 rootfs（如已导入的 Ubuntu 26.04）不会重新解压，这里兜底巡检修复已知兼容性问题
             containerInstaller.repairRootfsCompatibility(containerInstaller.rootfsDirFor(profile))
             _initProgress.value = ContainerInitState.Ready
-            refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
+            pathHomeResolver.containerHome = profile.homePath
             if (fastDiagnosticsLogged.add(profile.id)) {
                 logContainerDiagnostics("ensureInstalled 快路径（本进程首次）")
             }
@@ -564,8 +564,8 @@ class LinuxContainerEngine @Inject constructor(
         job.join()
         if (containerInstaller.isInstalledFor(profile)) {
             _initProgress.value = ContainerInitState.Ready
-            refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
+            pathHomeResolver.containerHome = profile.homePath
             FileLogger.i(TAG, "ensureInstalled 完成（耗时 ${System.currentTimeMillis() - startedAt}ms）")
             logContainerDiagnostics("ensureInstalled 完成后")
         } else {
@@ -621,15 +621,6 @@ class LinuxContainerEngine @Inject constructor(
     private suspend fun doInit(profile: ContainerProfile) {
         // installRootfsIfNeed 在真正解压/部署时回调更新进度（已安装则快路径不回调）
         containerInstaller.installRootfsIfNeed(profile) { _initProgress.value = it }
-    }
-
-    /** 查容器内 $HOME 并缓存到 [com.aicove.feature.workspace.domain.PathHomeResolver]，供各工具展开 ~。 */
-    private suspend fun refreshContainerHome() {
-        runCatching {
-            val result = execCaptured("echo \$HOME", projectPath = null, timeoutMs = 3000)
-            val home = result.output.trim().ifEmpty { null }
-            if (home != null) pathHomeResolver.containerHome = home
-        }.onFailure { FileLogger.w(TAG, "查容器 \$HOME 失败", it) }
     }
 
     /**

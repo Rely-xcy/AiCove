@@ -32,6 +32,10 @@ data class ContainerProfile(
     /** 添加时间（毫秒时间戳），容器列表按此降序排列；旧数据/内置默认 0 排最后。 */
     val createdAt: Long = 0
 ) {
+    /** 容器 HOME 与 buildContainerEnv 默认值及 env 覆盖规则一致。 */
+    val homePath: String
+        get() = env["HOME"]?.takeIf { it.isNotBlank() } ?: "/root"
+
     companion object {
         const val BUILTIN_ID = "builtin-alpine"
 
