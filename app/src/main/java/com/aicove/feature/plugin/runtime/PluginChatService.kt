@@ -73,7 +73,7 @@ class PluginChatService @Inject constructor(
 
     suspend fun listSessions(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
+        val workspace = resolveWorkspace(params)
         val includeSubagents = optionalBoolean(params, "includeSubagents") ?: false
         val limit = optionalInt(params, "limit", DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT)
         val sessions = if (includeSubagents) {
@@ -88,14 +88,7 @@ class PluginChatService @Inject constructor(
 
     suspend fun createSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        // 允许指定目标工作区（如本地/远程切换）；不传则用当前工作区
-        val requested = optionalString(params, "workspacePath")?.trim()?.takeIf { it.isNotEmpty() }
-        val workspace = if (requested == null) {
-            requireWorkspace()
-        } else {
-            requested.takeIf { path -> workspaceRepository.workspaces.value.any { it.path == path } }
-                ?: throw paramInvalid("unknown workspace")
-        }
+        val workspace = resolveWorkspace(params)
         val title = optionalString(params, "title")?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.also { if (it.length > MAX_TITLE_CHARS) throw paramInvalid("title too long") }
@@ -122,9 +115,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun listMessages(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val limit = optionalInt(params, "limit", DEFAULT_MESSAGE_LIMIT, 1, MAX_MESSAGE_LIMIT)
         val before = optionalLong(params, "before")
         val after = optionalLong(params, "after")
@@ -165,7 +157,7 @@ class PluginChatService @Inject constructor(
         ensureActive(pluginId)
         val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val text = PluginHostPaths.requireString(params, "text")
         if (text.isBlank()) throw paramInvalid("text is blank")
         if (text.length > MAX_MESSAGE_CHARS) throw paramInvalid("text too long")
@@ -178,9 +170,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun stop(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         submit(AgentChatRequest.Stop(session.id))
         return buildJsonObject {
             put("sessionId", session.id)
@@ -190,9 +181,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun openSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         submit(AgentChatRequest.Select(session.id))
         return buildJsonObject {
             put("sessionId", session.id)
@@ -202,17 +192,15 @@ class PluginChatService @Inject constructor(
 
     suspend fun getSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         return buildJsonObject { put("session", sessionJson(session)) }
     }
 
     suspend fun renameSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val title = PluginHostPaths.requireString(params, "title").trim()
         if (title.isEmpty()) throw paramInvalid("title is blank")
         if (title.length > MAX_TITLE_CHARS) throw paramInvalid("title too long")
@@ -225,9 +213,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun pinSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val pinned = (params["pinned"] as? JsonPrimitive)?.booleanOrNull
             ?: throw paramInvalid("pinned must be a boolean")
         sessionUseCase.updatePinned(session.id, pinned)
@@ -239,9 +226,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun deleteSession(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         submit(AgentChatRequest.Delete(session.id))
         return buildJsonObject {
             put("sessionId", session.id)
@@ -251,9 +237,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun getRunState(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         return buildJsonObject {
             put("sessionId", session.id)
             put("run", runJson(runStateStore.snapshot(session.id)))
@@ -262,9 +247,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun waitForRun(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val timeoutMs = (optionalLong(params, "timeoutMs") ?: DEFAULT_WAIT_TIMEOUT_MS)
             .coerceIn(MIN_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS)
         val snapshot = runStateStore.awaitIdle(session.id, timeoutMs)
@@ -289,7 +273,7 @@ class PluginChatService @Inject constructor(
             chatSessionDao.getRootSessionsByWorkspaceOnce(workspace).firstOrNull()?.id
                 ?: throw paramInvalid("no session in current workspace")
         } else {
-            requireSession(requestedId, workspace).id
+            requireSessionAnywhere(requestedId).id
         }
         val text = PluginHostPaths.requireString(params, "text")
         val append = (params["append"] as? JsonPrimitive)?.booleanOrNull == true
@@ -304,9 +288,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun listApprovals(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val tool = toolPermissionManager.pendingForSession(session.id)
         val question = askUserQuestionManager.pendingQuestion.value
             ?.takeIf { it.sessionId == session.id }
@@ -321,9 +304,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun resolveToolApproval(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val requestId = PluginHostPaths.requireString(params, "requestId").trim()
         val pending = toolPermissionManager.pendingForSession(session.id)
             ?.takeIf { it.id == requestId }
@@ -345,9 +327,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun resolveQuestion(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val requestId = PluginHostPaths.requireString(params, "requestId").trim()
         askUserQuestionManager.pendingQuestion.value
             ?.takeIf { it.id == requestId && it.sessionId == session.id }
@@ -372,9 +353,8 @@ class PluginChatService @Inject constructor(
 
     suspend fun resolvePlanApproval(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
-        val workspace = requireWorkspace()
         val sessionId = PluginHostPaths.requireString(params, "sessionId").trim()
-        val session = requireSession(sessionId, workspace)
+        val session = requireSessionAnywhere(sessionId)
         val requestId = PluginHostPaths.requireString(params, "requestId").trim()
         planApprovalManager.pendingForSession(session.id)?.takeIf { it.id == requestId }
             ?: throw PluginHostException("APPROVAL_NOT_FOUND", "plan approval not found: $requestId")
@@ -459,18 +439,26 @@ class PluginChatService @Inject constructor(
         return current.path
     }
 
-    private suspend fun requireSession(sessionId: String, workspace: String): ChatSessionEntity {
-        if (sessionId.isBlank()) throw paramInvalid("missing sessionId")
-        val session = sessionUseCase.getSessionById(sessionId)
-            ?: throw PluginHostException("SESSION_NOT_FOUND", "session not found: $sessionId")
-        if (!sameWorkspace(session.workspacePath, workspace)) {
-            throw PluginHostException("SESSION_FORBIDDEN", "session is outside the current workspace")
-        }
-        return session
+    /**
+     * 解析插件传入的 workspacePath；不传则退回当前工作区。
+     * 与 createSession 口径一致：必须是已存在的工作区。
+     */
+    private fun resolveWorkspace(params: JsonObject): String {
+        val requested = optionalString(params, "workspacePath")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return requireWorkspace()
+        return requested.takeIf { path -> workspaceRepository.workspaces.value.any { it.path == path } }
+            ?: throw paramInvalid("unknown workspace")
     }
 
-    private fun sameWorkspace(left: String, right: String): Boolean =
-        left.trimEnd('/') == right.trimEnd('/')
+    /**
+     * 按会话自己所属的工作区校验，而不是当前工作区。
+     * 插件可以总结/操作任意工作区的会话，否则跨工作区使用会被 SESSION_FORBIDDEN 挡回去。
+     */
+    private suspend fun requireSessionAnywhere(sessionId: String): ChatSessionEntity {
+        if (sessionId.isBlank()) throw paramInvalid("missing sessionId")
+        return sessionUseCase.getSessionById(sessionId)
+            ?: throw PluginHostException("SESSION_NOT_FOUND", "session not found: $sessionId")
+    }
 
     private fun parseMode(value: JsonElement?): AgentMode {
         val raw = (value as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() ?: return AgentMode.BUILD

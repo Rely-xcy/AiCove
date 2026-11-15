@@ -83,11 +83,21 @@
 
   <div class="card">
     <div class="row">
+      <label for="sourceWorkspace">会话所在工作区</label>
+    </div>
+    <select id="sourceWorkspace" v-model="sourceWorkspacePath" @change="loadSessions">
+      <option v-for="w in workspaces" :key="w.path" :value="w.path">
+        {{ w.name }}{{ w.remote ? ' · 远程' : '' }}
+      </option>
+    </select>
+
+    <div class="row">
       <label for="source">要总结的会话</label>
     </div>
     <select id="source" v-model="sourceId">
       <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.title }}</option>
     </select>
+    <p v-if="!sessions.length" class="hint">该工作区还没有会话。</p>
 
     <div class="row">
       <label for="workspace">新会话放在</label>
@@ -123,6 +133,7 @@ new Vue({
   data: {
     sessions: [],
     workspaces: [],
+    sourceWorkspacePath: '',
     sourceId: '',
     workspacePath: '',
     newTitle: '',
@@ -137,14 +148,26 @@ new Vue({
   methods: {
     async load() {
       try {
-        const sessionResult = await aicode.chat.sessions({});
-        this.sessions = (sessionResult && sessionResult.sessions) || [];
-        if (this.sessions.length) this.sourceId = this.sessions[0].id;
-
         const workspaceResult = await aicode.workspaces.list();
         this.workspaces = (workspaceResult && workspaceResult.workspaces) || [];
         const current = (workspaceResult && workspaceResult.current) || '';
-        this.workspacePath = current || (this.workspaces[0] && this.workspaces[0].path) || '';
+        this.sourceWorkspacePath = current || (this.workspaces[0] && this.workspaces[0].path) || '';
+        this.workspacePath = this.sourceWorkspacePath;
+        await this.loadSessions();
+      } catch (e) {
+        this.fail('读取工作区列表失败：' + ((e && e.message) || e));
+      }
+    },
+
+    // 会话按工作区拉取；chat.sessions 支持 workspacePath 参数。
+    async loadSessions() {
+      this.sessions = [];
+      this.sourceId = '';
+      if (!this.sourceWorkspacePath) return;
+      try {
+        const sessionResult = await aicode.chat.sessions({ workspacePath: this.sourceWorkspacePath });
+        this.sessions = (sessionResult && sessionResult.sessions) || [];
+        if (this.sessions.length) this.sourceId = this.sessions[0].id;
       } catch (e) {
         this.fail('读取会话列表失败：' + ((e && e.message) || e));
       }

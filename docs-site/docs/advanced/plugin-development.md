@@ -560,7 +560,7 @@ const off = aicode.events.on((event) => {
 | 方法 | 作用 |
 | --- | --- |
 | `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名，以及 `home` / `workspace` / `dataDir` 三个真实路径 |
-| `aicode.chat.sessions(options?)` | 列出当前工作区的会话，返回 `{ sessions }` |
+| `aicode.chat.sessions(options?)` | 列出会话，返回 `{ sessions }`；`options.workspacePath` 可指定其他工作区，不传则用当前工作区 |
 | `aicode.chat.create({title?, mode?, workspacePath?})` | 新建会话；`workspacePath` 可指定落在哪个工作区，不传用当前工作区 |
 | `aicode.chat.messages({sessionId, limit?, before?, after?})` | 读取消息，返回 `{ sessionId, messages, hasMore }` |
 | `aicode.chat.send({sessionId, text})` | 向会话发一条用户消息并启动 AI 轮次，走聊天页现有队列与授权链路 |
