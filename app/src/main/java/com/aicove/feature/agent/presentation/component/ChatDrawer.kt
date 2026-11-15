@@ -100,6 +100,7 @@ import com.aicove.core.ui.CollapsibleGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsGroup
 import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicove.core.plugin.PluginSlotEntry
+import compose.icons.feathericons.Package
 import com.aicove.feature.settings.presentation.component.SettingsRow
 import com.aicove.feature.settings.presentation.component.settingsPageBackground
 import com.aicove.feature.agent.domain.model.ChatSession

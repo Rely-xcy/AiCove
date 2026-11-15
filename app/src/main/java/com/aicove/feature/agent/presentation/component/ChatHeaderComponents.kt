@@ -76,9 +76,11 @@ import compose.icons.feathericons.Folder
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Menu
+import com.aicove.core.plugin.PluginSlotEntry
 import compose.icons.feathericons.MoreHorizontal
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Terminal
+import compose.icons.feathericons.Zap
 
 @Composable
 internal fun ChatHeader(
@@ -100,7 +102,9 @@ internal fun ChatHeader(
     showMenuButton: Boolean = true,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
-    browserActive: Boolean = false
+    browserActive: Boolean = false,
+    pluginEntries: List<PluginSlotEntry> = emptyList(),
+    onOpenPluginEntry: (PluginSlotEntry) -> Unit = {}
 ) {
     Surface(
         color = MaterialTheme.colorScheme.background
@@ -271,6 +275,22 @@ internal fun ChatHeader(
                                     ) {
                                         workbenchExpanded = false
                                         onNavigateToGit()
+                                    }
+                                    if (pluginEntries.isNotEmpty()) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(start = 40.dp, end = 12.dp),
+                                            thickness = 1.dp,
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                        )
+                                        pluginEntries.take(3).forEach { entry ->
+                                            WorkbenchMenuItem(
+                                                icon = FeatherIcons.Zap,
+                                                label = entry.title
+                                            ) {
+                                                workbenchExpanded = false
+                                                onOpenPluginEntry(entry)
+                                            }
+                                        }
                                     }
                                 }
                             }

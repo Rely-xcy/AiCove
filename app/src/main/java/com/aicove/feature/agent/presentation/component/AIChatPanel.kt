@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -75,6 +76,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1665,6 +1667,7 @@ fun AIChatPanel(
     // 用 saveable 记住已处理代际：从编辑器/终端等全屏路由返回时整棵组合重挂载，StateFlow 会把当前值
     // 重放一遍；只按「数值前进」复位，避免返回时把浏览位置拉回底部。
     val rewindGeneration by viewModel.rewindGeneration.collectAsStateWithLifecycle()
+    val isRewinding by viewModel.isRewinding.collectAsStateWithLifecycle()
     var handledRewindGeneration by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(rewindGeneration) {
         if (rewindGeneration > handledRewindGeneration) {
@@ -2558,6 +2561,39 @@ fun AIChatPanel(
                     },
                     onDismissRequest = { viewModel.dismissRewindMenu() }
                 )
+            }
+
+            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给一个明确的遮罩，
+            // 避免用户以为没点上而反复点。
+            if (isRewinding) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+                        .pointerInput(Unit) { detectTapGestures { } },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.semanticColors.cardSurface
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = stringResource(R.string.checkpoint_rewinding),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
             }
 
             messageForMenu?.let { message ->

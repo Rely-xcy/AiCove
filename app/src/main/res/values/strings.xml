@@ -868,6 +868,7 @@
 
     <!-- Checkpoint & Rewind -->
     <string name="checkpoint_rewind_title">检查点与撤销</string>
+    <string name="checkpoint_rewinding">正在撤销…</string>
     <string name="checkpoint_target_prompt">目标消息：%1$s</string>
     <string name="checkpoint_restore_code_and_conversation">恢复代码与对话</string>
     <string name="checkpoint_restore_code_and_conversation_desc">将代码与对话均回滚至此检查点之前</string>

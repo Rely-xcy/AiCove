@@ -14,6 +14,7 @@ import com.aicove.feature.plugin.data.PluginShizukuPermissionRepository
 import com.aicove.feature.plugin.domain.PluginManifestParser
 import com.aicove.feature.plugin.domain.ManifestParseResult
 import com.aicove.feature.plugin.domain.InstalledPlugin
+import com.aicove.feature.plugin.domain.LocalizedText
 import com.aicove.feature.plugin.domain.PluginError
 import com.aicove.feature.plugin.domain.PluginErrorCode
 import com.aicove.feature.plugin.domain.PluginInstallResult
@@ -84,7 +85,10 @@ data class PluginDevProject(
     val version: String,
     val installedVersion: String?,
     val lastModified: Long,
-    val error: String? = null
+    val error: String? = null,
+    val name: LocalizedText? = null,
+    val description: LocalizedText? = null,
+    val publisher: String? = null
 )
 
 @HiltViewModel
@@ -314,7 +318,10 @@ class PluginsViewModel @Inject constructor(
                         pluginId = parsed.manifest.id,
                         version = parsed.manifest.version.toString(),
                         installedVersion = installed[parsed.manifest.id],
-                        lastModified = lastModified
+                        lastModified = lastModified,
+                        name = parsed.manifest.name,
+                        description = parsed.manifest.description,
+                        publisher = parsed.manifest.publisher
                     )
                     else -> PluginDevProject(
                         dirName = dir.name,

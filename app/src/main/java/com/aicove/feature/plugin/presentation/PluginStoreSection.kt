@@ -68,9 +68,38 @@ import compose.icons.feathericons.CloudOff
 import compose.icons.feathericons.Github
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Package
+import compose.icons.feathericons.Search
 import compose.icons.feathericons.Server
 import compose.icons.feathericons.ShoppingBag
 import compose.icons.feathericons.Tag
+
+/** 列表搜索无结果时的占位。 */
+@Composable
+internal fun PluginSearchEmptyState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Icon(
+                FeatherIcons.Search,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Text(
+                text = stringResource(R.string.plugins_search_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
 /** 非官方徽标用语义色的 warning 槽位，跟随主题与暗色模式。 */
 private val UnofficialBadgeBackground: Color

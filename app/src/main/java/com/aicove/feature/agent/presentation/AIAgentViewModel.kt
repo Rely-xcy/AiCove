@@ -3610,6 +3610,13 @@ class AIAgentViewModel @Inject constructor(
     val rewindGeneration: StateFlow<Int> = _rewindGeneration.asStateFlow()
 
     /**
+     * 回退正在执行。回退要等运行中的任务结束、倒序还原文件快照、再跑删消息的事务，
+     * 全程没有其它界面反馈；不给这个状态，用户会以为没点上而反复点。
+     */
+    private val _isRewinding = MutableStateFlow(false)
+    val isRewinding: StateFlow<Boolean> = _isRewinding.asStateFlow()
+
+    /**
      * 用户主动停止代际（按会话）：[stopAgentSession] 每真正取消一个运行中的 job 就自增。
      *
      * 聊天页据此把本轮残留的流式 / 思考气泡立即判为就位并清空（见 AIChatPanel 对
@@ -3651,59 +3658,65 @@ class AIAgentViewModel @Inject constructor(
     ) = viewModelScope.launch {
         val sessionId = _currentSessionId.value ?: return@launch
         dismissRewindMenu()
+        // 先置忙：弹窗已关，接下来的取消与还原可能持续几秒，界面必须有反馈。
+        _isRewinding.value = true
+        try {
 
-        // 1. 停止当前正在运行的 Agent 任务及后续排队
-        markClientMessagesDiscarded(_queuedRequests.value[sessionId].orEmpty())
-        _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
-        agentNotificationCenter.clear(sessionId)
-        val runningJob = sessionJobs[sessionId]
-        if (runningJob != null && runningJob.isActive) {
-            runningJob.cancelAndJoin()
+            // 1. 停止当前正在运行的 Agent 任务及后续排队
+            markClientMessagesDiscarded(_queuedRequests.value[sessionId].orEmpty())
+            _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
+            agentNotificationCenter.clear(sessionId)
+            val runningJob = sessionJobs[sessionId]
+            if (runningJob != null && runningJob.isActive) {
+                runningJob.cancelAndJoin()
+            }
+            sessionJobs.remove(sessionId)
+
+            // 2. 重置会话运行、流式与检查点状态
+            setAgentState(sessionId, AgentUIState.Idle)
+            _runningTools.value = _runningTools.value - sessionId
+            setStreamingText(sessionId, null)
+            setStreamingReasoning(sessionId, null)
+            pendingAssistantTextStop.remove(sessionId)
+            setCompacting(sessionId, false)
+            setRetryState(sessionId, null)
+            checkpointManager.setActiveCheckpointId(sessionId, null)
+
+            val checkpoint = checkpointDao.getCheckpointBySessionAndMessage(sessionId, messageId)
+            val targetMsgEntity = agentMessageDao.getMessageById(messageId) ?: return@launch
+            val attachments = targetMsgEntity.toUIMessage().attachments
+
+            when (option) {
+                RewindOption.RESTORE_CODE_AND_CONVERSATION -> {
+                    if (checkpoint != null) {
+                        checkpointManager.restoreCodeToCheckpoint(sessionId, checkpoint.id)
+                    }
+                    val rewound = rewindWithRestore(sessionId) {
+                        agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
+                    }
+                    if (rewound == null) return@launch
+                    resetSessionInputTokens(sessionId)
+                    withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
+                }
+                RewindOption.RESTORE_CONVERSATION -> {
+                    val rewound = rewindWithRestore(sessionId) {
+                        agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
+                    }
+                    if (rewound == null) return@launch
+                    resetSessionInputTokens(sessionId)
+                    withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
+                }
+                RewindOption.RESTORE_CODE -> {
+                    if (checkpoint != null) {
+                        checkpointManager.restoreCodeToCheckpoint(sessionId, checkpoint.id)
+                    }
+                }
+            }
+            // 回退已执行（未提前 return）：通知界面复位 UI 侧状态。
+            _rewindGeneration.value++
+        } finally {
+            _isRewinding.value = false
         }
-        sessionJobs.remove(sessionId)
-
-        // 2. 重置会话运行、流式与检查点状态
-        setAgentState(sessionId, AgentUIState.Idle)
-        _runningTools.value = _runningTools.value - sessionId
-        setStreamingText(sessionId, null)
-        setStreamingReasoning(sessionId, null)
-        pendingAssistantTextStop.remove(sessionId)
-        setCompacting(sessionId, false)
-        setRetryState(sessionId, null)
-        checkpointManager.setActiveCheckpointId(sessionId, null)
-
-        val checkpoint = checkpointDao.getCheckpointBySessionAndMessage(sessionId, messageId)
-        val targetMsgEntity = agentMessageDao.getMessageById(messageId) ?: return@launch
-        val attachments = targetMsgEntity.toUIMessage().attachments
-
-        when (option) {
-            RewindOption.RESTORE_CODE_AND_CONVERSATION -> {
-                if (checkpoint != null) {
-                    checkpointManager.restoreCodeToCheckpoint(sessionId, checkpoint.id)
-                }
-                val rewound = rewindWithRestore(sessionId) {
-                    agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
-                }
-                if (rewound == null) return@launch
-                resetSessionInputTokens(sessionId)
-                withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
-            }
-            RewindOption.RESTORE_CONVERSATION -> {
-                val rewound = rewindWithRestore(sessionId) {
-                    agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
-                }
-                if (rewound == null) return@launch
-                resetSessionInputTokens(sessionId)
-                withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
-            }
-            RewindOption.RESTORE_CODE -> {
-                if (checkpoint != null) {
-                    checkpointManager.restoreCodeToCheckpoint(sessionId, checkpoint.id)
-                }
-            }
-        }
-        // 回退已执行（未提前 return）：通知界面复位 UI 侧状态。
-        _rewindGeneration.value++
     }
 
     /**

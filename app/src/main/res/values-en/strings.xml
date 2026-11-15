@@ -868,6 +868,7 @@
 
     <!-- Checkpoint & Rewind -->
     <string name="checkpoint_rewind_title">Checkpoint &amp; Rewind</string>
+    <string name="checkpoint_rewinding">Rewinding…</string>
     <string name="checkpoint_target_prompt">Target message: %1$s</string>
     <string name="checkpoint_restore_code_and_conversation">Restore code and conversation</string>
     <string name="checkpoint_restore_code_and_conversation_desc">Revert both code and conversation before this checkpoint</string>
