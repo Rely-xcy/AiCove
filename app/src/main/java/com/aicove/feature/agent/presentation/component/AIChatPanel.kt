@@ -2376,6 +2376,39 @@ fun AIChatPanel(
                 }
             }
 
+            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给一行即时确认，
+            // 否则用户会以为没点上而反复点。与插话确认同一位置同一形状：
+            // 贴着输入框上方，不遮消息、不挡顶栏，也不动列表布局。
+            AnimatedVisibility(
+                visible = isRewinding,
+                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                enter = fadeIn(tween(140)),
+                exit = fadeOut(tween(160))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg)
+                        .clip(RoundedCornerShape(Radius.md))
+                        .background(MaterialTheme.semanticColors.mutedSurface)
+                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text(
+                        text = stringResource(R.string.checkpoint_rewinding),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
             ChatInputBar(
                 value = inputText,
                 onValueChange = viewModel::updateInputDraft,
@@ -2562,39 +2595,6 @@ fun AIChatPanel(
                     },
                     onDismissRequest = { viewModel.dismissRewindMenu() }
                 )
-            }
-
-            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给个明确提示，
-            // 避免用户以为没点上而反复点。不做全屏遮罩：回退是后台动作，不该盖住整个聊天界面。
-            AnimatedVisibility(
-                visible = isRewinding,
-                enter = fadeIn() + slideInVertically { -it / 2 },
-                exit = fadeOut() + slideOutVertically { -it / 2 },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = Spacing.sm)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.semanticColors.cardSurface,
-                    shadowElevation = 3.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Text(
-                            text = stringResource(R.string.checkpoint_rewinding),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
             }
 
             messageForMenu?.let { message ->
