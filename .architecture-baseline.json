@@ -22,7 +22,7 @@
     "app/src/main/java/com/aicove/feature/agent/domain/tool/browser/BrowserManager.kt": 2017,
     "app/src/main/java/com/aicove/feature/agent/domain/workflow/ContextCompactor.kt": 1954,
     "app/src/main/java/com/aicove/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 2349,
-    "app/src/main/java/com/aicove/feature/agent/presentation/AIAgentViewModel.kt": 3909,
+    "app/src/main/java/com/aicove/feature/agent/presentation/AIAgentViewModel.kt": 3928,
     "app/src/main/java/com/aicove/feature/agent/presentation/component/AIChatPanel.kt": 2707,
     "app/src/main/java/com/aicove/feature/agent/presentation/component/ChatDrawer.kt": 1602,
     "app/src/main/java/com/aicove/feature/backup/data/BackupManagerImpl.kt": 1908,
