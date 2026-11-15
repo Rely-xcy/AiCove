@@ -1564,6 +1564,14 @@ class AIAgentViewModel @Inject constructor(
             }
             is AgentChatRequest.Stop -> stopAgentSession(request.sessionId)
             is AgentChatRequest.Select -> selectSession(request.sessionId)
+            is AgentChatRequest.SetDraft -> {
+                val target = request.sessionId ?: _currentSessionId.value ?: return
+                val existing = _inputDrafts.value[target].orEmpty()
+                val text = if (request.append) existing + request.text else request.text
+                _inputDrafts.value = _inputDrafts.value + (target to text)
+                draftPrefs.edit().putString(target, text).apply()
+            }
+            is AgentChatRequest.Delete -> deleteSession(request.sessionId)
         }
     }
 
