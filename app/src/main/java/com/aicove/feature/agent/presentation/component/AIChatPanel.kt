@@ -2376,12 +2376,12 @@ fun AIChatPanel(
                 }
             }
 
-            // 回退进行中：取消任务、还原快照与删消息可能持续数秒，给一行即时确认，
-            // 否则用户会以为没点上而反复点。与插话确认同一位置同一形状：
-            // 贴着输入框上方，不遮消息、不挡顶栏，也不动列表布局。
+            // 回退中给一行即时确认，避免用户以为没点上而反复点；与插话确认同形，不遮消息、不挡顶栏。
             AnimatedVisibility(
                 visible = isRewinding,
-                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                modifier = Modifier
+                    .graphicsLayer { alpha = floatingPanelAlpha }
+                    .padding(bottom = Spacing.sm),
                 enter = fadeIn(tween(140)),
                 exit = fadeOut(tween(160))
             ) {
