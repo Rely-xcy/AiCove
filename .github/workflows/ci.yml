@@ -22,6 +22,11 @@ on:
       - '.gitignore'
   # 允许 API/页面手动触发（复验 flake、重跑门禁用）。
   workflow_dispatch:
+    inputs:
+      test_filter:
+        description: '只跑指定测试类（如 com.aicove.feature.git.domain.GitRepositoryTest）；留空跑全量'
+        required: false
+        default: ''
   pull_request:
     branches: [ main, fork/release ]
     paths-ignore:
@@ -116,7 +121,13 @@ jobs:
       # 只跑 universal debug 变体：单测逻辑与 flavor 无关（flavor 仅影响 abiFilters/assets），
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。
       - name: Run unit tests
-        run: ./gradlew :app:testUniversalDebugUnitTest
+        # CI_TEST_FILTER 为空时跑全量；排障时用 workflow_dispatch 传入测试类名做二分。
+        run: |
+          if [ -n "${{ github.event.inputs.test_filter }}" ]; then
+            ./gradlew :app:testUniversalDebugUnitTest --tests "${{ github.event.inputs.test_filter }}"
+          else
+            ./gradlew :app:testUniversalDebugUnitTest
+          fi
 
       # 单测失败时把失败用例名与首行断言消息直接打进日志。
       # 报告 XML 只在 artifact 里，而 artifact 下载需要仓库权限，排障时往往拿不到；
