@@ -54,7 +54,6 @@ fun ToolDetailScreen(
                 pluginId = tool.pluginId,
                 localId = tool.localId,
                 title = tool.title,
-                anchor = "",
                 pageFile = tool.pageFile,
                 icon = tool.icon,
                 installDir = dir,

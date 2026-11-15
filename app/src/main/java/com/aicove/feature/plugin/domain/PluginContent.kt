@@ -37,12 +37,25 @@ data class PluginWorkspaceTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
-/** 设置页入口：页面文件已校验存在于 [installDir]，由宿主 WebView 加载。 */
+/** 插件专属配置页：页面文件已校验存在于 [installDir]，由宿主 WebView 加载。 */
 data class PluginSettingsPage(
     val pluginId: String,
     val localId: String,
     val title: LocalizedText,
-    val anchor: String,
+    val pageFile: String,
+    val icon: String,
+    val installDir: File,
+    val pluginVersion: String = ""
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
+/** 槽位入口：页面文件已校验存在于 [installDir]，由宿主 WebView 加载。 */
+data class PluginUiEntry(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val slot: String,
     val pageFile: String,
     val icon: String,
     val installDir: File,
@@ -134,7 +147,7 @@ data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
-    val settingsPages: List<PluginSettingsPage> = emptyList(),
+    val uiEntries: List<PluginUiEntry> = emptyList(),
     val runtime: PluginRuntime? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
@@ -170,8 +183,8 @@ object PluginContentLoader {
         val workspaceTools = manifest.workspaceTools.map {
             loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
         }
-        val settingsPages = manifest.settingsPages.mapNotNull {
-            loadSettingsPage(dir, manifest.id, manifest.version.toString(), it, errors)
+        val uiEntries = manifest.uiEntries.mapNotNull {
+            loadUiEntry(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
@@ -207,7 +220,7 @@ object PluginContentLoader {
                     skills = skills,
                     agents = agents,
                     workspaceTools = workspaceTools,
-                    settingsPages = settingsPages,
+                    uiEntries = uiEntries,
                     runtime = runtime,
                     tools = tools,
                     hooks = hooks,
@@ -391,14 +404,14 @@ object PluginContentLoader {
         )
     }
 
-    /** 设置页 HTML 只校验存在性与大小，不解析内容；页面由宿主 WebView 加载。 */
-    private fun loadSettingsPage(
+    /** 槽位入口 HTML 只校验存在性与大小，不解析内容；页面由宿主 WebView 加载。 */
+    private fun loadUiEntry(
         dir: File,
         pluginId: String,
         pluginVersion: String,
-        ref: PluginSettingsPageRef,
+        ref: PluginUiEntryRef,
         errors: MutableList<PluginError>
-    ): PluginSettingsPage? {
+    ): PluginUiEntry? {
         val file = File(dir, ref.page)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
         if (!inside || !file.isFile) {
@@ -409,11 +422,11 @@ object PluginContentLoader {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.page}: too large")
             return null
         }
-        return PluginSettingsPage(
+        return PluginUiEntry(
             pluginId = pluginId,
             localId = ref.id,
             title = ref.title,
-            anchor = ref.anchor,
+            slot = ref.slot,
             pageFile = ref.page,
             icon = ref.icon,
             installDir = dir,
@@ -443,7 +456,6 @@ object PluginContentLoader {
             pluginId = pluginId,
             localId = "config",
             title = LocalizedText(mapOf("default" to "Configuration", "zh-CN" to "插件配置", "en" to "Configuration")),
-            anchor = "",
             pageFile = relativePath,
             icon = "settings",
             installDir = dir,

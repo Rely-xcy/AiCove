@@ -403,7 +403,7 @@ private fun PluginRow(
                     }
 
                     // 自定义页面
-                    if (plugin.content.settingsPages.isNotEmpty()) {
+                    if (plugin.content.uiEntries.isNotEmpty()) {
                         McpPill(
                             text = stringResource(R.string.plugins_tag_page),
                             textColor = MaterialTheme.colorScheme.secondary,
@@ -742,13 +742,13 @@ private fun PluginNativeConfigContent(
                 val skills = plugin.content.skills
                 val agents = plugin.content.agents
                 val workspaceTools = plugin.content.workspaceTools
-                val settingsPages = plugin.content.settingsPages
+                val uiEntries = plugin.content.uiEntries
                 val aiTools = plugin.content.tools
                 val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
                 val providers = plugin.content.providers
                 val shizuku = plugin.content.shizuku
-                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
+                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && uiEntries.isEmpty() &&
                     aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty() && shizuku == null
                 ) {
                     Text(
@@ -767,8 +767,8 @@ private fun PluginNativeConfigContent(
                 } + workspaceTools.map {
                     stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)) to
                         it.description.resolve(languageTag)
-                } + settingsPages.map {
-                    stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)) to it.anchor
+                } + uiEntries.map {
+                    stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)) to it.slot
                 } + aiTools.map {
                     stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
                         it.description.resolve(languageTag)

@@ -17,14 +17,14 @@
     "pluginApi": "^1.0.0"
   },
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "gallery",
         "title": {
           "zh-CN": "组件演示",
           "en": "UI Gallery"
         },
-        "anchor": "settings.help",
+        "slot": "settings.help",
         "page": "pages/gallery.html",
         "icon": "settings"
       }
