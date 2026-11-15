@@ -2396,16 +2396,8 @@
     <string name="plugins_store_mirror_label">Download mirror</string>
     <string name="plugins_store_mirror_hint">Accelerates GitHub index and package downloads. Leave empty for direct access.</string>
     <string name="plugins_store_mirror_invalid">Enter a URL starting with http:// or https://</string>
-    <string name="plugins_dev_mode">Developer sideload</string>
-    <string name="plugins_dev_mode_desc">When enabled, the Dev tab lists plugin projects in the dev directory and reloads them when files change. For development only.</string>
-    <string name="plugins_dev_root">Dev directory: %1$s</string>
     <string name="plugins_dev_empty_title">No plugins in the dev directory</string>
     <string name="plugins_dev_empty_hint">Put plugin folders under %1$s; each subfolder needs a plugin.json.</string>
-    <string name="plugins_dev_install">Install</string>
-    <string name="plugins_dev_reload">Reload</string>
-    <string name="plugins_dev_installed">Installed %1$s</string>
-    <string name="plugins_dev_not_installed">Not installed</string>
-    <string name="plugins_dev_invalid">Invalid manifest</string>
     <string name="plugins_dev_detail_dir">Project folder</string>
     <string name="plugins_dev_detail_id">Plugin ID</string>
     <string name="plugins_dev_detail_version">Folder version</string>

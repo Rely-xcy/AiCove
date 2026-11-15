@@ -2395,16 +2395,8 @@
     <string name="plugins_store_mirror_label">镜像加速地址</string>
     <string name="plugins_store_mirror_hint">用于加速 GitHub 上的索引与插件包下载，留空则直连。</string>
     <string name="plugins_store_mirror_invalid">请填写 http:// 或 https:// 开头的地址</string>
-    <string name="plugins_dev_mode">开发者侧载</string>
-    <string name="plugins_dev_mode_desc">启用后「开发中」标签页会列出开发目录里的插件项目；保存文件后自动重载。仅用于开发调试。</string>
-    <string name="plugins_dev_root">开发目录：%1$s</string>
     <string name="plugins_dev_empty_title">开发目录里还没有插件</string>
     <string name="plugins_dev_empty_hint">把插件目录放到 %1$s 下，每个子目录需包含 plugin.json。</string>
-    <string name="plugins_dev_install">安装</string>
-    <string name="plugins_dev_reload">重载</string>
-    <string name="plugins_dev_installed">已安装 %1$s</string>
-    <string name="plugins_dev_not_installed">未安装</string>
-    <string name="plugins_dev_invalid">清单无效</string>
     <string name="plugins_dev_detail_dir">项目目录</string>
     <string name="plugins_dev_detail_id">插件 ID</string>
     <string name="plugins_dev_detail_version">目录版本</string>
