@@ -120,6 +120,8 @@ internal fun PluginsSection(
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var pluginToUninstall by remember { mutableStateOf<InstalledPlugin?>(null) }
+    // 0=已安装 1=插件商店；商店页自带 ViewModel，与已安装列表互不干扰
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     val filteredPlugins = remember(plugins, searchQuery, languageTag) {
         val query = searchQuery.trim().lowercase()
@@ -136,6 +138,18 @@ internal fun PluginsSection(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        SegmentedTabs(
+            selected = selectedTab,
+            labels = listOf(
+                stringResource(R.string.plugins_tab_installed),
+                stringResource(R.string.plugins_tab_store)
+            ),
+            onSelect = { selectedTab = it },
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
+        if (selectedTab == 1) {
+            PluginStoreSection()
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -221,6 +235,7 @@ internal fun PluginsSection(
                     }
                 }
             }
+        }
         }
     }
 
