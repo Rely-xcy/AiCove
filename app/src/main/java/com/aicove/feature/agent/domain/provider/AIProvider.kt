@@ -6,6 +6,9 @@ import com.aicove.feature.agent.domain.model.ReasoningCapability
 import com.aicove.feature.agent.domain.tool.AgentTool
 import com.aicove.feature.agent.domain.tool.ToolCall
 import kotlinx.coroutines.flow.Flow
+import java.security.SecureRandom
+import java.time.Instant
+import java.util.UUID
 
 data class AIResponse(
     val content: String,
@@ -235,19 +238,62 @@ private val VERSION_SEGMENT_REGEX = Regex("""^v\d+.*$""", RegexOption.IGNORE_CAS
 
 /**
  * 把提供商自定义请求头中的占位符替换为运行时值后返回最终待写出的 Header 表。
- * 目前支持 `{{SESSION_ID}}`（当前会话 id，无会话时替换为空串）与 `{{API_KEY}}`（本次实际取用的 Key）。
+ *
+ * 静态值：
+ * - `{{SESSION_ID}}`：当前会话 id，无会话时为空串
+ * - `{{API_KEY}}`：本次实际取用的 Key
+ *
+ * 动态生成（每次调用重新生成，同一请求内多个头共用一个值）：
+ * - `{{UUID}}`：随机 UUID v4（如 `x-client-request-id`）
+ * - `{{UUID_HEX}}`：去横线的 UUID（32 位十六进制）
+ * - `{{TIMESTAMP}}`：Unix 毫秒
+ * - `{{ISO8601}}`：UTC ISO-8601 时间
+ * - `{{SESSION_UUID}}`：由会话 id 稳定派生的 UUID（同一会话固定，无会话时随机）
+ * - `{{RANDOM_8}}` / `{{RANDOM_16}}`：小写十六进制随机串
+ *
  * 空 Header 名在保存侧已被清洗，这里再防御性跳过一次。
  */
 fun resolveCustomHeaders(
     customHeaders: Map<String, String>,
     sessionId: String?,
     apiKey: String
-): Map<String, String> = customHeaders
-    .filterKeys { it.isNotBlank() }
-    .mapValues { (_, raw) ->
-        raw.replace("{{SESSION_ID}}", sessionId ?: "")
-            .replace("{{API_KEY}}", apiKey)
+): Map<String, String> {
+    if (customHeaders.isEmpty()) return emptyMap()
+    // 同一请求内复用：`x-client-request-id` 与 `x-codex-turn-metadata` 这类字段
+    // 若各自随机，服务端会发现同一次请求里两个 id 对不上。
+    val requestUuid by lazy { UUID.randomUUID() }
+    val timestamp by lazy { System.currentTimeMillis() }
+    val sessionUuid by lazy {
+        val sid = sessionId
+        if (sid.isNullOrBlank()) UUID.randomUUID()
+        else UUID.nameUUIDFromBytes(sid.toByteArray(Charsets.UTF_8))
     }
+    return customHeaders
+        .filterKeys { it.isNotBlank() }
+        .mapValues { (_, raw) ->
+            // 先换长名（SESSION_UUID 包含 SESSION 前缀），避免前缀相同时被误替。
+            raw.replace("{{SESSION_UUID}}", sessionUuid.toString())
+                .replace("{{SESSION_ID}}", sessionId ?: "")
+                .replace("{{API_KEY}}", apiKey)
+                .replace("{{UUID_HEX}}", requestUuid.toString().replace("-", ""))
+                .replace("{{UUID}}", requestUuid.toString())
+                .replace("{{TIMESTAMP}}", timestamp.toString())
+                .replace("{{ISO8601}}", iso8601(timestamp))
+                .replace("{{RANDOM_16}}", randomHex(16))
+                .replace("{{RANDOM_8}}", randomHex(8))
+        }
+}
+
+/** UTC ISO-8601，形如 `2026-11-15T19:30:00.000Z`。 */
+private fun iso8601(epochMillis: Long): String =
+    Instant.ofEpochMilli(epochMillis).toString()
+
+/** 小写十六进制随机串。 */
+private fun randomHex(bytes: Int): String {
+    val buffer = ByteArray(bytes)
+    SecureRandom().nextBytes(buffer)
+    return buffer.joinToString("") { "%02x".format(it) }
+}
 
 /** 官方给出推荐采样温度、填别的值会明显掉效果的 Gemini 世代；其余 Gemini 不发温度。 */
 private val GEMINI_MODELS_WITH_SAMPLING_DEFAULTS = listOf(

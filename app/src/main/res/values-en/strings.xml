@@ -1677,7 +1677,7 @@
     <string name="provider_full_url">Full URL</string>
     <string name="provider_full_url_desc">Base URL is the full request address, no default path appended</string>
     <string name="provider_headers_title">Custom Headers</string>
-    <string name="provider_headers_desc">Completely override the same-name default header for this vendor</string>
+    <string name="provider_headers_desc">Completely override the same-name default header for this vendor. Placeholders: {{SESSION_ID}}, {{SESSION_UUID}}, {{UUID}}, {{UUID_HEX}}, {{TIMESTAMP}}, {{ISO8601}}, {{API_KEY}}</string>
     <string name="provider_headers_name">Header Name</string>
     <string name="provider_headers_name_hint">e.g. Authorization</string>
     <string name="provider_headers_value">Value</string>

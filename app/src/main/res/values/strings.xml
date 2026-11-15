@@ -1677,7 +1677,7 @@
     <string name="provider_full_url">完整 URL</string>
     <string name="provider_full_url_desc">Base URL 即完整请求地址，不自动拼接默认路径</string>
     <string name="provider_headers_title">自定义请求头</string>
-    <string name="provider_headers_desc">完全覆盖该供应商请求的同名默认头</string>
+    <string name="provider_headers_desc">完全覆盖该供应商请求的同名默认头。可用占位符：{{SESSION_ID}}、{{SESSION_UUID}}、{{UUID}}、{{UUID_HEX}}、{{TIMESTAMP}}、{{ISO8601}}、{{API_KEY}}</string>
     <string name="provider_headers_name">Header 名</string>
     <string name="provider_headers_name_hint">例如 Authorization</string>
     <string name="provider_headers_value">值</string>

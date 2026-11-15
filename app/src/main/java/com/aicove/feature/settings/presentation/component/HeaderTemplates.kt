@@ -3,9 +3,13 @@ package com.aicove.feature.settings.presentation.component
 /**
  * 自定义请求头的内置模板。
  *
- * 只收录「每次请求都相同、与账号无关」的静态标识头。会话 id、匿名用户 id、账号 id、
- * attestation、stainless 运行时指纹这类由客户端运行时动态生成或与账号绑定的头不在其中
- * —— 硬编码它们只会伪造出错误身份，服务端一眼就能看出对不上。
+ * 静态标识头直接写值；每次请求都会变的字段用占位符，由 `resolveCustomHeaders`
+ * 在发请求时动态生成（同一请求内多个头共用同一个值，保证彼此对得上）：
+ *
+ * - `{{SESSION_UUID}}` 由会话 id 稳定派生，同一会话内固定
+ * - `{{UUID}}` / `{{UUID_HEX}}` 每次请求随机
+ * - `{{TIMESTAMP}}` / `{{ISO8601}}` 当前时间
+ * - `{{RANDOM_8}}` / `{{RANDOM_16}}` 随机十六进制串
  *
  * 版本号跟随各客户端当前公开发布值，用户可在弹窗里直接改。
  */
@@ -19,14 +23,17 @@ internal data class HeaderTemplate(
 
 internal object HeaderTemplates {
 
-    /** Codex CLI（openai/codex）。默认头只有 originator 与 User-Agent。 */
+    /** Codex CLI（openai/codex）。 */
     private val CODEX = HeaderTemplate(
         id = "codex",
         label = "Codex CLI",
-        description = "OpenAI Codex CLI 的客户端标识，中转站常按此区分 Codex 渠道",
+        description = "OpenAI Codex CLI 的客户端标识与请求追踪头",
         headers = listOf(
             "originator" to "codex_cli_rs",
-            "User-Agent" to "codex_cli_rs/0.58.0 (Linux 6.1.0; x86_64) reqwest/0.12"
+            "User-Agent" to "codex_cli_rs/0.58.0 (Linux 6.1.0; x86_64) reqwest/0.12",
+            "session-id" to "{{SESSION_UUID}}",
+            "x-client-request-id" to "{{UUID}}",
+            "x-codex-window-id" to "{{UUID}}"
         )
     )
 
@@ -34,9 +41,11 @@ internal object HeaderTemplates {
     private val DSH = HeaderTemplate(
         id = "dsh",
         label = "DeepSeek Harness",
-        description = "DeepSeek Harness 的应用标识（product/version (+url) 形式）",
+        description = "DeepSeek Harness 的应用标识与会话身份",
         headers = listOf(
-            "user-agent" to "deepseek-harness/0.1.0 (+https://github.com/deepseek-ai/deepseek-harness)"
+            "user-agent" to "deepseek-harness/0.1.0 (+https://github.com/deepseek-ai/deepseek-harness)",
+            "x-deepseek-harness-user-id" to "{{SESSION_UUID}}",
+            "x-deepseek-harness-session-id" to "{{SESSION_UUID}}"
         )
     )
 
@@ -49,7 +58,8 @@ internal object HeaderTemplates {
             "User-Agent" to "claude-cli/2.1.92 (external, cli)",
             "anthropic-version" to "2023-06-01",
             "anthropic-beta" to "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
-            "x-app" to "cli"
+            "x-app" to "cli",
+            "x-client-request-id" to "{{UUID}}"
         )
     )
 
