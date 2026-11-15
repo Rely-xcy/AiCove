@@ -3,6 +3,7 @@ package com.aicove.feature.workspace.domain.remote.agent
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import com.aicove.feature.workspace.domain.FileEntry
+import com.aicove.feature.workspace.domain.FileReadTooLargeException
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -78,6 +79,25 @@ class RemoteAgentFileAccess(
         }
         return call("read", AgentRequestParams(path = abs(path), offset = 0, len = MAX_READ_BYTES)).body
     }
+
+    override fun readBytes(path: String, maxBytes: Long): ByteArray {
+        val size = fileSizeOrNull(path)
+        if (size != null && size > maxBytes) throw FileReadTooLargeException(maxBytes)
+        // agent 单次 read 的上限比调用方允许的还小时，退回 SFTP（它自带流式限读）。
+        if (size != null && size > MAX_READ_BYTES) {
+            FileLogger.d(TAG, "文件过大(${size}B)，readBytes(max) 退回 SFTP: $path")
+            return delegate.readBytes(path, maxBytes)
+        }
+        val len = minOf(MAX_READ_BYTES.toLong(), maxBytes).toInt()
+        return call("read", AgentRequestParams(path = abs(path), offset = 0, len = len)).body
+    }
+
+    /**
+     * agent 协议没有 realpath，交给同一个远端的 SFTP 后端解析：
+     * 两边看到的是同一套文件系统，解析结果一致。
+     */
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        delegate.resolvePath(path, followFinalLink)
 
     override fun exists(path: String): Boolean = statOrNull(path) != null
 
