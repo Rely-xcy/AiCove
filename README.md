@@ -14,16 +14,6 @@
   <a href="https://github.com/Rely-xcy/AiCove/releases"><img src="https://img.shields.io/github/v/release/Rely-xcy/AiCove?display_name=tag&include_prereleases" alt="Latest Release" /></a>
 </p>
 
-## 关于本仓库
-
-AiCove 是 [AiCode](https://github.com/jieapi/aicode) 的独立分支（fork）：上游的全部功能、文档与设计都在这里复用，本仓库在其基础上做自己的品牌与调整。上游代码以 GPL-3.0 授权，本仓库同样遵循 GPL-3.0，并保留原作者的版权与许可声明。
-
-## 关于开源协议的声明
-
-近期发现，某闭源商业 App 大量使用了 AiCode 的代码及静态资源，甚至保留了本项目的类名与相关标识，却未遵守本项目的开源协议。与此同时，其开发者声称从未听说过 AiCode。
-
-**AiCode 允许在遵守 [GPL-3.0](LICENSE) 的前提下进行商业使用。** 我们反对的不是商业化，而是使用本项目代码后，以闭源形式分发衍生作品，且未履行保留版权与许可声明、按 GPL-3.0 授权及提供对应源代码等义务的行为。开源不等于放弃版权，请尊重开源协议与开发者的劳动成果。
-
 <p align="center">
   <table>
     <tr>
@@ -125,4 +115,4 @@ AiCove 按「现状」提供，仅供学习、研究与合法的软件开发用�
 
 ## 开源协议
 
-本项目基于 [GPL-3.0](LICENSE) 协议开源。
+本项目基于 [GPL-3.0](LICENSE) 协议开源。部分代码源自 [AiCode](https://github.com/jieapi/aicode)（同为 GPL-3.0），原作者的版权与许可声明完整保留在 [LICENSE](LICENSE) 中。

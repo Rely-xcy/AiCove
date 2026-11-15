@@ -14,16 +14,6 @@
   <a href="https://github.com/Rely-xcy/AiCove/releases"><img src="https://img.shields.io/github/v/release/Rely-xcy/AiCove?display_name=tag&include_prereleases" alt="Latest Release" /></a>
 </p>
 
-## About this repository
-
-AiCove is an independent fork of [AiCode](https://github.com/jieapi/aicode): the upstream features, docs and design are reused here, and this repository adds its own branding and adjustments. Upstream code is licensed under GPL-3.0; this repository follows the same license and keeps the original authors' copyright and license notices.
-
-## Statement on Open-Source License Compliance
-
-We recently discovered that a closed-source commercial app makes extensive use of AiCode's code and static assets, even retaining class names and other identifiers from this project, without complying with its open-source license. Meanwhile, its developer claims never to have heard of AiCode.
-
-**AiCode permits commercial use under the terms of [GPL-3.0](LICENSE).** Our objection is not to commercialization, but to distributing derivative works as closed-source software without fulfilling obligations such as preserving copyright and license notices, licensing those works under GPL-3.0, and providing the corresponding source code. Open source does not mean giving up copyright. Please respect the license and the work of open-source developers.
-
 <p align="center">
   <table>
     <tr>
@@ -125,4 +115,4 @@ If you do not agree with this disclaimer, please stop using the software and uni
 
 ## License
 
-This project is licensed under [GPL-3.0](LICENSE).
+This project is licensed under [GPL-3.0](LICENSE). Some code originates from [AiCode](https://github.com/jieapi/aicode), also licensed under GPL-3.0; the original authors' copyright and license notices are preserved in [LICENSE](LICENSE).
