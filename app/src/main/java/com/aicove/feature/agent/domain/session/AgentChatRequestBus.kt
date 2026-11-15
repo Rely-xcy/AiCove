@@ -3,6 +3,7 @@ package com.aicove.feature.agent.domain.session
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** 插件发起的会话操作；由聊天页的 ViewModel 消费并转成普通用户轮次或 UI 动作。 */
 sealed interface AgentChatRequest {
@@ -69,6 +70,15 @@ class AgentChatRequestBus @Inject constructor() {
     }
 
     suspend fun receive(): AgentChatRequest = channel.receive()
+
+    /**
+     * 取一条请求；[timeoutMs] 内没有请求就返回 null。
+     *
+     * 供消费循环用：无条件挂起的 [receive] 在单测的 runBlocking 里会连同子协程一起被等待，
+     * 永不结束的循环直接把测试挂死。带超时返回 null 后由调用方检查 isActive 退出。
+     */
+    suspend fun receiveOrNull(timeoutMs: Long): AgentChatRequest? =
+        withTimeoutOrNull(timeoutMs) { channel.receive() }
 
     private companion object {
         const val MAX_QUEUED_REQUESTS = 64

@@ -125,6 +125,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -1359,16 +1360,22 @@ class AIAgentViewModel @Inject constructor(
 
         /** goal 自主循环连续空回合阈值：达到即置 BLOCKED（借鉴 Codex 的空响应熔断）。 */
         const val MAX_GOAL_EMPTY_TURNS = 3
+
+        /** 插件会话请求的轮询间隔：让消费循环可被取消，不在单测里永久挂起。 */
+        const val POLL_TIMEOUT_MS = 500L
     }
 
     init {
         // 插件通过宿主 API 创建会话后，发送消息/停止/切换仍交给聊天页执行，
         // 复用这里的授权、运行状态、通知与队列逻辑。
         agentChatRequestBus.attach(chatRequestConsumerId)
-        viewModelScope.launch {
+        // 显式指定 dispatcher：默认继承 viewModelScope 的 Main，在单测里 Main 被
+        // Dispatchers.setMain 接管后，这个永不结束的消费循环会被 runBlocking 一并等待，
+        // 测试直接挂死（CI 实测卡在 Run unit tests 三小时）。带超时轮询让循环可被取消。
+        viewModelScope.launch(Dispatchers.Default) {
             try {
-                while (true) {
-                    val request = agentChatRequestBus.receive()
+                while (isActive) {
+                    val request = agentChatRequestBus.receiveOrNull(POLL_TIMEOUT_MS) ?: continue
                     try {
                         handleAgentChatRequest(request)
                     } catch (e: CancellationException) {
