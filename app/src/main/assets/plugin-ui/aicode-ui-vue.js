@@ -1,5 +1,5 @@
 /*
- * AiCode Vue WebView 组件库。
+ * AiCove Vue WebView 组件库。
  *
  * 依赖 vue.global.prod.js 暴露的全局 Vue；样式来自 /__aicode/ui.css 与 theme.css，
  * 与设置页 Compose 组件同一套尺寸和排版。用法：

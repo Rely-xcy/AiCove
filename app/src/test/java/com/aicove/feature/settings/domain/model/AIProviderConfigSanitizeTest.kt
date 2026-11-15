@@ -72,13 +72,13 @@ class AIProviderConfigSanitizeTest {
     @Test
     fun customHeaders_trimKeysStripLineBreaksAndDropEmptyKeys() {
         val sanitized = config().copy(customHeaders = mapOf(
-            " User-Agent " to " AiCode/1.0 (Android)\n",
+            " User-Agent " to " AiCove/1.0 (Android)\n",
             "X-Session" to " sk-abc \n",
             "  " to "ignored"
         )).sanitized()
 
         assertEquals(
-            mapOf("User-Agent" to "AiCode/1.0 (Android)", "X-Session" to "sk-abc"),
+            mapOf("User-Agent" to "AiCove/1.0 (Android)", "X-Session" to "sk-abc"),
             sanitized.customHeaders
         )
     }

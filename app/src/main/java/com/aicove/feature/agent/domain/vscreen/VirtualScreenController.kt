@@ -106,7 +106,7 @@ class VirtualScreenController @Inject constructor(
         if (!VscreenAccessibilityBridge.isReady) {
             return Result.failure(
                 IllegalStateException(
-                    "无障碍服务未开启：到「设置 → 无障碍」开启「AiCode 虚拟屏读屏」后重试；或改用 mode=screenshot。"
+                    "无障碍服务未开启：到「设置 → 无障碍」开启「AiCove 虚拟屏读屏」后重试；或改用 mode=screenshot。"
                 )
             )
         }

@@ -455,7 +455,7 @@ private fun PluginRow(
 
 /**
  * 插件详情与配置页面：
- * 采用 SegmentedTabs 分段控件，将【插件管理（AiCode 固定配置）】与【插件配置（WebView 专属配置页面）】清晰分离，
+ * 采用 SegmentedTabs 分段控件，将【插件管理（AiCove 固定配置）】与【插件配置（WebView 专属配置页面）】清晰分离，
  * 若插件未声明专属配置页面（configPage）则直接全屏展示原生管理页面，无缝融入 App 主题。
  */
 @Composable
@@ -545,7 +545,7 @@ internal fun PluginDetailSection(
         }
 
         if (!hasConfigPage || selectedTab == 0) {
-            // Tab 0: AiCode 固定配置与管理页面
+            // Tab 0: AiCove 固定配置与管理页面
             PluginNativeConfigContent(
                 plugin = plugin,
                 languageTag = languageTag,

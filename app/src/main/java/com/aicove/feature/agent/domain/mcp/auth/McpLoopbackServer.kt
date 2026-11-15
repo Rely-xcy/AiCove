@@ -109,11 +109,11 @@ class McpLoopbackServer(
 
     private fun resultHtml(error: String?): String {
         val message = if (error.isNullOrBlank()) {
-            "Authorization complete. You can return to AiCode.<br>授权完成，可以返回 AiCode。"
+            "Authorization complete. You can return to AiCove.<br>授权完成，可以返回 AiCove。"
         } else {
-            "Authorization failed: $error<br>授权失败，请返回 AiCode 重试。"
+            "Authorization failed: $error<br>授权失败，请返回 AiCove 重试。"
         }
-        return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>AiCode</title></head>" +
+        return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>AiCove</title></head>" +
             "<body style=\"font-family:sans-serif;padding:24px;line-height:1.6\">" +
             "<h3>$message</h3></body></html>"
     }

@@ -194,7 +194,7 @@
     <!-- Storage page -->
     <string name="settings_storage">Storage</string>
     <string name="storage_refresh">Rescan</string>
-    <string name="storage_total_title">Used by AiCode</string>
+    <string name="storage_total_title">Used by AiCove</string>
     <string name="storage_scanning">Calculating…</string>
     <string name="storage_device_free">%1$s free of %2$s</string>
     <string name="storage_section_breakdown">Breakdown</string>
@@ -426,7 +426,7 @@
     <string name="credential_auto_inject_title">Auto-inject credentials</string>
     <string name="credential_auto_inject_hint">Sync git credentials saved in the app to this remote server, effective only for repositories under the current workspace root. Does not affect your manual git usage on the server.</string>
     <string name="credential_auto_inject_prompt_title">Auto-inject git credentials?</string>
-    <string name="credential_auto_inject_prompt_body">Allow AiCode to sync git credentials saved in the app to this remote server? It only applies to repositories under the current workspace root and will not modify the server\'s global git config.</string>
+    <string name="credential_auto_inject_prompt_body">Allow AiCove to sync git credentials saved in the app to this remote server? It only applies to repositories under the current workspace root and will not modify the server\'s global git config.</string>
     <string name="credential_auto_inject_enable">Enable</string>
     <string name="common_rename">Rename</string>
     <string name="common_hide">Hide</string>
@@ -576,10 +576,10 @@
     <string name="about_update_verify_not_newer">Package version is not newer than the installed one</string>
     <string name="about_update_install_failed">No app available to install packages</string>
 
-    <string name="agreement_title">Welcome to AiCode</string>
+    <string name="agreement_title">Welcome to AiCove</string>
     <string name="agreement_terms">User Agreement</string>
     <string name="agreement_privacy">Privacy Policy</string>
-    <string name="agreement_notice_prefix">"Before using AiCode, please read and agree to the "</string>
+    <string name="agreement_notice_prefix">"Before using AiCove, please read and agree to the "</string>
     <string name="agreement_terms_link">User Agreement</string>
     <string name="agreement_notice_conjunction">" and "</string>
     <string name="agreement_privacy_link">Privacy Policy</string>
@@ -1056,7 +1056,7 @@
     <!-- Credential List -->
     <string name="credential_empty_hint">No credentials yet, tap + to add</string>
     <string name="credential_empty_title">Keys not yet in hand</string>
-    <string name="credential_empty_desc">Tap + in the top right to sign in with GitHub or add an access token. AiCode then authenticates pushes and pulls automatically</string>
+    <string name="credential_empty_desc">Tap + in the top right to sign in with GitHub or add an access token. AiCove then authenticates pushes and pulls automatically</string>
 
     <!-- Credential Add / Quick Login -->
     <string name="credential_add_sheet_title">Add Credential</string>
@@ -1089,15 +1089,15 @@
     <string name="credential_device_waiting_desc">Credentials will be bound and saved automatically once authorized</string>
     <string name="credential_device_success_title">Authorization Successful</string>
     <string name="credential_device_success">Signed in as %1$s and credential saved</string>
-    <string name="credential_device_install_required">Signed in as %1$s. You still need to install AiCode on your repositories before pushing/pulling code.</string>
+    <string name="credential_device_install_required">Signed in as %1$s. You still need to install AiCove on your repositories before pushing/pulling code.</string>
     <string name="credential_device_install_now">Install</string>
     <string name="credential_device_install_later">Later</string>
     <string name="credential_device_repos_granted">Authorized repositories (%1$d)</string>
     <string name="credential_device_repos_more">…and %1$d more</string>
-    <string name="credential_device_readonly">This authorization is read-only, so pushes will be rejected. Switch to a personal access token (PAT), or change AiCode\'s repository permission to Read and write on GitHub.</string>
-    <string name="vscreen_accessibility_service_label">AiCode screen reader</string>
-    <string name="vscreen_accessibility_service_desc">Only used by AiCode to read UI controls while running automated tests on a virtual display (exports the node tree for that display; read-only, never intercepts input). Screenshots still work when this is off.</string>
-    <string name="credential_device_install_unknown">Could not confirm whether AiCode is installed on your repositories (query restricted). If pushes fail, switch to a personal access token (PAT).</string>
+    <string name="credential_device_readonly">This authorization is read-only, so pushes will be rejected. Switch to a personal access token (PAT), or change AiCove\'s repository permission to Read and write on GitHub.</string>
+    <string name="vscreen_accessibility_service_label">AiCove screen reader</string>
+    <string name="vscreen_accessibility_service_desc">Only used by AiCove to read UI controls while running automated tests on a virtual display (exports the node tree for that display; read-only, never intercepts input). Screenshots still work when this is off.</string>
+    <string name="credential_device_install_unknown">Could not confirm whether AiCove is installed on your repositories (query restricted). If pushes fail, switch to a personal access token (PAT).</string>
     <string name="credential_device_failed_title">Authorization Incomplete</string>
     <string name="credential_device_failed">Sign-in failed: %1$s</string>
     <string name="credential_device_expired">Device code expired, please retry</string>
@@ -2022,7 +2022,7 @@
     <string name="crash_restart">Restart app</string>
     <string name="crash_exit">Exit app</string>
     <string name="crash_log_hint">Full log files at: %1$s</string>
-    <string name="crash_report_title">AiCode Crash Report</string>
+    <string name="crash_report_title">AiCove Crash Report</string>
     <string name="crash_report_time">Time: %1$s</string>
     <string name="crash_report_version">Version: %1$s</string>
     <string name="crash_report_device">Device: %1$s</string>
@@ -2275,7 +2275,7 @@
     <string name="plugins_import_failed_title">Can\'t import this plugin</string>
     <string name="plugins_import_failed_more">%1$d more problems</string>
     <string name="plugins_preview_title">Install plugin</string>
-    <string name="plugins_preview_local_notice">This package was imported from a local file, so AiCode can\'t verify where it came from. Only install plugins you trust.</string>
+    <string name="plugins_preview_local_notice">This package was imported from a local file, so AiCove can\'t verify where it came from. Only install plugins you trust.</string>
     <string name="plugins_preview_behavior_notice">Skills and sub-agents are instructions that shape how the AI behaves. Their names and descriptions are also added to the system prompt.</string>
     <string name="plugins_preview_runtime_notice">This plugin contains runtime code. AI tools run in an isolated JavaScript sandbox, and each tool call still needs your approval.</string>
     <string name="plugins_preview_mcp_notice">This plugin registers MCP servers. HTTP servers use the network, and stdio servers start processes in the container or on the remote host. Only install it if you trust the author.</string>
@@ -2312,7 +2312,7 @@
     <string name="plugins_enable_hint">When off, the skills and sub-agents it provides stop working.</string>
     <string name="plugins_hint_needs_permission">A required permission hasn\'t been granted, so the plugin has no effect yet. Turn on the matching permission below.</string>
     <string name="plugins_hint_damaged">The plugin files are damaged or missing, so it can\'t be enabled. Uninstall it and import it again.</string>
-    <string name="plugins_hint_incompatible">This plugin isn\'t compatible with this version of AiCode, so it can\'t be enabled.</string>
+    <string name="plugins_hint_incompatible">This plugin isn\'t compatible with this version of AiCove, so it can\'t be enabled.</string>
     <string name="plugins_section_summary">About</string>
     <string name="plugins_section_info">Details</string>
     <string name="plugins_section_contents">What it provides</string>
@@ -2342,7 +2342,7 @@
     <string name="plugins_error_unsupported_field">Field not supported by this version: %1$s</string>
     <string name="plugins_error_unsupported_contribution">Content type not supported by this version yet: %1$s</string>
     <string name="plugins_error_unsupported_permission">Permission not supported by this version yet: %1$s</string>
-    <string name="plugins_error_api_incompatible">The plugin requires plugin API %1$s, which this version of AiCode doesn\'t provide.</string>
+    <string name="plugins_error_api_incompatible">The plugin requires plugin API %1$s, which this version of AiCove doesn\'t provide.</string>
     <string name="plugins_error_duplicate_id">Duplicate ID: %1$s</string>
     <string name="plugins_error_scope_mismatch">The permission scope doesn\'t match what the plugin provides: %1$s</string>
     <string name="plugins_error_file_missing">A file referenced by the manifest is missing: %1$s</string>

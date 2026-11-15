@@ -426,7 +426,7 @@
     <string name="credential_auto_inject_title">自动注入凭证</string>
     <string name="credential_auto_inject_hint">把应用中保存的 git 凭据同步到远程服务器，仅对当前工作区根目录下的仓库生效，不影响你在服务器上手动使用 git</string>
     <string name="credential_auto_inject_prompt_title">自动注入 git 凭证？</string>
-    <string name="credential_auto_inject_prompt_body">是否让 AiCode 把应用中保存的 git 凭据同步到该远程服务器？仅对当前工作区根目录下的仓库生效，不会改动服务器的全局 git 配置。</string>
+    <string name="credential_auto_inject_prompt_body">是否让 AiCove 把应用中保存的 git 凭据同步到该远程服务器？仅对当前工作区根目录下的仓库生效，不会改动服务器的全局 git 配置。</string>
     <string name="credential_auto_inject_enable">开启</string>
     <string name="common_rename">重命名</string>
     <string name="common_hide">隐藏</string>
@@ -576,7 +576,7 @@
     <string name="about_update_verify_not_newer">安装包版本不高于当前版本</string>
     <string name="about_update_install_failed">没有可用的安装程序</string>
 
-    <string name="agreement_title">欢迎使用 AiCode</string>
+    <string name="agreement_title">欢迎使用 AiCove</string>
     <string name="agreement_terms">用户协议</string>
     <string name="agreement_privacy">隐私政策</string>
     <string name="agreement_notice_prefix">使用前，请阅读并同意</string>
@@ -1089,15 +1089,15 @@
     <string name="credential_device_waiting_desc">完成授权后将自动绑定并保存凭据</string>
     <string name="credential_device_success_title">授权成功</string>
     <string name="credential_device_success">已成功关联账号 %1$s 并保存凭据</string>
-    <string name="credential_device_install_required">已登录为 %1$s。还需把 AiCode 安装到你的仓库，之后才能推送/拉取代码。</string>
+    <string name="credential_device_install_required">已登录为 %1$s。还需把 AiCove 安装到你的仓库，之后才能推送/拉取代码。</string>
     <string name="credential_device_install_now">去安装</string>
     <string name="credential_device_install_later">稍后</string>
     <string name="credential_device_repos_granted">已授权仓库（%1$d 个）</string>
     <string name="credential_device_repos_more">…另有 %1$d 个</string>
-    <string name="credential_device_readonly">当前授权只有只读权限，推送代码会被拒绝。可改用个人令牌（PAT），或在 GitHub 上把 AiCode 的仓库权限改为 Read and write。</string>
-    <string name="vscreen_accessibility_service_label">AiCode 虚拟屏读屏</string>
-    <string name="vscreen_accessibility_service_desc">仅供 AiCode 在虚拟屏上做自动化测试时读取界面控件（按虚拟屏导出节点树，只读取、不拦截输入）。不开启时虚拟屏仍可用截图观察。</string>
-    <string name="credential_device_install_unknown">暂时无法确认 AiCode 是否已安装到你的仓库（查询受限）。若推送失败，可改用个人令牌（PAT）。</string>
+    <string name="credential_device_readonly">当前授权只有只读权限，推送代码会被拒绝。可改用个人令牌（PAT），或在 GitHub 上把 AiCove 的仓库权限改为 Read and write。</string>
+    <string name="vscreen_accessibility_service_label">AiCove 虚拟屏读屏</string>
+    <string name="vscreen_accessibility_service_desc">仅供 AiCove 在虚拟屏上做自动化测试时读取界面控件（按虚拟屏导出节点树，只读取、不拦截输入）。不开启时虚拟屏仍可用截图观察。</string>
+    <string name="credential_device_install_unknown">暂时无法确认 AiCove 是否已安装到你的仓库（查询受限）。若推送失败，可改用个人令牌（PAT）。</string>
     <string name="credential_device_failed_title">授权未能完成</string>
     <string name="credential_device_failed">登录失败：%1$s</string>
     <string name="credential_device_expired">设备码已过期，请重试</string>
@@ -2021,7 +2021,7 @@
     <string name="crash_restart">重启应用</string>
     <string name="crash_exit">退出应用</string>
     <string name="crash_log_hint">完整日志文件位置：%1$s</string>
-    <string name="crash_report_title">AiCode 崩溃报告</string>
+    <string name="crash_report_title">AiCove 崩溃报告</string>
     <string name="crash_report_time">时间：%1$s</string>
     <string name="crash_report_version">版本：%1$s</string>
     <string name="crash_report_device">设备：%1$s</string>
@@ -2274,7 +2274,7 @@
     <string name="plugins_import_failed_title">无法导入这个插件</string>
     <string name="plugins_import_failed_more">还有 %1$d 个问题</string>
     <string name="plugins_preview_title">安装插件</string>
-    <string name="plugins_preview_local_notice">这是从本地文件导入的插件包，AiCode 无法核验它的来源。请只安装你信任的插件。</string>
+    <string name="plugins_preview_local_notice">这是从本地文件导入的插件包，AiCove 无法核验它的来源。请只安装你信任的插件。</string>
     <string name="plugins_preview_behavior_notice">技能和子代理的内容会作为指令影响 AI 的行为，它们的名称与描述还会进入系统提示词。</string>
     <string name="plugins_preview_runtime_notice">这个插件包含运行时代码：AI 工具会在独立的 JavaScript 沙箱中执行，工具调用仍需要你授权。</string>
     <string name="plugins_preview_mcp_notice">这个插件会注册 MCP 服务器：HTTP 服务器会联网，stdio 服务器会在容器或远端启动进程。请确认你信任插件作者。</string>
@@ -2311,7 +2311,7 @@
     <string name="plugins_enable_hint">关闭后，它提供的技能和子代理都不再生效。</string>
     <string name="plugins_hint_needs_permission">必要权限还没有授予，插件暂不生效。请在下方打开对应权限。</string>
     <string name="plugins_hint_damaged">插件文件已损坏或丢失，无法启用。请卸载后重新导入。</string>
-    <string name="plugins_hint_incompatible">这个插件与当前版本的 AiCode 不兼容，无法启用。</string>
+    <string name="plugins_hint_incompatible">这个插件与当前版本的 AiCove 不兼容，无法启用。</string>
     <string name="plugins_section_summary">简介</string>
     <string name="plugins_section_info">信息</string>
     <string name="plugins_section_contents">提供的内容</string>
@@ -2341,7 +2341,7 @@
     <string name="plugins_error_unsupported_field">此版本不支持的字段：%1$s</string>
     <string name="plugins_error_unsupported_contribution">此版本暂不支持的内容类型：%1$s</string>
     <string name="plugins_error_unsupported_permission">此版本暂不支持的权限：%1$s</string>
-    <string name="plugins_error_api_incompatible">插件要求的插件接口版本（%1$s）与当前 AiCode 不兼容。</string>
+    <string name="plugins_error_api_incompatible">插件要求的插件接口版本（%1$s）与当前 AiCove 不兼容。</string>
     <string name="plugins_error_duplicate_id">重复的 ID：%1$s</string>
     <string name="plugins_error_scope_mismatch">权限范围与提供的内容不一致：%1$s</string>
     <string name="plugins_error_file_missing">清单引用的文件不存在：%1$s</string>

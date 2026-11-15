@@ -28,7 +28,7 @@ class BackupCryptoTest {
 
     @Test
     fun encryptStream_and_decryptStream_roundTrip() {
-        val plain = "AiCode encrypted backup payload".toByteArray(Charsets.UTF_8)
+        val plain = "AiCove encrypted backup payload".toByteArray(Charsets.UTF_8)
         val encryptedBytes = encrypt(plain)
 
         assertTrue(encryptedBytes.size > BackupCrypto.SALT_LEN + BackupCrypto.IV_LEN)

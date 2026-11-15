@@ -1857,10 +1857,10 @@ internal val OMITTED_CONTENT_PLACEHOLDER = Regex(
  * 判据必须落在开头而不是「值里含这句话」——本仓库自己的源码与测试就带着这些字样，
  * 「包含」会把对这类文件的正常编辑全拦掉。
  */
-internal const val BULK_EXCERPT_HEAD = "[AiCode 上下文摘录·非完整正文]"
+internal const val BULK_EXCERPT_HEAD = "[AiCove 上下文摘录·非完整正文]"
 
 /** 摘录中段省略标记的前缀；模型只抄走这一段（不含首行哨兵）时同样按占位形态拦下。 */
-internal const val BULK_EXCERPT_GAP_PREFIX = "…[AiCode 摘录省略"
+internal const val BULK_EXCERPT_GAP_PREFIX = "…[AiCove 摘录省略"
 
 /** 摘录的预算上限：比一句占位说明大得多（那种约 60 字符），容得下一段可读的头尾。 */
 private const val EXCERPT_MAX_CHARS = 1_600

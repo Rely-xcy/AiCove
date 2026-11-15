@@ -309,7 +309,7 @@ class BackupManagerImpl @Inject constructor(
                     // 与 restoreFromTar 同一判据：预览说“能导入”就必须真的能导入。
                     val first = entry?.name
                     if (first != FILE_METADATA && first != FILE_LEGACY_SNAPSHOT) {
-                        error("不是有效的 AiCode 备份文件：缺少 metadata.json")
+                        error("不是有效的 AiCove 备份文件：缺少 metadata.json")
                     }
                     while (entry != null) {
                         // 把整个 tar 走完：一是拿到全部条目的声明大小做恢复前空间预检，
@@ -325,7 +325,7 @@ class BackupManagerImpl @Inject constructor(
                         entry = tar.nextEntry
                     }
                     if (!metadataSeen && first != FILE_LEGACY_SNAPSHOT) {
-                        error("不是有效的 AiCode 备份文件：缺少 metadata.json")
+                        error("不是有效的 AiCove 备份文件：缺少 metadata.json")
                     }
                     ImportPreview(workspaces, uncompressedBytes)
                 }
@@ -345,7 +345,7 @@ class BackupManagerImpl @Inject constructor(
                 if (pw != null) {
                     "备份文件已损坏，或口令与备份文件不匹配"
                 } else {
-                    "不是有效的 AiCode 备份文件；如果这是加密备份，请输入导出口令"
+                    "不是有效的 AiCove 备份文件；如果这是加密备份，请输入导出口令"
                 },
                 e
             )
@@ -1213,7 +1213,7 @@ class BackupManagerImpl @Inject constructor(
             // 先校验格式再动数据：metadata 缺失或排在后面时，已写入的会话与文件会留在本机，
             // 用户只得到一个失败提示，残留却不回滚。本应用导出恒把 metadata 写在第一条。
             if (entry == null || (entry.name != FILE_METADATA && entry.name != FILE_LEGACY_SNAPSHOT)) {
-                error("不是有效的 AiCode 备份文件：缺少 metadata.json")
+                error("不是有效的 AiCove 备份文件：缺少 metadata.json")
             }
             while (entry != null) {
                 when (entry.name) {
@@ -1288,7 +1288,7 @@ class BackupManagerImpl @Inject constructor(
             }
             val meta = metadata ?: run {
                 FileLogger.e(TAG, "导入失败：tar 中缺少 metadata.json")
-                error("不是有效的 AiCode 备份文件：缺少 metadata.json")
+                error("不是有效的 AiCove 备份文件：缺少 metadata.json")
             }
             FileLogger.i(TAG, "tar 解析完成，开始还原元数据段")
             return stats + restoreMeta(meta, segmentedSecrets)
