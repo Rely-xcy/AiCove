@@ -58,6 +58,7 @@ import com.aicove.core.ui.SwipeToDeleteRow
 import com.aicove.feature.agent.domain.shizuku.ShizukuState
 import com.aicove.feature.plugin.domain.InstalledPlugin
 import com.aicove.feature.plugin.domain.PluginHookModes
+import com.aicove.feature.plugin.domain.PluginIcon
 import com.aicove.feature.plugin.domain.PluginMcpServer
 import com.aicove.feature.plugin.domain.PluginSettingsPage
 import com.aicove.feature.plugin.domain.PluginStatus
@@ -303,13 +304,11 @@ private fun PluginRow(
                         shape = RoundedCornerShape(8.dp)
                     )
             ) {
-                Icon(
-                    imageVector = FeatherIcons.Package,
-                    contentDescription = null,
+                PluginIconContent(
+                    icon = plugin.content.icon,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .align(Alignment.Center)
+                    iconSize = 22.dp,
+                    shape = RoundedCornerShape(8.dp)
                 )
             }
 

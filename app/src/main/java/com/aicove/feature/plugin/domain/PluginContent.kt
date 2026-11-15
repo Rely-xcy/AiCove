@@ -123,7 +123,14 @@ data class PluginShizukuDefinition(
     val purpose: String
 )
 
+/**
+ * 已解析的插件图标：内置图标名或已校验存在的包内位图，两者只会有一个非空。
+ * 清单值以 `.png` / `.webp` 结尾时按包内相对路径处理，其余按内置图标名处理。
+ */
+data class PluginIcon(val name: String? = null, val file: File? = null)
+
 data class PluginContent(
+    val icon: PluginIcon? = null,
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
@@ -151,11 +158,13 @@ object PluginContentLoader {
     const val MAX_SCHEMA_BYTES = 256 * 1024
     const val MAX_RUNTIME_BYTES = 512 * 1024
     const val MAX_MCP_BYTES = 256 * 1024
+    const val MAX_ICON_BYTES = 256 * 1024
 
     private val WHITESPACE = Regex("\\s+")
 
     fun load(dir: File, manifest: PluginManifest): ContentLoadResult {
         val errors = mutableListOf<PluginError>()
+        val icon = manifest.icon?.let { loadIcon(dir, it, errors) }
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
         val workspaceTools = manifest.workspaceTools.map {
@@ -194,6 +203,7 @@ object PluginContentLoader {
         return if (errors.isEmpty()) {
             ContentLoadResult.Ok(
                 PluginContent(
+                    icon = icon,
                     skills = skills,
                     agents = agents,
                     workspaceTools = workspaceTools,
@@ -210,6 +220,21 @@ object PluginContentLoader {
         } else {
             ContentLoadResult.Failed(errors)
         }
+    }
+
+    private fun loadIcon(dir: File, value: String, errors: MutableList<PluginError>): PluginIcon? {
+        if (!PluginManifestParser.isIconFilePath(value)) return PluginIcon(name = value)
+        val file = File(dir, value)
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, value)
+            return null
+        }
+        if (file.length() > MAX_ICON_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "$value: too large")
+            return null
+        }
+        return PluginIcon(file = file)
     }
 
     private fun loadMcp(
