@@ -182,7 +182,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
         messagePersistenceUseCase = mockk(relaxed = true),
         agentChatRequestBus = mockk(relaxed = true) {
             coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
-        }
+        },
         agentRunStateStore = mockk(relaxed = true),
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk<TerminalSessionManager>(relaxed = true).also { m ->

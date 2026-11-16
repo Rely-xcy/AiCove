@@ -150,7 +150,7 @@ class AIAgentViewModelBrowseRefreshTest {
         messagePersistenceUseCase = mockk(relaxed = true),
         agentChatRequestBus = mockk(relaxed = true) {
             coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
-        }
+        },
         agentRunStateStore = mockk(relaxed = true),
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk(relaxed = true) { every { tabFinishedEvents } returns MutableSharedFlow() },
