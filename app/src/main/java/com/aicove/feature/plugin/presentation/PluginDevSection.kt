@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aicove.R
+import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
 import com.aicove.core.ui.AppSwitch
@@ -67,7 +68,8 @@ internal fun DevPluginsPage(
     refreshing: Boolean,
     onRefresh: () -> Unit,
     onOpenDetail: (PluginDevProject) -> Unit,
-    onSetEnabled: (PluginDevProject, Boolean) -> Unit
+    onSetEnabled: (PluginDevProject, Boolean) -> Unit,
+    busyPluginIds: Set<String> = emptySet()
 ) {
     PullToRefreshBox(
         isRefreshing = refreshing,
@@ -103,7 +105,8 @@ internal fun DevPluginsPage(
                             project = project,
                             installed = installed,
                             onClick = { onOpenDetail(project) },
-                            onSetEnabled = { onSetEnabled(project, it) }
+                            onSetEnabled = { onSetEnabled(project, it) },
+                            operationRunning = project.pluginId in busyPluginIds
                         )
                     }
                 }
@@ -117,7 +120,8 @@ private fun DevPluginRow(
     project: PluginDevProject,
     installed: InstalledPlugin?,
     onClick: () -> Unit,
-    onSetEnabled: (Boolean) -> Unit
+    onSetEnabled: (Boolean) -> Unit,
+    operationRunning: Boolean
 ) {
     val languageTag = currentLanguageTag()
     Row(
@@ -132,7 +136,7 @@ private fun DevPluginRow(
                 .size(40.dp)
                 .background(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(Radius.sm)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -140,7 +144,7 @@ private fun DevPluginRow(
                 icon = installed?.content?.icon,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 iconSize = 22.dp,
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(Radius.sm)
             )
         }
 
@@ -181,7 +185,7 @@ private fun DevPluginRow(
         AppSwitch(
             checked = installed?.record?.enabled == true,
             onCheckedChange = onSetEnabled,
-            enabled = project.error == null && (installed == null || installed.status == PluginStatus.OK)
+            enabled = !operationRunning && project.error == null && (installed == null || installed.status == PluginStatus.OK)
         )
 
         Spacer(modifier = Modifier.width(Spacing.xs))
@@ -207,7 +211,8 @@ internal fun PluginDevDetailSection(
     project: PluginDevProject,
     plugins: List<InstalledPlugin>,
     devRootPath: String,
-    onInstall: () -> Unit
+    onInstall: () -> Unit,
+    operationRunning: Boolean = false
 ) {
     val languageTag = currentLanguageTag()
     val installed = plugins.firstOrNull { it.id == project.pluginId }
@@ -279,14 +284,15 @@ internal fun PluginDevDetailSection(
 
         Button(
             onClick = onInstall,
-            enabled = project.error == null,
+            enabled = project.error == null && !operationRunning,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = Spacing.lg)
         ) {
             Text(
                 stringResource(
-                    if (installed != null) R.string.plugins_dev_reload
+                    if (operationRunning) R.string.plugins_operation_working
+                    else if (installed != null) R.string.plugins_dev_reload
                     else R.string.plugins_dev_install
                 )
             )
@@ -308,7 +314,7 @@ private fun DevHeaderCard(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(Radius.lg),
         color = MaterialTheme.semanticColors.cardSurface
     ) {
         Row(
@@ -322,7 +328,7 @@ private fun DevHeaderCard(
                     .size(48.dp)
                     .background(
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(Radius.mdLarge)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -330,7 +336,7 @@ private fun DevHeaderCard(
                     icon = installed?.content?.icon,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     iconSize = 26.dp,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(Radius.mdLarge)
                 )
             }
             Spacer(modifier = Modifier.width(Spacing.lg))

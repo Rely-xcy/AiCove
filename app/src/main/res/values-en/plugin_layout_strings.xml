@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_layout_settings">Plugin settings</string>
+    <string name="plugin_layout_developer_path">Enable to show the Development tab. Place plugin projects in the development directory: %1$s, then pull down to refresh.</string>
+    <string name="plugin_layout_permissions">Permissions</string>
+    <string name="plugin_layout_update_available">Update available</string>
+    <string name="plugin_layout_update_version">%1$s → %2$s</string>
+</resources>

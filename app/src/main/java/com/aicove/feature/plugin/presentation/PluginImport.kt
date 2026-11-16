@@ -140,20 +140,6 @@ internal fun PluginPreviewSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Notice(stringResource(R.string.plugins_preview_local_notice))
-            Notice(stringResource(R.string.plugins_preview_behavior_notice))
-            if (manifest.runtime != null) {
-                Notice(stringResource(R.string.plugins_preview_runtime_notice))
-            }
-            if (manifest.hooks.isNotEmpty()) {
-                Notice(stringResource(R.string.plugins_preview_hook_notice))
-            }
-            if (manifest.mcp.isNotEmpty()) {
-                Notice(stringResource(R.string.plugins_preview_mcp_notice))
-            }
-            if (manifest.shizuku != null) {
-                Notice(stringResource(R.string.plugins_preview_shizuku_notice))
-            }
             preview.installedVersion?.let { installed ->
                 Notice(
                     stringResource(
@@ -180,6 +166,13 @@ internal fun PluginPreviewSheet(
                     }
                 }
             }
+
+            Notice(stringResource(R.string.plugins_preview_local_notice))
+            Notice(stringResource(R.string.plugins_preview_behavior_notice))
+            if (manifest.runtime != null) Notice(stringResource(R.string.plugins_preview_runtime_notice))
+            if (manifest.hooks.isNotEmpty()) Notice(stringResource(R.string.plugins_preview_hook_notice))
+            if (manifest.mcp.isNotEmpty()) Notice(stringResource(R.string.plugins_preview_mcp_notice))
+            if (manifest.shizuku != null) Notice(stringResource(R.string.plugins_preview_shizuku_notice))
 
             error?.let { error ->
                 Text(

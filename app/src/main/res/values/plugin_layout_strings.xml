@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_layout_settings">插件设置</string>
+    <string name="plugin_layout_developer_path">开启后显示“开发中”页签。将插件项目放入开发目录：%1$s，然后下拉刷新。</string>
+    <string name="plugin_layout_permissions">权限</string>
+    <string name="plugin_layout_update_available">可更新</string>
+    <string name="plugin_layout_update_version">%1$s → %2$s</string>
+</resources>

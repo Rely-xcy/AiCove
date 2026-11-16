@@ -31,6 +31,9 @@
     <string name="plugins_dependencies_prepare">准备依赖</string>
     <string name="plugins_dependencies_preparing">准备中…</string>
     <string name="plugins_dependencies_state_not_saved">依赖状态未能保存，插件可能已被替换或存储不可写，请重新准备依赖。</string>
+    <string name="plugins_store_badge_installed">已安装</string>
+    <string name="plugins_store_badge_update">可更新</string>
+    <string name="plugins_operation_refresh_failed">刷新失败，请稍后重试。</string>
     <string name="plugins_loading">正在加载插件…</string>
     <string name="plugins_operation_working">正在处理…</string>
     <string name="plugins_operation_installed">插件已安装</string>

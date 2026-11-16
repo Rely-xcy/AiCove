@@ -278,6 +278,51 @@ class PluginsViewModelTest {
         coVerify(exactly = 2) { manager.prepareDependencies(ID) }
     }
 
+    @Test
+    fun refresh_whileRunning_ignoresDuplicateAndReleasesIndicator() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        coEvery { manager.refresh() } coAnswers {
+            entered.complete(Unit)
+            release.await()
+        }
+
+        viewModel.refresh()
+        assertTrue(viewModel.refreshing.value)
+        withTimeout(3_000) { entered.await() }
+        viewModel.refresh()
+        release.complete(Unit)
+
+        withTimeout(3_000) { viewModel.refreshing.first { !it } }
+        coVerify(exactly = 1) { manager.refresh() }
+    }
+
+    @Test
+    fun refresh_failureShowsMessageAndAllowsRetry() = runBlocking {
+        coEvery { manager.refresh() } throws IOException("unreadable registry")
+        viewModel.refresh()
+        assertEquals(R.string.plugins_operation_refresh_failed, nextMessage())
+        withTimeout(3_000) { viewModel.refreshing.first { !it } }
+        coEvery { manager.refresh() } just runs
+
+        viewModel.refresh()
+
+        withTimeout(3_000) { viewModel.refreshing.first { !it } }
+        coVerify(exactly = 2) { manager.refresh() }
+    }
+
+    @Test
+    fun developerSwitchForInstalledPluginUsesExistingEnableAction() = runBlocking {
+        coEvery { manager.setEnabled(ID, false) } returns true
+        val project = PluginDevProject("project", ID, "1.0.0", "1.0.0", 0L)
+
+        viewModel.setDevProjectEnabled(project, false)
+
+        assertEquals(R.string.plugins_operation_disabled, nextMessage())
+        awaitIdle()
+        coVerify(exactly = 1) { manager.setEnabled(ID, false) }
+    }
+
     private suspend fun nextMessage(): Int = withTimeout(3_000) { viewModel.operationMessages.first() }
 
     private suspend fun awaitIdle() {

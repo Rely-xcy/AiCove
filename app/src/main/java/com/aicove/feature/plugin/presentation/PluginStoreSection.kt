@@ -24,10 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,8 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -68,7 +64,6 @@ import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsRow
 import com.aicove.feature.settings.presentation.component.openUrl
 import compose.icons.FeatherIcons
-import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Book
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.CloudOff
@@ -117,14 +112,13 @@ private val UnofficialBadgeText: Color
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PluginStoreSection(
+    onOpenDetail: (PluginStoreItem) -> Unit,
     viewModel: PluginStoreViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var selectedItem by remember { mutableStateOf<PluginStoreItem?>(null) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val languageTag = currentLanguageTag()
-    val pageBackground = MaterialTheme.semanticColors.pageBackground
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(viewModel) {
@@ -158,30 +152,12 @@ internal fun PluginStoreSection(
         PullToRefreshBox(
             isRefreshing = state.refreshing,
             onRefresh = viewModel::refresh,
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithContent {
-                    drawContent()
-                    if (selectedItem == null) {
-                        val fadeHeight = Spacing.xl.toPx()
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.5f to pageBackground.copy(alpha = 0.35f),
-                                1f to pageBackground,
-                                startY = size.height - fadeHeight,
-                                endY = size.height
-                            ),
-                            topLeft = Offset(0f, size.height - fadeHeight),
-                            size = androidx.compose.ui.geometry.Size(size.width, fadeHeight)
-                        )
-                    }
-                }
+            modifier = Modifier.fillMaxSize()
         ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
+            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             when {
@@ -237,7 +213,7 @@ internal fun PluginStoreSection(
                                 StorePluginRow(
                                     item = item,
                                     languageTag = languageTag,
-                                    onClick = { selectedItem = item }
+                                    onClick = { onOpenDetail(item) }
                                 )
                             }
                         }
@@ -245,18 +221,6 @@ internal fun PluginStoreSection(
                 }
             }
         }
-        }
-        selectedItem?.let { item ->
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.semanticColors.pageBackground
-            ) {
-                PluginStoreDetailSection(
-                    item = item,
-                    onBack = { selectedItem = null },
-                    viewModel = viewModel
-                )
-            }
         }
     }
 }
@@ -308,6 +272,22 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
+                if (item.installedVersion != null && !item.updateAvailable) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    McpPill(
+                        text = stringResource(R.string.plugins_store_badge_installed),
+                        textColor = MaterialTheme.colorScheme.tertiary,
+                        backgroundColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+                    )
+                }
+                if (item.updateAvailable) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    McpPill(
+                        text = stringResource(R.string.plugins_store_badge_update),
+                        textColor = MaterialTheme.colorScheme.primary,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    )
+                }
                 if (!item.official) {
                     Spacer(modifier = Modifier.width(6.dp))
                     McpPill(
@@ -357,21 +337,6 @@ internal fun PluginStoreDetailSection(
 
     BackHandler(onBack = onBack)
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
-            }
-            Text(
-                text = latest.plugin.name.resolve(languageTag),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -434,7 +399,10 @@ internal fun PluginStoreDetailSection(
             }
             if (installError != null) {
                 Text(
-                    text = storeErrorMessage(installError),
+                    text = listOfNotNull(
+                        storeErrorMessage(installError),
+                        installError.detail?.takeIf { it.isNotBlank() }
+                    ).joinToString("\n"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = Spacing.xs, vertical = Spacing.xs)

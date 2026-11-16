@@ -174,6 +174,11 @@ class PluginsViewModel @Inject constructor(
     private val _dependencyStates = MutableStateFlow<Map<String, PluginDependencyUiState>>(emptyMap())
     val dependencyStates: StateFlow<Map<String, PluginDependencyUiState>> = _dependencyStates.asStateFlow()
 
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    private val _devRefreshing = MutableStateFlow(false)
+    val devRefreshing: StateFlow<Boolean> = _devRefreshing.asStateFlow()
+
     private val _devMode = MutableStateFlow(false)
     val devMode: StateFlow<Boolean> = _devMode.asStateFlow()
 
@@ -274,8 +279,44 @@ class PluginsViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { devSettingsRepository.setEnabled(enabled) }
     }
 
+    fun refresh() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                manager.refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "刷新插件失败", e)
+                operationMessageChannel.send(R.string.plugins_operation_refresh_failed)
+            } finally {
+                _refreshing.value = false
+            }
+        }
+    }
+
     fun refreshDevProjects() {
-        viewModelScope.launch(Dispatchers.IO) { _devProjects.value = scanDevProjects() }
+        if (_devRefreshing.value) return
+        _devRefreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _devProjects.value = scanDevProjects()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "刷新开发插件失败", e)
+                operationMessageChannel.send(R.string.plugins_operation_refresh_failed)
+            } finally {
+                _devRefreshing.value = false
+            }
+        }
+    }
+
+    fun setDevProjectEnabled(project: PluginDevProject, enabled: Boolean) {
+        val installed = manager.plugins.value.firstOrNull { it.id == project.pluginId }
+        if (installed != null) setEnabled(installed.id, enabled)
+        else if (enabled) installDevProject(project)
     }
 
     /** 从开发目录打 zip 后走现有预览流程，安装仍需使用者在预览里确认。 */
