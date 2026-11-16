@@ -159,6 +159,53 @@ class PrepareIntegrationTest(unittest.TestCase):
         self.assertEqual(5, json.loads(cycle.STATE.read_text())['beta_run_number'])
         out.assert_any_call('sha', cycle.git('rev-parse', 'HEAD'))
 
+    def test_counter_from_another_branch_is_not_inherited(self):
+        cycle.STATE.write_text(json.dumps({'schema': 1, 'branch': 'other', 'beta_run_number': 999}))
+        self.assertEqual({}, cycle.load_state())
+        cycle.STATE.write_text(json.dumps({'schema': 1, 'branch': BRANCH, 'beta_run_number': 5}))
+        self.assertEqual(5, cycle.load_state()['beta_run_number'])
+
+    def test_branch_advance_discards_capture_without_commit(self):
+        original_git = cycle.git
+        calls = []
+        def simulated_remote(*args):
+            calls.append(args)
+            if args[0] == 'fetch' or args[0] == 'ls-tree': return ''
+            return original_git(*args)
+        with patch.object(cycle, 'api', return_value=self.origin), \
+             patch.object(cycle, 'branch_head', return_value='c' * 40), \
+             patch.object(cycle, 'git', side_effect=simulated_remote), \
+             patch.object(cycle, 'output') as out:
+            cycle.prepare(self.capture)
+        self.assertEqual(self.source, original_git('rev-parse', 'HEAD'))
+        self.assertEqual('Lcom/aicove/Old;\n', cycle.PROFILE.read_text())
+        self.assertFalse(cycle.STATE.exists())
+        out.assert_called_with('ready', 'false')
+        self.assertFalse(any(args[0] in ('commit', 'push') for args in calls))
+
+    def test_retry_reuses_own_published_commit(self):
+        with patch.object(cycle, 'api', return_value=self.origin), \
+             patch.object(cycle, 'branch_head', return_value=self.source), \
+             patch.object(cycle, 'beta_runs', return_value=[]), patch.object(cycle, 'output'):
+            cycle.prepare(self.capture)
+        published = cycle.git('rev-parse', 'HEAD')
+        cycle.git('update-ref', 'refs/heads/published', published)
+        cycle.git('checkout', '--detach', self.source)
+        original_git = cycle.git
+        def simulated_fetch(*args):
+            if args[0] == 'fetch':
+                Path('.git/FETCH_HEAD').write_text(published + '\n')
+                return ''
+            return original_git(*args)
+        with patch.object(cycle, 'api', return_value=self.origin), \
+             patch.object(cycle, 'branch_head', return_value=published), \
+             patch.object(cycle, 'git', side_effect=simulated_fetch), \
+             patch.object(cycle, 'output') as out:
+            cycle.prepare(self.capture)
+        self.assertEqual(published, cycle.git('rev-parse', 'HEAD'))
+        out.assert_any_call('ready', 'true')
+        out.assert_any_call('sha', published)
+
     def test_bad_capture_keeps_previous_profile_and_head(self):
         (self.capture/'chatList-baseline-prof.txt').write_text('Lcom/aicove/New;->broken\n')
         with patch.object(cycle, 'api', return_value=self.origin), \

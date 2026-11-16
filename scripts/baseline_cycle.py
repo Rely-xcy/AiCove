@@ -48,6 +48,8 @@ def load_state():
     state = json.loads(STATE.read_text())
     if state.get('schema') != 1:
         raise ValueError('Unsupported baseline cycle state')
+    if state.get('branch') != os.environ['GITHUB_REF_NAME']:
+        return {}
     return state
 
 
@@ -161,7 +163,8 @@ def prepare(root):
         git('fetch', 'origin', 'refs/heads/' + branch)
         remote_state = json.loads(git('show', 'FETCH_HEAD:' + str(STATE))) if git(
             'ls-tree', 'FETCH_HEAD', '--', str(STATE)) else {}
-        if (remote_state.get('beta_run_id') == run['id']
+        if (remote_state.get('branch') == branch
+                and remote_state.get('beta_run_id') == run['id']
                 and git('log', '-1', '--format=%s', 'FETCH_HEAD') == COMMIT_PREFIX + source[:8]
                 and git('rev-parse', 'FETCH_HEAD^') == source
                 and git('rev-parse', 'FETCH_HEAD') == head):
@@ -188,7 +191,7 @@ def prepare(root):
         beta_runs(branch, since), branch, run, previous, since)
     merged = merge_profiles(root)  # Validate everything before touching the installed file.
     PROFILE.write_text(merged)
-    STATE.write_text(json.dumps({'schema': 1, 'source_sha': source,
+    STATE.write_text(json.dumps({'schema': 1, 'branch': branch, 'source_sha': source,
                                  'counted_shas': sorted(counted), 'profile_commits': sorted(profile_commits),
                                  'beta_run_id': run['id'], 'beta_run_number': run['run_number'],
                                  'beta_created_at': run['created_at'],
