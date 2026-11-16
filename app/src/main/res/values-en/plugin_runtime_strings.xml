@@ -30,5 +30,6 @@
     <string name="plugins_dependencies_missing">Dependencies not prepared</string>
     <string name="plugins_dependencies_prepare">Prepare</string>
     <string name="plugins_dependencies_preparing">Preparing…</string>
+    <string name="plugins_dependencies_state_not_saved">Dependency state could not be saved. The plugin may have been replaced or storage may be unwritable. Please prepare dependencies again.</string>
     <string name="project_tools_drawer_title">Project tools</string>
 </resources>

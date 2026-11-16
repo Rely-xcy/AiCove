@@ -30,5 +30,6 @@
     <string name="plugins_dependencies_missing">依赖未准备</string>
     <string name="plugins_dependencies_prepare">准备依赖</string>
     <string name="plugins_dependencies_preparing">准备中…</string>
+    <string name="plugins_dependencies_state_not_saved">依赖状态未能保存，插件可能已被替换或存储不可写，请重新准备依赖。</string>
     <string name="project_tools_drawer_title">项目工具</string>
 </resources>

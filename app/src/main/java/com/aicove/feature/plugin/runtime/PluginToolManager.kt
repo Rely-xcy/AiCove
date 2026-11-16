@@ -33,7 +33,14 @@ class PluginToolManager @Inject constructor(
     private val started = AtomicBoolean(false)
     private val registeredLock = Any()
     private val registeredNames = mutableSetOf<String>()
-    private var activePluginIds = emptySet<String>()
+    private var activePluginRevisions = emptyMap<String, InstallRevision>()
+
+    private data class InstallRevision(
+        val version: String,
+        val installedAt: Long,
+        val archiveSha256: String,
+        val installRevision: String?
+    )
 
     fun start(scope: CoroutineScope) {
         if (!started.compareAndSet(false, true)) return
@@ -47,11 +54,8 @@ class PluginToolManager @Inject constructor(
     }
 
     private fun sync(plugins: List<InstalledPlugin>) {
-        plugins.filter { it.isActive }.forEach { plugin ->
-            plugin.content.runtime?.let { runtime.closeOtherVersions(plugin.id, plugin.record.version) }
-        }
-        val desired = plugins
-            .filter { it.isActive }
+        val activePlugins = plugins.filter { it.isActive }
+        val desired = activePlugins
             .flatMap { plugin ->
                 val manifest = plugin.manifest ?: return@flatMap emptyList()
                 plugin.content.runtime ?: return@flatMap emptyList()
@@ -71,15 +75,30 @@ class PluginToolManager @Inject constructor(
             }
             .distinctBy { it.name }
 
-        val currentActiveIds = plugins
-            .filter { it.isActive && it.content.runtime != null }
-            .map { it.id }
-            .toSet()
-        (activePluginIds - currentActiveIds).forEach {
-            runtime.closePlugin(it)
-            terminalRunner.closePlugin(it)
+        val currentRevisions = activePlugins.associate { plugin ->
+            plugin.id to InstallRevision(
+                version = plugin.record.version,
+                installedAt = plugin.record.installedAt,
+                archiveSha256 = plugin.record.archiveSha256,
+                installRevision = plugin.record.installRevision
+            )
         }
-        activePluginIds = currentActiveIds
+        (activePluginRevisions.keys - currentRevisions.keys).forEach { pluginId ->
+            runtime.closePlugin(pluginId)
+            terminalRunner.closePlugin(pluginId)
+        }
+        currentRevisions.forEach { (pluginId, revision) ->
+            val previous = activePluginRevisions[pluginId]
+            if (previous != null && previous != revision) {
+                // 同版本重装仍共用进程 key，按版本清理无法让旧进程失效。
+                if (previous.version != revision.version) {
+                    runtime.closeOtherVersions(pluginId, revision.version)
+                } else {
+                    runtime.closePlugin(pluginId)
+                }
+            }
+        }
+        activePluginRevisions = currentRevisions
 
         val desiredNames = desired.map { it.name }.toSet()
         synchronized(registeredLock) {

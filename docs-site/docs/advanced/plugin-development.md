@@ -209,12 +209,12 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCove 在本地容器
 ```
 
 - `type` 支持 `javascript`（用 `node` 启动）与 `python`（用 `python3` 启动）；可用 `command` 覆盖启动命令。
-- 可选 `resident: true`：进程不参与 10 分钟空闲回收，首次启动后常驻；插件停用、卸载、版本替换或 App 进程结束仍会关闭。常驻进程会持续占用内存与容器资源。
+- 可选 `resident: true`：进程不参与 10 分钟空闲回收，首次启动后常驻；插件停用、卸载、替换安装（包括同版本重装）或 App 进程结束仍会关闭。常驻进程会持续占用内存与容器资源。
 - 可选 `dependencies` 声明依赖输入文件：
   ```json
   "dependencies": {"tool": "npm", "file": "package.json"}
   ```
-  在插件详情页点「准备依赖」会在插件目录执行 `npm ci`/`npm install` 或 `python3 -m venv` + `pip install`。容器缺少 node/npm 或 python3 时只提示去终端「环境安装」，不会自动装系统包。
+  在插件详情页点「准备依赖」会在插件目录执行 `npm ci`/`npm install` 或 `python3 -m venv` + `pip install`。容器缺少 node/npm 或 python3 时只提示去终端「环境安装」，不会自动装系统包。准备成功的状态会持久保存；准备期间插件被替换，或状态无法保存时，会提示重新准备，旧安装的结果不会应用到新安装。
 
 常驻插件可在 App 启动时初始化进程：
 
