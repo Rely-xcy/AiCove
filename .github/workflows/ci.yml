@@ -98,6 +98,9 @@ jobs:
       - name: Self-test container image sync script
         run: python3 scripts/sync-container-images.py --self-test
 
+      - name: Test baseline refresh cycle
+        run: python3 scripts/test_baseline_cycle.py -v
+
       - name: Test summarize-switch plugin
         run: node --test plugin-samples/summarize-switch/test.cjs
 

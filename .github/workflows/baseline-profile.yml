@@ -1,16 +1,25 @@
 name: Baseline Profile
 
-# 手动触发，**不**在 push 时自动跑：需要模拟器 + KVM，一次 20 分钟上下，
-# 而日常 CI 的门禁只需要编译与单测。
-#
-# 产出 baseline-prof.txt → 人工提交到 app/src/main/baseline-prof.txt。
-# 发布前代码大改后重跑一次即可；profile 的类名来自当次 R8 mapping，代码漂移后旧 profile 会逐步失配。
+# 手动采集仍只输出artifact；Beta每五个不同成功版本触发自动采集、校验、回包与回写。
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: '自动采集绑定的完整源码SHA；手动只采集时留空'
+        required: false
+        default: ''
+      beta_run_id:
+        description: '触发采集的成功Beta run ID；留空不回写和发包'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
 
 concurrency:
-  group: baseline-profile
-  cancel-in-progress: true
+  group: baseline-profile-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   generate:
@@ -23,6 +32,7 @@ jobs:
         with:
           # versionCode 取 git rev-list --count HEAD，浅克隆会得到 1
           fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -113,3 +123,54 @@ jobs:
             baselineprofile/build/outputs/androidTest-results/**
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Prepare validated profile update
+        if: ${{ inputs.beta_run_id != '' && inputs.source_sha != '' }}
+        id: profile
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BETA_RUN_ID: ${{ inputs.beta_run_id }}
+        run: python3 scripts/baseline_cycle.py prepare --profiles baselineprofile/build/outputs
+
+      - name: Restore signing configuration for profiled Beta
+        if: steps.profile.outputs.ready == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.AICODE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.AICODE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AICODE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.AICODE_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          Path('app/aicode.jks').write_bytes(base64.b64decode(os.environ['KEYSTORE_BASE64'], validate=True))
+          Path('app/keystore.properties').write_text(
+              'storeFile=aicode.jks\n'
+              + 'storePassword=' + os.environ['KEYSTORE_PASSWORD'] + '\n'
+              + 'keyAlias=' + os.environ['KEY_ALIAS'] + '\n'
+              + 'keyPassword=' + os.environ['KEY_PASSWORD'] + '\n')
+          PY
+
+      - name: Validate and build profiled Beta
+        if: steps.profile.outputs.ready == 'true'
+        run: |
+          python3 scripts/check_architecture.py
+          python3 scripts/check_migrations.py
+          ./gradlew :app:testUniversalDebugUnitTest :app:assembleUniversalBeta --stacktrace
+
+      - name: Publish verified profile and APK
+        if: steps.profile.outputs.ready == 'true'
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 scripts/baseline_cycle.py publish --apk app/build/outputs/apk/universal/beta/app-universal-beta.apk
+
+      - name: Upload rebuilt Beta
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aicode-beta-${{ steps.profile.outputs.sha }}
+          path: dist/*
+          if-no-files-found: error

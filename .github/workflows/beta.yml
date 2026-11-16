@@ -23,6 +23,10 @@ concurrency:
   group: beta-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build:
     name: Build Beta APK
@@ -115,3 +119,8 @@ jobs:
             dist/aicode-universal-beta-*.apk
             dist/aicode-universal-beta-*-mapping.txt
           if-no-files-found: error
+
+      - name: Check five-version baseline cycle
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/baseline_cycle.py gate
