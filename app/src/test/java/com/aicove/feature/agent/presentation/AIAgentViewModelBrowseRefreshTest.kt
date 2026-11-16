@@ -15,10 +15,12 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -57,7 +59,16 @@ class AIAgentViewModelBrowseRefreshTest {
     fun tearDown() {
         // viewModelScope 的生命周期不随测试结束：不取消它，ViewModel init 里起的 launch
         // 与 stateIn(Eagerly) 会继续挂在 Dispatchers.Main 上，泄漏到后面的测试。
-        if (::viewModel.isInitialized) viewModel.viewModelScope.cancel()
+        // 必须在 resetMain 之前等待所有协程退出，否则 DefaultDispatcher 上的轮询循环仍可能访问
+        // 已被 reset 的 Dispatchers.Main，导致 UncaughtExceptionsBeforeTest 泄漏到后续测试。
+        if (::viewModel.isInitialized) {
+            val scope = viewModel.viewModelScope
+            runBlocking {
+                withTimeout(3_000) {
+                    checkNotNull(scope.coroutineContext[Job]).cancelAndJoin()
+                }
+            }
+        }
         Dispatchers.resetMain()
     }
 
@@ -137,7 +148,9 @@ class AIAgentViewModelBrowseRefreshTest {
         containerEngine = mockk(relaxed = true),
         sessionUseCase = mockk(relaxed = true),
         messagePersistenceUseCase = mockk(relaxed = true),
-        agentChatRequestBus = mockk(relaxed = true),
+        agentChatRequestBus = mockk(relaxed = true) {
+            coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
+        }
         agentRunStateStore = mockk(relaxed = true),
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk(relaxed = true) { every { tabFinishedEvents } returns MutableSharedFlow() },

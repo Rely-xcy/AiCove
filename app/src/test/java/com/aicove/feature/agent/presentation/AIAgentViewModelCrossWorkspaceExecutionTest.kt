@@ -4,7 +4,8 @@ import android.content.Context
 import android.os.PowerManager
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import com.aicove.R
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.container.ContainerProfile
@@ -26,6 +27,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -77,7 +79,15 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
 
     @After
     fun tearDown() {
-        if (::viewModel.isInitialized) viewModel.viewModelScope.cancel()
+        if (::viewModel.isInitialized) {
+            val scope = viewModel.viewModelScope
+            // Main 必须保留到后台请求消费者退出，否则取消收尾仍可能访问已撤掉的 dispatcher。
+            runBlocking {
+                withTimeout(3_000) {
+                    checkNotNull(scope.coroutineContext[Job]).cancelAndJoin()
+                }
+            }
+        }
         Dispatchers.resetMain()
     }
 
@@ -129,7 +139,9 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             containerEngine = mockk(relaxed = true),
             sessionUseCase = sessionUseCase,
             messagePersistenceUseCase = mockk(relaxed = true),
-            agentChatRequestBus = mockk(relaxed = true),
+            agentChatRequestBus = mockk(relaxed = true) {
+                coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
+            }
             agentRunStateStore = mockk(relaxed = true),
             planApprovalManager = mockk(relaxed = true),
             terminalSessionManager = mockk<TerminalSessionManager>(relaxed = true) {
