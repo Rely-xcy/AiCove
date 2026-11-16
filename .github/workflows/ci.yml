@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       test_filter:
-        description: '只跑指定测试类（如 com.aicove.feature.git.domain.GitRepositoryTest）；留空跑全量'
+        description: '只跑指定测试类/包模式，逗号分隔；留空跑全量'
         required: false
         default: ''
   pull_request:
@@ -121,10 +121,18 @@ jobs:
       # 只跑 universal debug 变体：单测逻辑与 flavor 无关（flavor 仅影响 abiFilters/assets），
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。
       - name: Run unit tests
-        # CI_TEST_FILTER 为空时跑全量；排障时用 workflow_dispatch 传入测试类名做二分。
+        # 排障时传逗号分隔的测试类/包模式，组成一组 --tests 参数；空值仍跑全量。
+        env:
+          TEST_FILTER: ${{ github.event.inputs.test_filter }}
         run: |
-          if [ -n "${{ github.event.inputs.test_filter }}" ]; then
-            ./gradlew :app:testUniversalDebugUnitTest --tests "${{ github.event.inputs.test_filter }}"
+          if [ -n "$TEST_FILTER" ]; then
+            IFS=',' read -r -a filters <<< "$TEST_FILTER"
+            args=()
+            for filter in "${filters[@]}"; do
+              filter="$(echo "$filter" | xargs)"
+              if [ -n "$filter" ]; then args+=(--tests "$filter"); fi
+            done
+            ./gradlew :app:testUniversalDebugUnitTest "${args[@]}"
           else
             ./gradlew :app:testUniversalDebugUnitTest
           fi
