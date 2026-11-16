@@ -163,12 +163,11 @@ internal fun PluginStoreSection(
                 .drawWithContent {
                     drawContent()
                     if (selectedItem == null) {
-                        val fadeHeight = 136.dp.toPx()
+                        val fadeHeight = Spacing.xl.toPx()
                         drawRect(
                             brush = Brush.verticalGradient(
                                 0f to Color.Transparent,
-                                0.32f to pageBackground.copy(alpha = 0.24f),
-                                0.68f to pageBackground.copy(alpha = 0.72f),
+                                0.5f to pageBackground.copy(alpha = 0.35f),
                                 1f to pageBackground,
                                 startY = size.height - fadeHeight,
                                 endY = size.height
@@ -182,7 +181,7 @@ internal fun PluginStoreSection(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = 136.dp),
+            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             when {

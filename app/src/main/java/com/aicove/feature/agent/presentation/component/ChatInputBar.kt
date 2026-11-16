@@ -337,6 +337,8 @@ internal fun ChatInputBar(
                         Brush.verticalGradient(
                             listOf(
                                 MaterialTheme.colorScheme.surface.copy(alpha = 0f),
+                                MaterialTheme.semanticColors.mutedSurface.copy(alpha = 0.18f),
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
                                 MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
                             ),
                             startY = 0f,
