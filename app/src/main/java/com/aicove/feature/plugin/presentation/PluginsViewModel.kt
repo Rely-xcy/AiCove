@@ -40,15 +40,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -77,7 +81,8 @@ sealed interface PluginImportState {
 data class PluginDependencyUiState(
     val running: Boolean = false,
     val ready: Boolean? = null,
-    val message: String? = null
+    val message: String? = null,
+    val installRevision: String? = null
 )
 
 /** 开发者目录里的一个插件项目；安装/重载按目录重新打包。 */
@@ -160,6 +165,12 @@ class PluginsViewModel @Inject constructor(
     private val _importState = MutableStateFlow<PluginImportState>(PluginImportState.Idle)
     val importState: StateFlow<PluginImportState> = _importState.asStateFlow()
 
+    private val _busyPluginIds = MutableStateFlow<Set<String>>(emptySet())
+    val busyPluginIds: StateFlow<Set<String>> = _busyPluginIds.asStateFlow()
+
+    private val operationMessageChannel = Channel<Int>(Channel.BUFFERED)
+    val operationMessages: Flow<Int> = operationMessageChannel.receiveAsFlow()
+
     private val _dependencyStates = MutableStateFlow<Map<String, PluginDependencyUiState>>(emptyMap())
     val dependencyStates: StateFlow<Map<String, PluginDependencyUiState>> = _dependencyStates.asStateFlow()
 
@@ -220,17 +231,30 @@ class PluginsViewModel @Inject constructor(
         if (state.installing) return
         _importState.value = state.copy(installing = true, error = null)
         viewModelScope.launch(Dispatchers.IO) {
-            when (val result = manager.install(state.preview.token)) {
-                is PluginInstallResult.Installed -> {
-                    syncProviders(result.pluginId)
-                    state.sourceDirName?.let { dirName ->
-                        devLastLoaded[dirName] = devDirModified(dirName)
-                        refreshDevProjects()
+            try {
+                when (val result = manager.install(state.preview.token)) {
+                    is PluginInstallResult.Installed -> {
+                        syncProviders(result.pluginId)
+                        _importState.value = PluginImportState.Idle
+                        operationMessageChannel.send(R.string.plugins_operation_installed)
+                        state.sourceDirName?.let { dirName ->
+                            devLastLoaded[dirName] = devDirModified(dirName)
+                            refreshDevProjects()
+                        }
                     }
-                    _importState.value = PluginImportState.Idle
+                    is PluginInstallResult.Failed -> _importState.update { current ->
+                        (current as? PluginImportState.Preview)?.copy(installing = false, error = result.error) ?: current
+                    }
                 }
-                is PluginInstallResult.Failed -> _importState.update { current ->
-                    (current as? PluginImportState.Preview)?.copy(installing = false, error = result.error) ?: current
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "安装插件失败", e)
+                _importState.update { current ->
+                    (current as? PluginImportState.Preview)?.copy(
+                        installing = false,
+                        error = PluginError(PluginErrorCode.STORAGE_FAILED)
+                    ) ?: current
                 }
             }
         }
@@ -280,26 +304,76 @@ class PluginsViewModel @Inject constructor(
     }
 
     fun setEnabled(id: String, enabled: Boolean) {
+        synchronized(_busyPluginIds) {
+            if (id in _busyPluginIds.value) return
+            _busyPluginIds.update { it + id }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            if (manager.setEnabled(id, enabled)) {
-                if (enabled) syncProviders(id) else removeProviders(id)
-            }
-            if (!enabled) {
-                pluginTerminalRunner.closePlugin(id)
-                tipManager.dismissPlugin(id)
+            try {
+                val changed = manager.setEnabled(id, enabled)
+                if (changed) {
+                    if (enabled) {
+                        syncProviders(id)
+                    } else {
+                        removeProviders(id)
+                        pluginTerminalRunner.closePlugin(id)
+                        tipManager.dismissPlugin(id)
+                    }
+                }
+                operationMessageChannel.send(
+                    if (!changed) R.string.plugins_operation_toggle_failed
+                    else if (enabled) R.string.plugins_operation_enabled
+                    else R.string.plugins_operation_disabled
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "切换插件状态失败: $id", e)
+                operationMessageChannel.send(R.string.plugins_operation_toggle_failed)
+            } finally {
+                _busyPluginIds.update { it - id }
             }
         }
     }
 
     fun uninstall(id: String) {
+        synchronized(_busyPluginIds) {
+            if (id in _busyPluginIds.value) return
+            _busyPluginIds.update { it + id }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            manager.uninstall(id)
-            if (manager.plugins.value.none { it.id == id }) {
-                removeProviders(id)
-                shizukuPermissionRepository.revoke(id)
+            try {
+                val uninstalled = try {
+                    manager.uninstall(id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    FileLogger.e(TAG, "卸载插件失败: $id", e)
+                    false
+                }
+                val removed = manager.plugins.value.none { it.id == id }
+                if (removed) {
+                    removeProviders(id)
+                    pluginTerminalRunner.closePlugin(id)
+                    tipManager.dismissPlugin(id)
+                    shizukuPermissionRepository.revoke(id)
+                }
+                operationMessageChannel.send(
+                    if (!removed) R.string.plugins_operation_uninstall_failed
+                    else if (uninstalled) R.string.plugins_operation_uninstalled
+                    else R.string.plugins_operation_uninstall_cleanup_failed
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "清理插件资源失败: $id", e)
+                operationMessageChannel.send(
+                    if (manager.plugins.value.none { it.id == id }) R.string.plugins_operation_uninstall_cleanup_failed
+                    else R.string.plugins_operation_uninstall_failed
+                )
+            } finally {
+                _busyPluginIds.update { it - id }
             }
-            pluginTerminalRunner.closePlugin(id)
-            tipManager.dismissPlugin(id)
         }
     }
 
@@ -319,6 +393,8 @@ class PluginsViewModel @Inject constructor(
     private suspend fun syncProviders(pluginId: String) {
         try {
             pluginProviderRegistrar.sync(pluginId)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             FileLogger.e(TAG, "同步插件提供商失败: $pluginId", e)
         }
@@ -327,6 +403,8 @@ class PluginsViewModel @Inject constructor(
     private suspend fun removeProviders(pluginId: String) {
         try {
             pluginProviderRegistrar.removeAll(pluginId)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             FileLogger.e(TAG, "移除插件提供商失败: $pluginId", e)
         }
@@ -427,21 +505,51 @@ class PluginsViewModel @Inject constructor(
 
     /** 准备依赖：在本地容器、插件安装目录执行；同一插件不并发启动两次。 */
     fun prepareDependencies(id: String) {
-        if (_dependencyStates.value[id]?.running == true) return
-        _dependencyStates.update { it + (id to PluginDependencyUiState(running = true)) }
+        if (id in _busyPluginIds.value) return
+        val record = manager.plugins.value.firstOrNull { it.id == id }?.record ?: return
+        val runningState = PluginDependencyUiState(running = true, installRevision = record.installRevision)
+        synchronized(_dependencyStates) {
+            val current = _dependencyStates.value[id]
+            if (current?.running == true && current.installRevision == record.installRevision) return
+            _dependencyStates.update { it + (id to runningState) }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val state = when (val result = manager.prepareDependencies(id)) {
-                is PluginDependencyResult.Ready -> PluginDependencyUiState(ready = true)
-                is PluginDependencyResult.MissingRuntime ->
-                    PluginDependencyUiState(ready = false, message = result.message)
-                is PluginDependencyResult.Failed -> PluginDependencyUiState(
-                    ready = false,
-                    message = if (result.code == "STATE_NOT_SAVED") {
-                        context.getString(R.string.plugins_dependencies_state_not_saved)
-                    } else result.message
-                )
+            try {
+                val state = when (val result = manager.prepareDependencies(id)) {
+                    is PluginDependencyResult.Ready -> runningState.copy(running = false, ready = true)
+                    is PluginDependencyResult.MissingRuntime ->
+                        runningState.copy(running = false, ready = false, message = result.message)
+                    is PluginDependencyResult.Failed -> runningState.copy(
+                        running = false,
+                        ready = false,
+                        message = if (result.code == "STATE_NOT_SAVED") {
+                            context.getString(R.string.plugins_dependencies_state_not_saved)
+                        } else result.message
+                    )
+                }
+                val current = manager.plugins.value.firstOrNull { it.id == id }?.record
+                val sameInstallation = current != null && if (record.installRevision != null) {
+                    current.installRevision == record.installRevision
+                } else {
+                    current.installRevision == null && current.installedAt == record.installedAt &&
+                        current.archiveSha256 == record.archiveSha256 && current.manifestSha256 == record.manifestSha256
+                }
+                _dependencyStates.update {
+                    if (it[id] === runningState && sameInstallation) it + (id to state) else it
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "准备插件依赖失败: $id", e)
+                _dependencyStates.update {
+                    if (it[id] === runningState) it + (id to runningState.copy(running = false, ready = false, message = e.message))
+                    else it
+                }
+            } finally {
+                _dependencyStates.update {
+                    if (it[id] === runningState) it + (id to runningState.copy(running = false)) else it
+                }
             }
-            _dependencyStates.update { it + (id to state) }
         }
     }
 

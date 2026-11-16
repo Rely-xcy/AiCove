@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.presentation
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,10 +19,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,15 +60,23 @@ fun PluginManagementScreen(
     val dependencyStates by viewModel.dependencyStates.collectAsStateWithLifecycle()
     val devMode by viewModel.devMode.collectAsStateWithLifecycle()
     val devProjects by viewModel.devProjects.collectAsStateWithLifecycle()
-    var selectedPluginId by remember { mutableStateOf<String?>(null) }
+    val busyPluginIds by viewModel.busyPluginIds.collectAsStateWithLifecycle()
+    val importState by viewModel.importState.collectAsStateWithLifecycle()
+    var selectedPluginId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val languageTag = currentLanguageTag()
+    val context = LocalContext.current
+    LaunchedEffect(viewModel) {
+        viewModel.operationMessages.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.import(uri)
     }
 
-    LaunchedEffect(selectedPlugin, selectedPluginId) {
-        if (selectedPluginId != null && selectedPlugin == null) selectedPluginId = null
+    LaunchedEffect(loaded, selectedPlugin, selectedPluginId) {
+        if (loaded && selectedPluginId != null && selectedPlugin == null) selectedPluginId = null
     }
 
     val navigateBack = {
@@ -78,7 +88,7 @@ fun PluginManagementScreen(
         containerColor = MaterialTheme.semanticColors.pageBackground,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_plugins)) },
+                title = { Text(selectedPlugin?.displayName(languageTag) ?: stringResource(R.string.settings_plugins)) },
                 navigationIcon = {
                     IconButton(onClick = navigateBack) {
                         Icon(
@@ -89,7 +99,10 @@ fun PluginManagementScreen(
                 },
                 actions = {
                     if (selectedPluginId == null) {
-                        IconButton(onClick = { picker.launch(PluginPackageMimeTypes) }) {
+                        IconButton(
+                            onClick = { picker.launch(PluginPackageMimeTypes) },
+                            enabled = loaded && (importState is PluginImportState.Idle || importState is PluginImportState.Failed)
+                        ) {
                             Icon(
                                 imageVector = FeatherIcons.Plus,
                                 contentDescription = stringResource(R.string.plugins_import)
@@ -113,6 +126,7 @@ fun PluginManagementScreen(
                 PluginsSection(
                     plugins = plugins,
                     loaded = loaded,
+                    busyPluginIds = busyPluginIds,
                     onOpenDetail = { selectedPluginId = it.id },
                     onToggleEnabled = { item, enabled -> viewModel.setEnabled(item.id, enabled) },
                     onUninstall = { viewModel.uninstall(it.id) },
@@ -125,14 +139,14 @@ fun PluginManagementScreen(
                 )
             } else {
                 val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                val depState = dependencyStates[plugin.id]
+                val depState = dependencyStates[plugin.id]?.takeIf {
+                    it.installRevision == plugin.record.installRevision
+                }
                 PluginDetailSection(
                     plugin = plugin,
                     onToggleEnabled = { viewModel.setEnabled(plugin.id, it) },
-                    onUninstall = {
-                        viewModel.uninstall(plugin.id)
-                        selectedPluginId = null
-                    },
+                    onUninstall = { viewModel.uninstall(plugin.id) },
+                    operationRunning = plugin.id in busyPluginIds,
                     bridgeFactory = { page, post, onClosePage ->
                         viewModel.createWebBridge(
                             page = page,

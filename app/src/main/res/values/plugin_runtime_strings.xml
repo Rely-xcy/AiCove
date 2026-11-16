@@ -31,5 +31,14 @@
     <string name="plugins_dependencies_prepare">准备依赖</string>
     <string name="plugins_dependencies_preparing">准备中…</string>
     <string name="plugins_dependencies_state_not_saved">依赖状态未能保存，插件可能已被替换或存储不可写，请重新准备依赖。</string>
+    <string name="plugins_loading">正在加载插件…</string>
+    <string name="plugins_operation_working">正在处理…</string>
+    <string name="plugins_operation_installed">插件已安装</string>
+    <string name="plugins_operation_enabled">插件已启用</string>
+    <string name="plugins_operation_disabled">插件已停用</string>
+    <string name="plugins_operation_toggle_failed">插件状态保存失败，请重试。</string>
+    <string name="plugins_operation_uninstalled">插件已卸载</string>
+    <string name="plugins_operation_uninstall_failed">卸载失败，插件仍已安装，请重试。</string>
+    <string name="plugins_operation_uninstall_cleanup_failed">插件已停用并移除，但部分文件清理失败，请查看日志。</string>
     <string name="project_tools_drawer_title">项目工具</string>
 </resources>

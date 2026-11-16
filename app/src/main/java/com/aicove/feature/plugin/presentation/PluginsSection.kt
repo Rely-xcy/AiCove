@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -113,9 +114,21 @@ internal fun PluginsSection(
     devProjects: List<PluginDevProject> = emptyList(),
     onSetDevMode: (Boolean) -> Unit = {},
     onRefreshDevProjects: () -> Unit = {},
-    onInstallDevProject: (PluginDevProject) -> Unit = {}
+    onInstallDevProject: (PluginDevProject) -> Unit = {},
+    busyPluginIds: Set<String> = emptySet()
 ) {
-    if (!loaded) return
+    if (!loaded) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+                Text(stringResource(R.string.plugins_loading), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
 
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -230,7 +243,8 @@ internal fun PluginsSection(
                             // 点击层按同一形状裁剪，按压反馈才不会在卡片圆角外露出直角横带。
                             contentShape = pluginRowShape(index, filteredPlugins.lastIndex),
                             onClick = { onOpenDetail(plugin) },
-                            onDelete = { pluginToUninstall = plugin }
+                            onDelete = { pluginToUninstall = plugin },
+                            operationRunning = plugin.id in busyPluginIds
                         )
                     }
                 }
@@ -280,7 +294,8 @@ private fun PluginRow(
     languageTag: String,
     onClick: () -> Unit,
     onDelete: () -> Unit,
-    contentShape: Shape = RectangleShape
+    contentShape: Shape = RectangleShape,
+    operationRunning: Boolean = false
 ) {
     val statusText = when {
         plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_status_incompatible)
@@ -302,6 +317,7 @@ private fun PluginRow(
     SwipeToDeleteRow(
         onDelete = onDelete,
         onClick = onClick,
+        deleteEnabled = !operationRunning,
         contentShape = contentShape
     ) {
         Row(
@@ -451,11 +467,15 @@ private fun PluginRow(
             Spacer(modifier = Modifier.width(Spacing.sm))
 
             // 状态 pill 与右箭头
-            McpPill(
-                text = statusText,
-                textColor = statusColor,
-                backgroundColor = statusBgColor
-            )
+            if (operationRunning) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                McpPill(
+                    text = statusText,
+                    textColor = statusColor,
+                    backgroundColor = statusBgColor
+                )
+            }
             Spacer(modifier = Modifier.width(Spacing.xs))
             Icon(
                 imageVector = FeatherIcons.ChevronRight,
@@ -483,7 +503,8 @@ internal fun PluginDetailSection(
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
     shizukuState: ShizukuState = ShizukuState.NOT_RUNNING,
-    onSetShizukuGranted: (Boolean) -> Unit = {}
+    onSetShizukuGranted: (Boolean) -> Unit = {},
+    operationRunning: Boolean = false
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
@@ -567,6 +588,7 @@ internal fun PluginDetailSection(
                 onNavigateToConfigTab = { selectedTab = 1 },
                 onToggleEnabled = onToggleEnabled,
                 onUninstall = onUninstall,
+                operationRunning = operationRunning,
                 dependencyState = dependencyState,
                 onPrepareDependencies = onPrepareDependencies,
                 shizukuGranted = shizukuGranted,
@@ -601,7 +623,8 @@ private fun PluginNativeConfigContent(
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
     shizukuState: ShizukuState = ShizukuState.NOT_RUNNING,
-    onSetShizukuGranted: (Boolean) -> Unit = {}
+    onSetShizukuGranted: (Boolean) -> Unit = {},
+    operationRunning: Boolean = false
 ) {
     val manifest = plugin.manifest
     var confirmUninstall by remember { mutableStateOf(false) }
@@ -636,11 +659,15 @@ private fun PluginNativeConfigContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                AppSwitch(
-                    checked = plugin.record.enabled && plugin.status == PluginStatus.OK,
-                    onCheckedChange = onToggleEnabled,
-                    enabled = plugin.status == PluginStatus.OK
-                )
+                if (operationRunning) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    AppSwitch(
+                        checked = plugin.record.enabled && plugin.status == PluginStatus.OK,
+                        onCheckedChange = onToggleEnabled,
+                        enabled = plugin.status == PluginStatus.OK
+                    )
+                }
             }
         }
 
@@ -687,7 +714,7 @@ private fun PluginNativeConfigContent(
                     AppSwitch(
                         checked = shizukuGranted,
                         onCheckedChange = onSetShizukuGranted,
-                        enabled = plugin.isActive
+                        enabled = plugin.isActive && !operationRunning
                     )
                 }
             }
@@ -845,7 +872,7 @@ private fun PluginNativeConfigContent(
                     }
                     TextButton(
                         onClick = onPrepareDependencies,
-                        enabled = dependencyState?.running != true
+                        enabled = dependencyState?.running != true && !operationRunning
                     ) {
                         Text(
                             stringResource(
@@ -860,12 +887,12 @@ private fun PluginNativeConfigContent(
 
         SettingsGroup {
             Text(
-                text = stringResource(R.string.plugins_uninstall),
+                text = stringResource(if (operationRunning) R.string.plugins_operation_working else R.string.plugins_uninstall),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { confirmUninstall = true }
+                    .clickable(enabled = !operationRunning) { confirmUninstall = true }
                     .padding(horizontal = Spacing.lg, vertical = 14.dp)
             )
         }
