@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "branch": "feat/upstream-plugin-refresh",
+  "source_sha": "54ffd0c23d0c244a45096b3c3114b86bd92764ae",
+  "counted_shas": [
+    "00187e18fa793319df4cf10c11c8a91b7fda45a0",
+    "062b293348445e2486b80306a2b49cdd5d17f665",
+    "47a9451c700b07cd89617e09ee2bbe185958c3ea",
+    "51dffca744a768aae969bd4e24ff71215027e426",
+    "54ffd0c23d0c244a45096b3c3114b86bd92764ae",
+    "78a577922def81964acd467a4c71a89b299a19ab",
+    "80b521342b60d014ea11e9c918267d7a285969da",
+    "8425b0a458e04b88ec1f68abda1b62759f1cd553",
+    "86a6770ecd75b95284dccbeb6ff2710894bdbe35",
+    "cb39a150a1cf53eb6ab34de49a0fe45d3536d143",
+    "cc9be3e3fcf804cab21e6e7f512cf99f760083e5",
+    "d4542672c4da35fd74674b7bc549cc6664549cf7",
+    "fe4464c9d07595b99d83aeef9fc6011599a629a6"
+  ],
+  "profile_commits": [],
+  "beta_run_id": 43882079954,
+  "beta_run_number": 510,
+  "beta_created_at": "2026-11-16T14:05:06Z",
+  "capture_run_id": "43883378994"
+}
