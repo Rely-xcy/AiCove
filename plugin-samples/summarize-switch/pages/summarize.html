@@ -126,11 +126,12 @@
   </div>
 </div>
 
+<script src="/__aicode/vue.global.prod.js"></script>
 <script src="/__aicode/aicode.js"></script>
 <script>
-new Vue({
-  el: '#app',
-  data: {
+Vue.createApp({
+  data() {
+    return {
     sessions: [],
     workspaces: [],
     sourceWorkspacePath: '',
@@ -141,6 +142,7 @@ new Vue({
     status: '',
     failed: false,
     summary: ''
+    };
   },
   async mounted() {
     await this.load();
@@ -180,11 +182,7 @@ new Vue({
       this.summary = '';
       this.status = '正在读取当前会话…';
       try {
-        const messageResult = await aicode.chat.messages({
-          sessionId: this.sourceId,
-          limit: 400
-        });
-        const messages = (messageResult && messageResult.messages) || [];
+        const messages = await this.readMessages(this.sourceId);
         if (!messages.length) {
           this.fail('这个会话还没有消息，没什么可总结的。');
           return;
@@ -207,19 +205,53 @@ new Vue({
         await aicode.chat.send({ sessionId: session.id, text: prompt });
 
         this.status = '已新建会话，等待模型给出要点…';
-        await aicode.chat.waitRun(session.id, 120000);
+        await this.waitForSummary(session.id);
 
-        const after = await aicode.chat.messages({ sessionId: session.id, limit: 50 });
-        const reply = this.lastAssistantText((after && after.messages) || []);
+        const after = await this.readMessages(session.id);
+        const reply = this.lastAssistantText(after);
         this.summary = reply || '（模型没有返回内容，可切过去手动追问。）';
 
         await aicode.chat.open(session.id);
         this.status = '已切换到新会话。';
+        await aicode.ui.close();
       } catch (e) {
         this.fail('执行失败：' + ((e && e.message) || e));
       } finally {
         this.busy = false;
       }
+    },
+
+    async readMessages(sessionId) {
+      const messages = [];
+      let after;
+      while (true) {
+        const page = await aicode.chat.messages({ sessionId, limit: 200, after });
+        const rows = ((page && page.messages) || []).slice().sort((a, b) => a.timestamp - b.timestamp);
+        messages.push(...rows);
+        if (!page || !page.hasMore || !rows.length) break;
+        const cursor = rows[rows.length - 1].timestamp;
+        if (after !== undefined && cursor <= after) throw new Error('读取会话分页失败。');
+        after = cursor;
+      }
+      return messages;
+    },
+
+    async waitForSummary(sessionId) {
+      const deadline = Date.now() + 120000;
+      while (Date.now() < deadline) {
+        const state = await aicode.chat.runState(sessionId);
+        if (!state || !state.run || state.run.status === 'idle') {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          continue;
+        }
+        const result = await aicode.chat.waitRun(sessionId, Math.max(1, deadline - Date.now()));
+        if (result.timedOut) throw new Error('总结超时，可在新会话中查看运行进度。');
+        if (!result.run || result.run.status !== 'success') {
+          throw new Error((result.run && result.run.error) || '总结未完成。');
+        }
+        return;
+      }
+      throw new Error('总结未启动，请检查供应商与模型设置。');
     },
 
     buildTranscript(messages) {
@@ -238,7 +270,7 @@ new Vue({
 
     buildPrompt(transcript) {
       return [
-        '下面是上一个会话的完整记录。请把它总结成可以独立继续工作的要点，包含：',
+        '下面是上一个会话的记录。请把它总结成可以独立继续工作的要点，包含：',
         '1. 正在做的任务与目标；2. 已经完成的内容；3. 关键决定与约定；4. 尚未解决的问题；5. 下一步建议。',
         '用简洁的中文要点列表，不要复述原文，不要客套。',
         '',
@@ -261,7 +293,7 @@ new Vue({
       this.status = message;
     }
   }
-});
+}).mount('#app');
 </script>
 </body>
 </html>
