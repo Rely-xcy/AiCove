@@ -3,7 +3,15 @@ package com.aicove.feature.agent.domain.container
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.workspace.domain.remote.RemoteAuth
 import com.aicove.feature.credentials.domain.model.GitCredential
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,9 +29,9 @@ import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.RenameFlags
-import java.security.MessageDigest
 import java.util.EnumSet
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import net.schmizz.sshj.transport.DisconnectListener
 import net.schmizz.sshj.userauth.UserAuthException
 import com.hierynomus.sshj.common.KeyDecryptionFailedException
@@ -80,6 +88,7 @@ class RemoteSshConnection @Inject constructor(
     private val mutex = Mutex()
     private val sftpLock = Mutex()
     private val credentialSyncMutex = Mutex()
+    private val docsSyncMutex = Mutex()
     internal val sftpOperationMutex = Mutex()
 
     /**
@@ -173,6 +182,10 @@ class RemoteSshConnection @Inject constructor(
     var config: RemoteConnectionConfig? = null
         private set
 
+    @Volatile
+    var connectionGeneration: Long = 0L
+        private set
+
     suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock {
         if (isConnected() && this.config == config) return@withLock
         disconnectInternal()
@@ -182,6 +195,7 @@ class RemoteSshConnection @Inject constructor(
             withContext(Dispatchers.IO) {
                 val client = newSshClient(config)
                 sshClient = client
+                connectionGeneration++
                 // 查远程真实 home（root 是 /root，普通用户是 /home/xxx），供文件工具展开 ~
                 runCatching {
                     val s = client.startSession()
@@ -228,9 +242,11 @@ class RemoteSshConnection @Inject constructor(
     }
 
     private fun disconnectInternal() {
+        connectionGeneration++
         closeSftpInternal()
         runCatching { sshClient?.disconnect() }
         sshClient = null
+        remoteHome = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
@@ -243,7 +259,11 @@ class RemoteSshConnection @Inject constructor(
     }
 
     /** 建立一条 SSH transport 并完成认证与保活（exec 与 SFTP 各建一条）。 */
-    private fun newSshClient(config: RemoteConnectionConfig): SSHClient = SSHClient().apply {
+    private fun newSshClient(
+        config: RemoteConnectionConfig,
+        onCreated: (SSHClient) -> Unit = {}
+    ): SSHClient = SSHClient().apply {
+        onCreated(this)
         addHostKeyVerifier(hostKeyVerifier)
         setConnectTimeout(SSH_CONNECT_TIMEOUT_MS)
         connect(config.host, config.port)
@@ -399,82 +419,80 @@ class RemoteSshConnection @Inject constructor(
     fun workspaceSymlinkCommand(workspacePath: String): String =
         buildRemoteWorkspaceSymlinkCommand(workspacePath)
 
-    /**
-     * 把内置文档同步到远程 ~/.aicode/docs/，让远程模式下 AI 也能像本地模式一样
-     * 查阅 ~/.aicode/docs/ 下的设置说明文档。每次连接/重连后全量覆盖，使 App 升级后
-     * 远程文档随之更新。正文通过 SFTP 写入并替换。
-     *
-     * @param docs 相对 docs/ 的路径（可含子目录，如 guide/terminal.md）→ 文件内容。
-     */
     suspend fun uploadDocs(docs: Map<String, String>) {
-        if (docs.isEmpty()) return
-        val client = sshClient ?: return
+        val execClient = sshClient ?: return
+        val cfg = config ?: return
         val home = remoteHome ?: return
-        val destDir = home.trimEnd('/') + "/.aicode/docs"
-        // 内容指纹：全部文档排序后拼接再取 sha256。与远端 .version 比对，一致就整轮跳过。
-        // 之前每次连接/重连都无条件全量重写 54 个文件，每个 7 次 SFTP 往返、完全串行，
-        // 400 次往返就这样白白花掉；而文档只在 App 升级时才变。
-        val version = docsVersion(docs)
-        val versionFile = "$destDir/.version"
+        val generation = connectionGeneration
         withContext(Dispatchers.IO) {
-            runCatching {
-                val remoteVersion = readRemoteCommandOrNull(client, "cat '$versionFile' 2>/dev/null")?.trim()
-                if (remoteVersion == version) {
-                    FileLogger.d(TAG, "远程文档已是最新（$version），跳过上传")
-                    return@runCatching
+            docsSyncMutex.withLock {
+                val context = currentCoroutineContext()
+                val checkActive: suspend () -> Unit = {
+                    context.ensureActive()
+                    if (generation != connectionGeneration || sshClient !== execClient || config != cfg ||
+                        remoteHome != home || !isConnected()
+                    ) {
+                        throw CancellationException("SSH docs sync target changed")
+                    }
                 }
-                // 先建全部子目录并清掉旧 .md：版本间调整文档分类会改变路径，只覆盖不清理会让旧文件残留
-                val subDirs = docs.keys.mapNotNull { key ->
-                    key.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
-                }.distinct()
-                executeRemoteCommand(client, buildRemoteDocsPreparationCommand(destDir, subDirs))
-                var viaAgent = 0
-                for ((name, content) in docs) {
-                    val dest = "$destDir/$name"
-                    val bytes = content.toByteArray(Charsets.UTF_8)
-                    if (tryAgentWrite(dest, bytes)) viaAgent++ else writeRemoteFile(dest, bytes)
+                checkActive()
+                val snapshot = BuiltinDocsSync.snapshot(docs)
+                coroutineScope {
+                    val transport = AtomicReference<SSHClient?>()
+                    var channel: SFTPClient? = null
+                    // sshj 的阻塞读不响应协程取消；关闭任务专属 transport 才能唤醒它。
+                    val cancellationCloser = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            runCatching { transport.get()?.close() }
+                        }
+                    }
+                    try {
+                        val connection = newSshClient(cfg) {
+                            transport.set(it)
+                            it.timeout = SSH_CONNECT_TIMEOUT_MS
+                            context.ensureActive()
+                        }
+                        checkActive()
+                        val sftp = connection.newSFTPClient()
+                        channel = sftp
+                        checkActive()
+                        val ops = agentFileOps
+                        val backend = RemoteDocsSftpBackend(sftp, home, checkActive) { path, bytes ->
+                            if (ops == null) false else {
+                                checkActive()
+                                try {
+                                    ops.writeForConnection(generation, path, bytes, executable = false, overwrite = true)
+                                    checkActive()
+                                    true
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    checkActive()
+                                    FileLogger.w(TAG, "agent 文档暂存失败，退回 SFTP", error)
+                                    false
+                                }
+                            }
+                        }
+                        val result = BuiltinDocsSync(backend, checkActive).sync(snapshot)
+                        if (result.changed) {
+                            FileLogger.i(TAG, "内置文档增量同步完成：上传 ${result.uploaded}，删除 ${result.deleted}")
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        checkActive()
+                        FileLogger.w(TAG, "同步文档到远程失败", error)
+                    } finally {
+                        withContext(NonCancellable) {
+                            cancellationCloser.cancelAndJoin()
+                            runCatching { channel?.close() }
+                            runCatching { transport.get()?.close() }
+                        }
+                    }
                 }
-                if (viaAgent > 0) FileLogger.d(TAG, "文档上传 $viaAgent/${docs.size} 个走 agent")
-                // 写指纹放最后：上传中途失败时远端版本号仍旧，下次会重传，不会把半套文档当完整。
-                executeRemoteCommand(client, "printf '%s' '$version' > '$versionFile'")
-                FileLogger.i(TAG, "已同步 ${docs.size} 个文档到远程 $destDir（$version）")
-            }.onFailure { FileLogger.w(TAG, "同步文档到远程失败", it) }
-        }
-    }
-
-    /** 全部文档的内容指纹：按路径排序后逐个追加「路径 + 内容」，与 Map 的迭代顺序无关。 */
-    private fun docsVersion(docs: Map<String, String>): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        for (key in docs.keys.sorted()) {
-            digest.update(key.toByteArray(Charsets.UTF_8))
-            digest.update(0)
-            digest.update(docs.getValue(key).toByteArray(Charsets.UTF_8))
-            digest.update(0)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    /**
-     * 执行一条只读命令并取回 stdout；退出码非 0 或抛异常时返回 null。
-     *
-     * 与 [executeRemoteCommand] 的区别：那个只关心成败、丢弃输出，用于 mkdir/rm 这类动作；
-     * 这个需要把远端的状态读回来（如 .version 内容），所以单独一条路径。
-     */
-    private fun readRemoteCommandOrNull(client: SSHClient, command: String): String? {
-        val session = client.startSession()
-        return try {
-            val cmd = session.exec(command)
-            cmd.outputStream.close()
-            val text = cmd.inputStream.bufferedReader().use { it.readText() }
-            cmd.join()
-            val status = cmd.exitStatus
-            cmd.close()
-            if (status == 0) text else null
-        } catch (e: Exception) {
-            FileLogger.w(TAG, "读取远端命令输出失败: ${e.message}")
-            null
-        } finally {
-            runCatching { session.close() }
+            }
         }
     }
 

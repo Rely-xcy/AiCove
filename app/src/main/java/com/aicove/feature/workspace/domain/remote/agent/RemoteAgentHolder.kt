@@ -55,8 +55,10 @@ class RemoteAgentHolder @Inject constructor(
      */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private data class BoundConnection(val connection: RemoteAgentConnection, val generation: Long)
+
     @Volatile
-    private var current: RemoteAgentConnection? = null
+    private var current: BoundConnection? = null
 
     /** 上次失败的原因，供日志与调试入口查看；成功后清空。 */
     @Volatile
@@ -64,7 +66,9 @@ class RemoteAgentHolder @Inject constructor(
         private set
 
     /** 已就绪的会话；没有或已判定不可用时返回 null，调用方据此退回 SFTP。 */
-    fun sessionOrNull(): RemoteAgentSession? = current?.session
+    fun sessionOrNull(): RemoteAgentSession? = current
+        ?.takeIf { it.generation == connection.connectionGeneration && connection.isConnected() }
+        ?.connection?.session
 
     /**
      * 后台拉起 agent，不阻塞调用方。已就绪或正在连时直接返回。
@@ -73,12 +77,12 @@ class RemoteAgentHolder @Inject constructor(
      * 好几秒，不能让用户等着它才能用文件功能。
      */
     fun warmUp() {
-        if (current != null) return
+        if (isReady) return
         scope.launch { ensureConnected() }
     }
 
     /** 是否已经连上。 */
-    val isReady: Boolean get() = current != null
+    val isReady: Boolean get() = sessionOrNull() != null
 
     /**
      * 确保 agent 就绪。幂等：已连上直接返回 true。
@@ -87,13 +91,15 @@ class RemoteAgentHolder @Inject constructor(
      * 「这次用不了快路径」，不该让文件操作整体失败。
      */
     suspend fun ensureConnected(): Boolean {
-        current?.let { return true }
+        if (isReady) return true
         return mutex.withLock {
-            current?.let { return@withLock true }
+            if (isReady) return@withLock true
+            reset()
             if (!connection.isConnected()) {
                 lastFailure = "SSH 未连接"
                 return@withLock false
             }
+            val generation = connection.connectionGeneration
             try {
                 // 先拿到登录 home：agent 的 -root 必须是绝对路径，而 $HOME 会被 shellPath
                 // 加引号变成字面量，远端 shell 不会展开它。
@@ -117,7 +123,11 @@ class RemoteAgentHolder @Inject constructor(
                     root = home
                 )
                 val connected = launcher.connect()
-                current = connected
+                if (generation != connection.connectionGeneration || !connection.isConnected()) {
+                    connected.close()
+                    return@withLock false
+                }
+                current = BoundConnection(connected, generation)
                 lastFailure = null
                 FileLogger.i(
                     TAG,
@@ -138,11 +148,12 @@ class RemoteAgentHolder @Inject constructor(
 
     /** 连接断开或切换服务器时调用：关掉会话，下次 [ensureConnected] 重新拉。 */
     fun reset() {
-        current?.let { conn ->
-            runCatching { conn.close() }
+        val previous = current
+        current = null
+        previous?.let { bound ->
+            runCatching { bound.connection.close() }
             FileLogger.d(TAG, "agent 会话已关闭")
         }
-        current = null
     }
 
     // ---- RemoteFileOps：会话不就绪时直接抛，由连接层退回 SFTP ----
@@ -175,6 +186,24 @@ class RemoteAgentHolder @Inject constructor(
         }
     }
 
+    override suspend fun writeForConnection(
+        generation: Long,
+        path: String,
+        bytes: ByteArray,
+        executable: Boolean,
+        overwrite: Boolean
+    ) {
+        val bound = current?.takeIf {
+            it.generation == generation && generation == connection.connectionGeneration && connection.isConnected()
+        } ?: throw RemoteAgentUnavailableException("agent 不属于当前 SSH 连接")
+        val response = bound.connection.session.request(
+            "write",
+            AgentRequestParams(path = path, overwrite = overwrite, mode = if (executable) 0x1ED else null),
+            bytes
+        )
+        if (!response.ok) throw RemoteAgentUnavailableException("write 失败: ${response.err} ${response.msg}")
+    }
+
     override suspend fun remove(path: String) {
         val session = requireSession()
         val response = session.request("remove", AgentRequestParams(path = remotePath(path)))
@@ -189,7 +218,7 @@ class RemoteAgentHolder @Inject constructor(
 
     /** 把 `~/...` 展开成绝对路径；其余路径原样传（agent 只接受绝对路径）。 */
     private fun remotePath(path: String): String {
-        val home = current?.session?.capabilities?.home ?: return path
+        val home = sessionOrNull()?.capabilities?.home ?: return path
         return when {
             path == "~" -> home
             path.startsWith("~/") -> home.trimEnd('/') + path.substring(1)

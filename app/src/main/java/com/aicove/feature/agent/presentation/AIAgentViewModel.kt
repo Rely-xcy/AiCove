@@ -15,7 +15,6 @@ import androidx.room.withTransaction
 import com.aicove.MainActivity
 import com.aicove.R
 import com.aicove.core.util.FileLogger
-import com.aicove.core.util.GitIgnoreMatcher
 import com.aicove.core.util.toUserMessage
 import com.aicove.core.util.formatCostUsd
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
@@ -78,7 +77,6 @@ import com.aicove.feature.terminal.domain.TerminalSessionManager
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
 import com.aicove.feature.terminal.domain.takeTailLines
 import com.aicove.feature.workspace.domain.FileAccessProvider
-import com.aicove.feature.workspace.domain.FileEntry
 import com.aicove.feature.workspace.domain.WorkspacePathMapper
 import com.aicove.feature.workspace.domain.isValidFileEntryName
 import com.aicove.feature.agent.domain.workflow.AgentEvent
@@ -586,132 +584,63 @@ class AIAgentViewModel @Inject constructor(
     /**
      * 当前容器根节点的显示名与图标来源：名称取当前 profile，系统类型取已检测缓存，[FileTreeRoot.Container.remote] 看其执行模式。
      */
-    private val containerRootNode: Flow<FileTreeRoot.Container> = combine(
+    private val browseScope = combine(
+        _currentWorkspace,
         containerSettingsRepository.activeProfileFlow,
         containerOsDetector.osMap
-    ) { profile, osMap ->
-        FileTreeRoot.Container(
+    ) { workspace, profile, osMap ->
+        Triple(workspace, profile.id, profile.mode) to FileTreeRoot.Container(
             label = profile.name,
             osId = osMap[profile.id],
             remote = profile.mode == ExecutionMode.REMOTE_SSH
         )
     }
 
+    private data class BrowseReload(val path: String? = null, val manual: Boolean = false)
+
     /**
      * 扁平化的可见文件树。listFiles 在本地是阻塞 IO、远程是网络调用，必须跑 IO 调度器。
      * 监听工作区根与所有已展开目录：任一发生变动（不限 AI，终端与其它 App 同样算）或手动刷新都会重建树。
      * 只监听展开中的目录、不递归整棵树，避免大仓库开出大量 inotify 句柄。
      */
-    val browseState: StateFlow<FileBrowseState> = combine(_expandedPaths, containerRootNode) { expanded, root -> expanded to root }
-        .flatMapLatest { (expanded, root) ->
+    val browseState: StateFlow<FileBrowseState> = browseScope.flatMapLatest { (_, root) ->
+        val loader = BrowseTreeLoader(
+            WorkspacePathMapper.CONTAINER_ROOT, fileAccess::listFiles, fileAccess::exists, fileAccess::readFile
+        )
+        _expandedPaths.flatMapLatest { expanded ->
             val watched = expanded + WorkspacePathMapper.CONTAINER_ROOT
             val triggers = merge(
-                watched.map { fileChangeHub.watchWorkspace(it).asDirtySignal() }.merge().debounce(BROWSE_DEBOUNCE_MS).map { false },
+                watched.map { path ->
+                    fileChangeHub.watchWorkspace(path).asDirtySignal()
+                        .debounce(BROWSE_DEBOUNCE_MS).map { BrowseReload(path) }
+                }.merge(),
                 // drop(1) 丢掉 StateFlow 重建时的当前值，否则刚展开就会多读一次
-                _browseRefresh.drop(1).map { true },
+                _browseRefresh.drop(1).map { BrowseReload(manual = true) },
                 // AI 工具刚写完工作区文件：远程模式（SFTP）没有 inotify，写入方不主动提一下就不会重读
-                workspaceWriteSignal.writes.map { false }
+                workspaceWriteSignal.writes.map { BrowseReload() }
             )
             flow {
                 // 首次产出前由 stateIn 初值 Loading 占位；后续展开/折叠/刷新不再回到 Loading，
                 // StateFlow 保留上一份 Success 直到新树就绪，避免闪加载动画与滚动位置丢失。
-                var previous: FileBrowseState = buildBrowseTree(expanded, root)
+                var previous: FileBrowseState = loader.build(expanded, root)
                 emit(previous)
-                triggers.collect { manualRefresh ->
+                triggers.collect { reload ->
                     val last = previous
                     // 只有手动刷新需要先发一帧进行中态：远程模式下要串行重列所有已展开目录，
                     // 数秒内没有任何反馈会像卡死。原样发上一份树（仅置 refreshing）保住滚动位置。
-                    if (manualRefresh && last is FileBrowseState.Success) {
+                    if (reload.manual && last is FileBrowseState.Success) {
                         emit(last.copy(refreshing = true))
                     }
-                    previous = buildBrowseTree(expanded, root)
+                    loader.invalidate(reload.path)
+                    previous = loader.build(expanded, root)
                     emit(previous)
                 }
             }.flowOn(Dispatchers.IO)
         }
+    }
         // 新树已就绪：清掉展开等待态（无论成功/出错都清，避免转圈卡死）。
         .onEach { _expandingPath.value = null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FileBrowseState.Loading)
-
-    /** 读取工作区根与当前容器根，按 [expanded] 递归展开，产出扁平的可见节点列表；工作区根读取失败则整体报错。 */
-    private fun buildBrowseTree(expanded: Set<String>, containerRoot: FileTreeRoot.Container): FileBrowseState {
-        val workspaceRoot = WorkspacePathMapper.CONTAINER_ROOT
-        val workspaceEntries = runCatching { fileAccess.listFiles(workspaceRoot) }.getOrElse { e ->
-            FileLogger.w(TAG, "列目录失败: $workspaceRoot", e)
-            return FileBrowseState.Error(e.message)
-        }
-        val nodes = mutableListOf<FileTreeNode>()
-        nodes += rootNode(FileTreeRoot.Workspace, workspaceRoot, expanded)
-        if (workspaceRoot in expanded) {
-            appendBrowseChildren(
-                workspaceRoot, workspaceEntries, depth = 1, expanded = expanded,
-                ignorePatterns = loadRootGitignore(workspaceRoot), relParts = emptyList(), out = nodes
-            )
-        }
-        // 当前容器根：读不到（容器未安装、远程未连接）时只把该行标红，不影响工作区那棵。
-        val containerExpanded = CONTAINER_FS_ROOT in expanded
-        val containerEntries = if (containerExpanded) {
-            runCatching { fileAccess.listFiles(CONTAINER_FS_ROOT) }.getOrNull()
-        } else {
-            null
-        }
-        nodes += rootNode(containerRoot, CONTAINER_FS_ROOT, expanded, hasError = containerExpanded && containerEntries == null)
-        if (containerEntries != null) {
-            appendBrowseChildren(
-                CONTAINER_FS_ROOT, containerEntries, depth = 1, expanded = expanded,
-                ignorePatterns = emptyList(), relParts = emptyList(), out = nodes
-            )
-        }
-        return FileBrowseState.Success(nodes)
-    }
-
-    /** 文件树的一个根节点行；[FileTreeNode.entry] 的 name 同时用作显示名（见 [FileTreeRoot.label]）。 */
-    private fun rootNode(root: FileTreeRoot, path: String, expanded: Set<String>, hasError: Boolean = false) = FileTreeNode(
-        entry = FileEntry(name = root.label, isDirectory = true, size = 0, lastModified = 0),
-        path = path,
-        depth = 0,
-        root = root,
-        isExpanded = path in expanded,
-        hasError = hasError
-    )
-
-    /** 读工作区根 .gitignore（本地/远程均可）；去空行/注释/否定行，读不到则空。仅根 .gitignore，不处理嵌套。 */
-    private fun loadRootGitignore(root: String): List<String> = runCatching {
-        val path = "$root/.gitignore"
-        if (!fileAccess.exists(path)) return emptyList()
-        fileAccess.readFile(path).lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("!") }
-            .map { it.removeSuffix("/") }
-            .toList()
-    }.getOrDefault(emptyList())
-
-    private fun appendBrowseChildren(
-        parent: String,
-        entries: List<FileEntry>,
-        depth: Int,
-        expanded: Set<String>,
-        ignorePatterns: List<String>,
-        relParts: List<String>,
-        out: MutableList<FileTreeNode>
-    ) {
-        // 按名字去重：文件系统的 readdir 在 FUSE 存储（外部工作区/模拟存储）上可能重复返回同一条目，
-        // AOSP 的 ReaddirHelper 亦做同样处理。同名条目会产生重复的节点 path，撞坏 LazyColumn 的 key。
-        for (entry in entries.distinctBy { it.name }.sortedWith(BROWSE_ORDER)) {
-            val path = childPathPrefix(parent) + entry.name
-            val parts = relParts + entry.name
-            val ignored = ignorePatterns.isNotEmpty() &&
-                GitIgnoreMatcher.isIgnored(ignorePatterns, parts)
-            val open = entry.isDirectory && path in expanded
-            if (!open) {
-                out += FileTreeNode(entry, path, depth, isExpanded = false, ignored = ignored)
-                continue
-            }
-            val children = runCatching { fileAccess.listFiles(path) }.getOrNull()
-            out += FileTreeNode(entry, path, depth, isExpanded = true, hasError = children == null, ignored = ignored)
-            if (children != null) appendBrowseChildren(path, children, depth + 1, expanded, ignorePatterns, parts, out)
-        }
-    }
 
     fun refreshBrowse() {
         _browseRefresh.value++
@@ -1344,16 +1273,8 @@ class AIAgentViewModel @Inject constructor(
         const val KEEPALIVE_TIMEOUT_MS = 60 * 60 * 1000L
         /** 从后台任务通知文本中提取 <title> 内容，供系统通知正文展示。 */
         val TASK_NOTIFICATION_TITLE_REGEX = Regex("<title>([^<]+)</title>")
-        /** 文件浏览排序：目录在前，同类按名称不区分大小写。 */
-        val BROWSE_ORDER: Comparator<FileEntry> =
-            compareByDescending<FileEntry> { it.isDirectory }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
-
         /** 写文件会连珠触发多个 inotify 事件，合并后再重读目录。 */
         const val BROWSE_DEBOUNCE_MS = 300L
-
-        /** 当前容器在容器内的根路径，对应宿主上的 rootfs 目录（随当前 profile 变化）。 */
-        const val CONTAINER_FS_ROOT = "/"
 
         /** 会话目标文本长度上限，避免 system 提示词过长。 */
         const val MAX_GOAL_CHARS = 2000

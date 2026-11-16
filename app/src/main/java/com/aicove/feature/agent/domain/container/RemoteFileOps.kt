@@ -25,6 +25,14 @@ interface RemoteFileOps {
      */
     suspend fun write(path: String, bytes: ByteArray, executable: Boolean, overwrite: Boolean)
 
+    suspend fun writeForConnection(
+        generation: Long,
+        path: String,
+        bytes: ByteArray,
+        executable: Boolean,
+        overwrite: Boolean
+    )
+
     /** 删除文件或空目录。 */
     suspend fun remove(path: String)
 }

@@ -125,6 +125,34 @@ class RemoteSkillBulkReaderTest {
     }
 
     @Test
+    fun filesUnder_connectionChangesDuringReadDiscardsOldResult() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val changingReader = RemoteSkillBulkReader(
+            RemoteSkillBulkContextSource { context.get() },
+            object : RemoteBulkCommandRunner {
+                override suspend fun runUnbounded(command: String, timeoutMs: Long): CommandResult? {
+                    started.countDown()
+                    assertTrue(release.await(THREAD_JOIN_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+                    return successOutput("old server")
+                }
+            }
+        )
+        val result = java.util.concurrent.FutureTask { changingReader.filesUnder("~/.aicode/skills") }
+        val thread = Thread(result)
+        thread.start()
+        try {
+            assertTrue(started.await(THREAD_JOIN_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+            context.set(contextFor("/srv/ws").copy(cacheKey = "other-server-generation"))
+        } finally {
+            release.countDown()
+            thread.join(THREAD_JOIN_TIMEOUT_MS)
+        }
+        assertTrue(!thread.isAlive)
+        assertNull(result.get(THREAD_JOIN_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+    }
+
+    @Test
     fun filesUnder_invalidateForcesNextScan() {
         response.set(successOutput())
         reader.filesUnder("~/.aicode/skills")

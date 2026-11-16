@@ -39,12 +39,17 @@ object RemoteSkillBulkModule {
     ): RemoteSkillBulkContextSource = RemoteSkillBulkContextSource {
         val mode = holder.currentMode()
         val workspaceRoot = workspaceRepository.currentPathOrNull()
+        val generation = connection.connectionGeneration
+        val config = connection.config
         val home = connection.remoteHome
-        if (mode != ExecutionMode.REMOTE_SSH || workspaceRoot == null || home == null) {
+        if (mode != ExecutionMode.REMOTE_SSH || workspaceRoot == null || home == null ||
+            config == null || !connection.isConnected() || generation != connection.connectionGeneration
+        ) {
             null
         } else {
             RemoteSkillBulkContext(
-                cacheKey = "$mode|$workspaceRoot|$home",
+                cacheKey = listOf(mode.name, config.host, config.port.toString(), config.username,
+                    generation.toString(), workspaceRoot, home).joinToString("") { "${it.length}:$it" },
                 workspaceRoot = workspaceRoot,
                 home = home
             )

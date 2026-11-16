@@ -1,6 +1,9 @@
 package com.aicove.feature.agent.presentation
 
 import androidx.lifecycle.viewModelScope
+import com.aicove.core.watch.FileChangeBatch
+import com.aicove.core.watch.FileChangeHub
+import com.aicove.core.watch.WorkspaceWriteSignal
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.RootfsSource
 import com.aicove.feature.workspace.domain.FileAccessProvider
@@ -20,6 +23,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -48,6 +53,16 @@ import org.junit.Test
 class AIAgentViewModelBrowseRefreshTest {
 
     private lateinit var viewModel: AIAgentViewModel
+    private val writeSignal = WorkspaceWriteSignal()
+    private val profile = MutableStateFlow(
+        ContainerProfile(
+            id = "builtin",
+            name = "Alpine",
+            rootfsSource = RootfsSource.Asset("alpine-rootfs.bin"),
+            shellPath = null,
+            isBuiltin = true
+        )
+    )
 
     @Before
     fun setUp() {
@@ -89,7 +104,7 @@ class AIAgentViewModelBrowseRefreshTest {
             } else {
                 // 第二次列目录就是手动刷新的重列：卡住它，让「进行中」那一帧能稳定被观察到。
                 refreshBuilding.countDown()
-                releaseRefresh.await()
+                check(releaseRefresh.await(5, TimeUnit.SECONDS))
                 secondTree
             }
         }
@@ -98,20 +113,204 @@ class AIAgentViewModelBrowseRefreshTest {
         val frames = ConcurrentLinkedQueue<FileBrowseState>()
         val collectJob = launch(Dispatchers.Unconfined) { viewModel.browseState.collect { frames += it } }
 
-        val first = awaitSuccess(frames) { !it.refreshing }
-        // 等刷新触发器订阅就绪：刷新信号经 drop(1) 丢掉订阅时的当前值，抢在订阅前发出会被吞掉。
-        delay(200)
-        viewModel.refreshBrowse()
+        try {
+            val first = awaitSuccess(frames) { !it.refreshing }
+            // 等刷新触发器订阅就绪：刷新信号经 drop(1) 丢掉订阅时的当前值，抢在订阅前发出会被吞掉。
+            delay(200)
+            viewModel.refreshBrowse()
 
-        assertTrue("手动刷新应触发重列（第二次 listFiles）", refreshBuilding.await(5, TimeUnit.SECONDS))
-        val refreshing = awaitSuccess(frames) { it.refreshing }
-        assertSame("进行中帧必须原样复用上一份树，不能替换 nodes", first.nodes, refreshing.nodes)
+            assertTrue("手动刷新应触发重列（第二次 listFiles）", refreshBuilding.await(5, TimeUnit.SECONDS))
+            val refreshing = awaitSuccess(frames) { it.refreshing }
+            assertSame("进行中帧必须原样复用上一份树，不能替换 nodes", first.nodes, refreshing.nodes)
 
-        releaseRefresh.countDown()
-        val updated = awaitSuccess(frames) { !it.refreshing && it.nodes.size == secondTree.size + 2 }
-        assertEquals(secondTree.size + 2, updated.nodes.size)
-        assertTrue("新树与旧树不是同一份", updated.nodes !== first.nodes)
-        collectJob.cancel()
+            releaseRefresh.countDown()
+            val updated = awaitSuccess(frames) { !it.refreshing && it.nodes.size == secondTree.size + 2 }
+            assertEquals(secondTree.size + 2, updated.nodes.size)
+            assertTrue("新树与旧树不是同一份", updated.nodes !== first.nodes)
+        } finally {
+            releaseRefresh.countDown()
+            collectJob.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `展开只列新增目录，折叠不列目录，再展开读取折叠期间的新内容`() = runBlocking {
+        val calls = ConcurrentLinkedQueue<String>()
+        var version = "old.txt"
+        val fileAccess = mockk<FileAccessProvider>()
+        every { fileAccess.exists(any()) } returns false
+        every { fileAccess.listFiles(any()) } answers {
+            val path = firstArg<String>()
+            calls += path
+            when (path) {
+                "~/workspace" -> listOf(entry("src", true), entry("docs", true))
+                "~/workspace/src" -> listOf(entry(version))
+                "~/workspace/docs" -> listOf(entry("guide.txt"))
+                else -> error("不应读取 $path")
+            }
+        }
+        viewModel = newFileBrowseViewModel(fileAccess)
+        val collector = launch { viewModel.browseState.collect {} }
+        try {
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "src" } }
+            assertEquals(listOf("~/workspace"), calls.toList())
+            viewModel.toggleExpand("~/workspace/src")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "old.txt" } }
+            assertEquals(listOf("~/workspace", "~/workspace/src"), calls.toList())
+            viewModel.toggleExpand("~/workspace/docs")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "guide.txt" } }
+            assertEquals(listOf("~/workspace", "~/workspace/src", "~/workspace/docs"), calls.toList())
+            calls.clear()
+
+            viewModel.toggleExpand("~/workspace/src")
+            awaitCurrent { it.nodes.any { node -> node.path == "~/workspace/src" && !node.isExpanded } }
+            assertTrue("折叠不应调用 listFiles", calls.isEmpty())
+            version = "new.txt"
+            viewModel.toggleExpand("~/workspace/src")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "new.txt" } }
+            assertEquals(listOf("~/workspace/src"), calls.toList())
+            calls.clear()
+
+            viewModel.toggleExpand("~/workspace")
+            awaitCurrent { it.nodes.size == 2 }
+            assertTrue("折叠工作区根也不应调用 listFiles", calls.isEmpty())
+        } finally {
+            collector.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `AI写入和手动刷新都会使已缓存的根和子目录重新读取`() = runBlocking {
+        val calls = ConcurrentLinkedQueue<String>()
+        var version = "old.txt"
+        val fileAccess = mockk<FileAccessProvider>()
+        every { fileAccess.exists(any()) } returns false
+        every { fileAccess.listFiles(any()) } answers {
+            val path = firstArg<String>()
+            calls += path
+            if (path == "~/workspace") listOf(entry("src", true), entry(version)) else listOf(entry(version))
+        }
+        viewModel = newFileBrowseViewModel(fileAccess)
+        val collector = launch { viewModel.browseState.collect {} }
+        try {
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "src" } }
+            viewModel.toggleExpand("~/workspace/src")
+            awaitCurrent { it.nodes.any { node -> node.path == "~/workspace/src/old.txt" } }
+            delay(200)
+            calls.clear()
+            version = "ai.txt"
+            writeSignal.notifyWritten()
+            awaitCurrent { it.nodes.count { node -> node.entry.name == "ai.txt" } == 2 }
+            assertEquals(listOf("~/workspace", "~/workspace/src"), calls.toList())
+
+            calls.clear()
+            version = "manual.txt"
+            viewModel.refreshBrowse()
+            awaitCurrent { !it.refreshing && it.nodes.count { node -> node.entry.name == "manual.txt" } == 2 }
+            assertEquals(listOf("~/workspace", "~/workspace/src"), calls.toList())
+        } finally {
+            collector.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `展开集相同的工作区和同名profile切换均丢弃旧目录缓存`() = runBlocking {
+        val calls = ConcurrentLinkedQueue<String>()
+        var version = "first.txt"
+        val fileAccess = mockk<FileAccessProvider>()
+        every { fileAccess.exists(any()) } returns false
+        every { fileAccess.listFiles(any()) } answers {
+            calls += firstArg<String>()
+            listOf(entry(version))
+        }
+        viewModel = newFileBrowseViewModel(fileAccess)
+        viewModel.setWorkspace("/projects/first")
+        val collector = launch { viewModel.browseState.collect {} }
+        try {
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "first.txt" } }
+            calls.clear()
+            version = "second.txt"
+            viewModel.setWorkspace("/projects/second")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "second.txt" } }
+            assertEquals(listOf("~/workspace"), calls.toList())
+
+            calls.clear()
+            version = "profile.txt"
+            profile.value = profile.value.copy(id = "another")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "profile.txt" } }
+            assertEquals(listOf("~/workspace"), calls.toList())
+        } finally {
+            collector.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `目录变更只重读受影响目录，根gitignore变更更新缓存标记`() = runBlocking {
+        val rootChanges = MutableSharedFlow<FileChangeBatch>()
+        val srcChanges = MutableSharedFlow<FileChangeBatch>()
+        val hub = mockk<FileChangeHub> {
+            every { watchWorkspace("~/workspace") } returns rootChanges
+            every { watchWorkspace("~/workspace/src") } returns srcChanges
+        }
+        val calls = ConcurrentLinkedQueue<String>()
+        var version = "old.txt"
+        var ignore = ""
+        val fileAccess = mockk<FileAccessProvider>()
+        every { fileAccess.exists(any()) } returns true
+        every { fileAccess.readFile(any()) } answers { ignore }
+        every { fileAccess.listFiles(any()) } answers {
+            val path = firstArg<String>()
+            calls += path
+            if (path == "~/workspace") listOf(entry("src", true)) else listOf(entry(version))
+        }
+        viewModel = newFileBrowseViewModel(fileAccess, hub)
+        val collector = launch { viewModel.browseState.collect {} }
+        try {
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "src" } }
+            viewModel.toggleExpand("~/workspace/src")
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "old.txt" } }
+            withTimeout(5_000) { srcChanges.subscriptionCount.first { it > 0 } }
+            calls.clear()
+            version = "new.txt"
+            srcChanges.emit(FileChangeBatch(emptyList()))
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "new.txt" } }
+            assertEquals(listOf("~/workspace/src"), calls.toList())
+
+            calls.clear()
+            ignore = "*.txt"
+            rootChanges.emit(FileChangeBatch(emptyList()))
+            awaitCurrent { it.nodes.any { node -> node.entry.name == "new.txt" && node.ignored } }
+            assertEquals(listOf("~/workspace"), calls.toList())
+        } finally {
+            collector.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `子目录读取失败保留工作区树并标错，刷新后恢复`() {
+        val fileAccess = mockk<FileAccessProvider>()
+        every { fileAccess.exists(any()) } returns false
+        every { fileAccess.listFiles("~/workspace") } returns listOf(entry("src", true), entry("visible.txt"))
+        every { fileAccess.listFiles("~/workspace/src") } throws java.io.IOException("unavailable")
+        val loader = BrowseTreeLoader("~/workspace", fileAccess::listFiles, fileAccess::exists, fileAccess::readFile)
+        val expanded = setOf("~/workspace", "~/workspace/src")
+        val root = FileTreeRoot.Container("Alpine", null, false)
+
+        val failed = loader.build(expanded, root) as FileBrowseState.Success
+        assertTrue(failed.nodes.any { it.path == "~/workspace/src" && it.hasError })
+        assertTrue(failed.nodes.any { it.entry.name == "visible.txt" })
+
+        every { fileAccess.listFiles("~/workspace/src") } returns listOf(entry("recovered.txt"))
+        loader.invalidate("~/workspace/src")
+        val recovered = loader.build(expanded, root) as FileBrowseState.Success
+        assertTrue(recovered.nodes.any { it.path == "~/workspace/src" && !it.hasError })
+        assertTrue(recovered.nodes.any { it.entry.name == "recovered.txt" })
+    }
+
+    private fun entry(name: String, directory: Boolean = false) = FileEntry(name, directory, 0, 0)
+
+    private suspend fun awaitCurrent(predicate: (FileBrowseState.Success) -> Boolean) = withTimeout(5_000) {
+        viewModel.browseState.first { it is FileBrowseState.Success && predicate(it) }
     }
 
     /** 取第一帧满足 [predicate] 的 [FileBrowseState.Success]；超时即失败。 */
@@ -131,7 +330,10 @@ class AIAgentViewModelBrowseRefreshTest {
      * 只为文件树这一条路径起的 ViewModel：它只依赖 [FileAccessProvider] 与文件变更信号，
      * 其余构造依赖与本路径无关，一律 relaxed mock。
      */
-    private fun newFileBrowseViewModel(fileAccess: FileAccessProvider): AIAgentViewModel = AIAgentViewModel(
+    private fun newFileBrowseViewModel(
+        fileAccess: FileAccessProvider,
+        fileChangeHub: FileChangeHub = mockk { every { watchWorkspace(any()) } returns emptyFlow() }
+    ): AIAgentViewModel = AIAgentViewModel(
         agentWorkflow = mockk(relaxed = true),
         toolRegistry = mockk(relaxed = true),
         agentEngine = mockk(relaxed = true),
@@ -146,7 +348,9 @@ class AIAgentViewModelBrowseRefreshTest {
         toolPermissionManager = mockk(relaxed = true),
         askUserQuestionManager = mockk(relaxed = true),
         containerEngine = mockk(relaxed = true),
-        sessionUseCase = mockk(relaxed = true),
+        sessionUseCase = mockk(relaxed = true) {
+            coEvery { getMostRecentSessionOfWorkspace(any()) } coAnswers { awaitCancellation() }
+        },
         messagePersistenceUseCase = mockk(relaxed = true),
         agentChatRequestBus = mockk(relaxed = true) {
             coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
@@ -178,26 +382,20 @@ class AIAgentViewModelBrowseRefreshTest {
         agentDefinitionRepository = mockk(relaxed = true),
         todoItemDao = mockk(relaxed = true),
         fileAccess = fileAccess,
-        fileChangeHub = mockk(relaxed = true),
-        workspaceWriteSignal = mockk(relaxed = true) { every { writes } returns MutableSharedFlow() },
+        fileChangeHub = fileChangeHub,
+        workspaceWriteSignal = writeSignal,
         contextUsageHolder = mockk(relaxed = true),
-        // 容器根行依赖这两个流：桩成会发值，否则 containerRootNode 永不产出、browseState 也就永不发帧。
+        // 容器根行依赖这两个流：桩成会发值，否则 browseScope 永不产出、browseState 也就永不发帧。
         containerSettingsRepository = mockk(relaxed = true) {
-            every { activeProfileFlow } returns MutableStateFlow(
-                ContainerProfile(
-                    id = "builtin",
-                    name = "Alpine",
-                    rootfsSource = RootfsSource.Asset("alpine-rootfs.bin"),
-                    shellPath = null,
-                    isBuiltin = true
-                )
-            )
+            every { activeProfileFlow } returns profile
         },
         containerOsDetector = mockk(relaxed = true) { every { osMap } returns MutableStateFlow(emptyMap()) },
         liveNotificationSettings = mockk(relaxed = true) { every { enabledFlow } returns MutableStateFlow(false) },
         agentLiveNotificationManager = mockk(relaxed = true),
         approvalNotificationSettings = mockk(relaxed = true) { every { enabledFlow } returns MutableStateFlow(false) },
         agentApprovalNotificationManager = mockk(relaxed = true),
-        context = mockk(relaxed = true)
+        context = mockk(relaxed = true) {
+            every { getSharedPreferences(any(), any()).getStringSet(any(), any()) } returns null
+        }
     )
 }

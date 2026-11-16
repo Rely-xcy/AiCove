@@ -26,7 +26,7 @@ private const val WAIT_TIMEOUT_MS = 30_000L
 /**
  * 批量读取需要的远端上下文。
  *
- * @param cacheKey 失效键：执行模式 + 工作区 + 远端 home，任一变化都换一批远端文件。
+ * @param cacheKey 失效键：执行模式、服务器身份、连接代次、工作区与远端 home。
  */
 data class RemoteSkillBulkContext(
     val cacheKey: String,
@@ -157,7 +157,7 @@ class RemoteSkillBulkReader @Inject constructor(
         }
 
         val files = try {
-            fetch(context)
+            fetch(context).takeIf { contextSource.context()?.cacheKey == key }
         } catch (e: Exception) {
             FileLogger.w(TAG, "批量读取技能/子代理文件失败，本次回退逐文件读取", e)
             null
