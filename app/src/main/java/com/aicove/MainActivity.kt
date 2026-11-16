@@ -416,10 +416,10 @@ fun AppNavigation(
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
     val pluginsViewModel: com.aicove.feature.plugin.presentation.PluginsViewModel = hiltViewModel()
-    // 侧栏底部的插件入口（uiEntries 声明 slot=drawer.footer）
-    val drawerPluginEntries by pluginsViewModel
-        .slotEntries(com.aicove.feature.plugin.domain.PluginUiSlots.DRAWER_FOOTER)
-        .collectAsStateWithLifecycle()
+    val drawerEntries = remember(pluginsViewModel) {
+        pluginsViewModel.slotEntries(com.aicove.feature.plugin.domain.PluginUiSlots.DRAWER_FOOTER)
+    }
+    val drawerPluginEntries by drawerEntries.collectAsStateWithLifecycle()
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
