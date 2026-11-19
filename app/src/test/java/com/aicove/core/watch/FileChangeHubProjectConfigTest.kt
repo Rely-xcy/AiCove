@@ -14,6 +14,7 @@ import com.aicove.feature.workspace.domain.WorkspacePathMapper
 import com.aicove.feature.workspace.domain.model.Workspace
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -66,6 +67,7 @@ class FileChangeHubProjectConfigTest {
     private lateinit var workspaceRepository: WorkspaceRepository
     private lateinit var projectAicodeRoot: ProjectAicodeRoot
     private lateinit var hub: FileChangeHub
+    private lateinit var poller: RemoteFileWatchPoller
 
     @Before
     fun setUp() {
@@ -104,7 +106,7 @@ class FileChangeHubProjectConfigTest {
         // 远端 home 未探到 → 远程那条路由退化为空流，事件只能来自宿主这条（正是被测的路由）。
         every { remoteSshConnection.remoteHome } returns null
 
-        val poller = mockk<RemoteFileWatchPoller>()
+        poller = mockk()
         every { poller.watch(any(), any(), any(), any(), any()) } returns emptyFlow()
 
         projectAicodeRoot = mockk<ProjectAicodeRoot>()
@@ -131,6 +133,23 @@ class FileChangeHubProjectConfigTest {
         //    join 的挂起点永远等不到 resume，tearDown 直接挂死。
         runBlocking { hub.close() }
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun watchRemoteDirPassesTheValidatedAbsolutePathToTheRemotePoller() {
+        val path = "/home/deploy/project/plugin-data"
+
+        hub.watchRemoteDir(path, recursive = true)
+
+        verify(exactly = 1) {
+            poller.watch(
+                remoteDir = path,
+                containerRoot = path,
+                recursive = true,
+                filter = WatchFilter.DEFAULT,
+                domain = ChangeDomain.OTHER
+            )
+        }
     }
 
     @Test

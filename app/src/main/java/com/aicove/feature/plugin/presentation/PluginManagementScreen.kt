@@ -294,7 +294,7 @@ fun PluginManagementScreen(
         PluginPublishHost(
             viewModel = publishViewModel,
             onPickPackage = { publishPicker.launch(PluginPackageMimeTypes) },
-            onExport = { name -> exportPicker.launch(name) }
+            onExport = { name -> exportPicker.launch(name) },
             onDismiss = { publishViewModel.dismiss(); showPublish = false }
         )
     }

@@ -74,13 +74,14 @@ class WorkspaceRepositoryRemoteRootEmptyTest {
         config: RemoteConnectionConfig?,
         listing: String = "",
         connectionState: ConnectionState = ConnectionState.CONNECTED,
+        remoteHome: String = REMOTE_HOME,
         // 按命令给退出码：`test -d` 要靠它判断「目录已存在」，其余默认成功
         exitCode: (String) -> Int = { 0 }
     ): WorkspaceRepository {
         every { executionModeHolder.currentMode() } returns ExecutionMode.REMOTE_SSH
         every { remoteSshConnection.connectionState } returns MutableStateFlow(connectionState)
         every { remoteSshConnection.config } returns config
-        every { remoteSshConnection.remoteHome } returns REMOTE_HOME
+        every { remoteSshConnection.remoteHome } returns remoteHome
         every { remoteSshConnection.isConnected() } returns (connectionState == ConnectionState.CONNECTED)
         // 构造期与 DataStore 委托都会碰到这两处（strict mock 下未 stub 即抛）
         every { context.applicationContext } returns context
@@ -90,8 +91,8 @@ class WorkspaceRepositoryRemoteRootEmptyTest {
         every { pathHomeResolver.expandHome(any()) } answers {
             val p = firstArg<String>()
             when {
-                p == "~" -> REMOTE_HOME
-                p.startsWith("~/") -> REMOTE_HOME.trimEnd('/') + p.removePrefix("~")
+                p == "~" -> remoteHome
+                p.startsWith("~/") -> remoteHome.trimEnd('/') + p.removePrefix("~")
                 else -> p
             }
         }
@@ -164,15 +165,25 @@ class WorkspaceRepositoryRemoteRootEmptyTest {
 
     @Test
     fun defaultWorkspacePathsUseTheSelectedPhysicalConfigRootDuringFallback() = runBlocking {
-        for (configured in listOf("~/.aicove/workspaces", "~/.aicode/workspaces", "~//.aicove//workspaces//", "~/./.aicove/./workspaces")) {
+        val cases = listOf(
+            "~/.aicove/workspaces" to REMOTE_HOME,
+            "~/.aicode/workspaces" to REMOTE_HOME,
+            "~//.aicove//workspaces//" to REMOTE_HOME,
+            "~/./.aicove/./workspaces" to REMOTE_HOME,
+            "~/.aicove/workspaces" to "/home//deploy"
+        )
+        for ((configured, remoteHome) in cases) {
             executedCommands.clear()
-            val repo = createRepository(config(configured), listing = "alpha\n")
-            every { remoteSshConnection.configRoot() } returns "$REMOTE_HOME/.aicode"
+            val normalizedHome = remoteHome.split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
+                .let { if (remoteHome.startsWith('/')) "/$it" else it }
+            val selectedRoot = "$normalizedHome/.aicode"
+            val repo = createRepository(config(configured), listing = "alpha\n", remoteHome = remoteHome)
+            every { remoteSshConnection.configRoot() } returns selectedRoot
 
             repo.refreshAvailability()
 
-            assertTrue(executedCommands.single().startsWith("cd '$REMOTE_HOME/.aicode/workspaces' "))
-            assertEquals("$REMOTE_HOME/.aicode/workspaces/alpha", repo.workspaces.value.single().path)
+            assertTrue(executedCommands.single().startsWith("cd '$selectedRoot/workspaces' "))
+            assertEquals("$selectedRoot/workspaces/alpha", repo.workspaces.value.single().path)
         }
     }
 

@@ -392,10 +392,12 @@ class WorkspaceRepository @Inject constructor(
      */
     private fun remoteWorkspaceRootOrNull(cfg: RemoteConnectionConfig?): String? {
         if (cfg == null) return null
-        val expanded = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
-        val path = expanded.split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
-            .let { if (expanded.startsWith('/')) "/$it" else it }
-        val home = remoteSshConnection.remoteHome?.trimEnd('/')
+        fun normalized(path: String): String = path.split('/')
+            .filter { it.isNotEmpty() && it != "." }
+            .joinToString("/")
+            .let { if (path.startsWith('/')) "/$it" else it }
+        val path = normalized(pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/')))
+        val home = remoteSshConnection.remoteHome?.let(::normalized)?.trimEnd('/')
         if (home != null && path in listOf("$home/.aicove/workspaces", "$home/.aicode/workspaces")) {
             return remoteSshConnection.configRoot().trimEnd('/') + "/workspaces"
         }

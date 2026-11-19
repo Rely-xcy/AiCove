@@ -97,7 +97,7 @@ class PluginToolAdapter(
             id = callId,
             toolName = name,
             title = context.getString(R.string.plugin_tool_permission_title),
-            summary = context.getString(R.string.plugin_tool_permission_summary, pluginName(), title)
+            summary = context.getString(R.string.plugin_tool_permission_summary, pluginName(), title),
             details = context.getString(
                 R.string.plugin_tool_permission_details,
                 pluginId,

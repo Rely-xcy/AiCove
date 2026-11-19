@@ -12,6 +12,9 @@ class ConfigRootSelection(private val fs: ConfigMigrationFileSystem) {
             val result = ConfigMigration(fs).migrate(oldRoot, newRoot)
             val root = result.physicalRoot
             val rootEntry = fs.lstat(root)
+            if (result.failureCode == "COMMIT_STATE_UNKNOWN") {
+                throw IOException("Configuration migration commit state is ambiguous; both roots were preserved")
+            }
             if (!result.completed && rootEntry?.type == ConfigEntryType.SYMBOLIC_LINK) {
                 throw IOException("Configuration migration did not validate the root link: ${result.failureCode}")
             }

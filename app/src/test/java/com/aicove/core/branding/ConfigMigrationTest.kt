@@ -260,7 +260,7 @@ class ConfigMigrationTest {
     }
 
     @Test
-    fun interruptedAliasCommitRestoresOldBeforeReturningRetry() {
+    fun interruptedAliasCommitKeepsNewRootAndRepairsLegacyLinkOnRetry() {
         val old = temp.newFolder("old")
         val new = temp.newFolder("new")
         write(old, "settings", "old")
@@ -275,9 +275,13 @@ class ConfigMigrationTest {
         val first = migrate(old, new, failing)
         assertTrue(Thread.interrupted())
         assertFalse(first.completed)
-        assertFalse(Files.isSymbolicLink(old.toPath()))
-        assertEquals("old", File(old, "settings").readText())
+        assertFalse(old.exists())
+        assertEquals("old", File(new, "settings").readText())
+        write(new, "settings", "edited after interrupted commit")
+
         assertTrue(migrate(old, new).completed)
+        assertTrue(Files.isSymbolicLink(old.toPath()))
+        assertEquals("edited after interrupted commit", File(old, "settings").readText())
     }
 
     @Test
@@ -286,14 +290,18 @@ class ConfigMigrationTest {
         val new = temp.newFolder("new")
         write(old, "settings", "old")
         val first = migrate(old, new, object : ConfigMigrationFileSystem by local {
-            override fun symlink(link: String, target: String) {
-                throw IOException("link permission denied")
+            override fun move(source: String, target: String) {
+                local.move(source, target)
+                if (File(target).name.startsWith(".aicove-legacy-") && source == old.absolutePath) {
+                    throw InterruptedIOException("connection lost after archive rename")
+                }
             }
         })
         assertFalse(first.completed)
-        local.move(old.absolutePath, first.legacyArchive!!)
+        assertTrue(Files.isDirectory(File(first.legacyArchive!!).toPath()))
         val recovered = migrate(old, new)
         assertTrue(recovered.completed)
+        assertTrue(Files.isSymbolicLink(old.toPath()))
         assertEquals("old", File(old, "settings").readText())
     }
 
@@ -586,24 +594,24 @@ class ConfigMigrationTest {
     }
 
     @Test
-    fun failedArchiveRecoverySelectsThePreservedOriginalEntityNotTheMergedCopy() {
+    fun interruptedAliasCommitUsesTheNewRootAndPreservesTheArchive() {
         val old = temp.newFolder("old")
         val new = temp.newFolder("new")
         write(old, "settings", "old")
         val first = migrate(old, new, object : ConfigMigrationFileSystem by local {
             override fun move(source: String, target: String) {
-                if (target == old.absolutePath) throw IOException("Old entry cannot be restored")
+                if (target == old.absolutePath) throw IOException("Legacy alias cannot be installed")
                 local.move(source, target)
             }
         })
         assertFalse(first.completed)
-        assertEquals("OLD_ENTRY_RECOVERY_REQUIRED", first.failureCode)
-        assertEquals(first.legacyArchive, first.physicalRoot)
-        assertEquals("old", File(first.physicalRoot, "settings").readText())
+        assertEquals(new.absolutePath, first.physicalRoot)
+        assertEquals("old", File(first.legacyArchive!!, "settings").readText())
         write(new, "settings", "new changed independently")
-        assertEquals("old", File(first.physicalRoot, "settings").readText())
+        assertEquals("old", File(first.legacyArchive, "settings").readText())
         assertTrue(migrate(old, new).completed)
-        assertEquals("old", File(old, "settings").readText())
+        assertTrue(Files.isSymbolicLink(old.toPath()))
+        assertEquals("new changed independently", File(old, "settings").readText())
     }
 
     @Test
@@ -661,24 +669,64 @@ class ConfigMigrationTest {
     }
 
     @Test
-    fun failedCompletionRecordMustBeCommittedBeforeTheNewRootIsPublished() {
+    fun restoredLegacyDirectoryCannotOverwriteAnAlreadyCommittedRoot() {
+        val old = temp.newFolder("old")
+        val new = temp.newFolder("new")
+        write(old, "settings", "original")
+        val first = migrate(old, new)
+        assertTrue(first.completed)
+        write(new, "settings", "current value")
+        Files.delete(old.toPath())
+        write(old, "settings", "restored stale copy")
+
+        val retry = migrate(old, new)
+
+        assertFalse(retry.completed)
+        assertEquals("COMMITTED_ROOT_CONFLICT", retry.failureCode)
+        assertEquals("current value", File(new, "settings").readText())
+        assertEquals("restored stale copy", File(old, "settings").readText())
+    }
+
+    @Test
+    fun failedCommitMarkerRestoresOldRootBeforePublishingAlias() {
         val old = temp.newFolder("old")
         val new = temp.newFolder("new")
         write(old, "settings", "before migration")
         val failed = migrate(old, new, object : ConfigMigrationFileSystem by local {
             override fun writeSmallFile(path: String, content: ByteArray) {
-                if (File(path).name.startsWith("complete-")) throw IOException("Completion write failed")
+                if (File(path).name.startsWith("commit-ready-")) throw IOException("Commit record failed")
+                local.writeSmallFile(path, content)
+            }
+        })
+        assertFalse(failed.completed)
+        assertTrue(old.isDirectory)
+        assertFalse(Files.isSymbolicLink(old.toPath()))
+        assertEquals("before migration", File(old, "settings").readText())
+        write(new, "settings", "edited before retry")
+
+        assertTrue(migrate(old, new).completed)
+        assertEquals("before migration", File(new, "settings").readText())
+    }
+
+    @Test
+    fun failedCompletionMarkerRepairsMissingAliasWithoutReplayingArchive() {
+        val old = temp.newFolder("old")
+        val new = temp.newFolder("new")
+        write(old, "settings", "before migration")
+        val failed = migrate(old, new, object : ConfigMigrationFileSystem by local {
+            override fun writeSmallFile(path: String, content: ByteArray) {
+                if (File(path).name.startsWith("complete-")) throw IOException("Completion record failed")
                 local.writeSmallFile(path, content)
             }
         })
         assertFalse(failed.completed)
         assertTrue(Files.isSymbolicLink(old.toPath()))
-        assertTrue(migrate(old, new).completed)
-        write(new, "settings", "edited after retry")
+        write(new, "settings", "edited after alias commit")
         Files.delete(old.toPath())
 
         assertTrue(migrate(old, new).completed)
-        assertEquals("edited after retry", File(new, "settings").readText())
+        assertTrue(Files.isSymbolicLink(old.toPath()))
+        assertEquals("edited after alias commit", File(old, "settings").readText())
     }
 
     @Test
@@ -718,6 +766,29 @@ class ConfigMigrationTest {
         assertEquals("physical workspace", File(selected.physicalRoot, "settings").readText())
         assertEquals("untouched logical workspace", File(logicalProject, "old/settings").readText())
         assertFalse(File(logicalProject, "new").exists())
+    }
+
+    @Test
+    fun ambiguousLegacyArchiveIsPreservedInsteadOfReplayed() {
+        val old = temp.newFolder("old")
+        val new = temp.newFolder("new")
+        write(old, "settings", "original")
+        write(new, "settings", "new value")
+        val incomplete = migrate(old, new, object : ConfigMigrationFileSystem by local {
+            override fun copyFile(source: String, target: String) {
+                throw IOException("pause before migration commit")
+            }
+        })
+        assertFalse(incomplete.completed)
+        local.move(old.absolutePath, incomplete.legacyArchive!!)
+
+        val retried = migrate(old, new)
+
+        assertFalse(retried.completed)
+        assertEquals("COMMIT_STATE_UNKNOWN", retried.failureCode)
+        assertEquals("original", File(incomplete.legacyArchive, "settings").readText())
+        assertEquals("new value", File(new, "settings").readText())
+        assertFalse(old.exists())
     }
 
     @Test

@@ -43,12 +43,40 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
             if (parent(old) != parent(new)) fail("ROOT_PARENT_MISMATCH")
             var source = fs.lstat(old)
             var destination = fs.lstat(new)
+            state = findState(old, new)
+            if (state != null && hasRecord(state, "commit-ready-", old, new)) {
+                val archive = legacyArchive(state)
+                when {
+                    source?.type == ConfigEntryType.DIRECTORY && destination?.type == ConfigEntryType.DIRECTORY &&
+                        hasCopyCompletion(state, old, new) ->
+                        return result(ConfigMigrationStatus.COPIED_COMPATIBILITY, new, state)
+                    source?.type == ConfigEntryType.SYMBOLIC_LINK && destination?.type == ConfigEntryType.DIRECTORY &&
+                        runCatching { fs.realPath(old) == new }.getOrDefault(false) -> {
+                        if (!hasRecord(state, "complete-", old, new)) record(state, "complete-", old, new)
+                        return result(ConfigMigrationStatus.ALREADY_MIGRATED, new, state)
+                    }
+                    source == null && destination?.type == ConfigEntryType.DIRECTORY ->
+                        return installCompatibility(old, new, state, hadSource = false)
+                    source?.type == ConfigEntryType.DIRECTORY && destination == null && fs.lstat(archive) == null &&
+                        !hasRecord(state, "complete-", old, new) && hasRecord(state, "rename-intent-", old, new) ->
+                        fastRename(old, new, state)?.let { return it }
+                    source?.type == ConfigEntryType.DIRECTORY && destination?.type == ConfigEntryType.DIRECTORY &&
+                        fs.lstat(archive) == null && !hasRecord(state, "complete-", old, new) &&
+                        hasRecord(state, "archive-intent-", old, new) ->
+                        return installCompatibility(old, new, state, hadSource = true)
+                    else -> fail("COMMITTED_ROOT_CONFLICT")
+                }
+            }
+            if (source == null && state != null && fs.lstat(legacyArchive(state))?.type == ConfigEntryType.DIRECTORY &&
+                destination?.type == ConfigEntryType.DIRECTORY) {
+                fail("COMMIT_STATE_UNKNOWN")
+            }
             if (source?.type == ConfigEntryType.SYMBOLIC_LINK) {
                 val resolved = fs.realPath(old)
                 val target = if (destination?.type == ConfigEntryType.SYMBOLIC_LINK) fs.realPath(new) else new
                 if (destination != null && resolved == target && fs.lstat(resolved)?.type == ConfigEntryType.DIRECTORY) {
-                    state = findState(old, new)
                     state?.let {
+                        if (!hasRecord(it, "commit-ready-", old, new)) record(it, "commit-ready-", old, new)
                         if (!hasRecord(it, "complete-", old, new)) record(it, "complete-", old, new)
                     }
                     return result(ConfigMigrationStatus.ALREADY_MIGRATED, resolved, state)
@@ -58,11 +86,6 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
             if (destination?.type == ConfigEntryType.SYMBOLIC_LINK && source?.type == ConfigEntryType.DIRECTORY) {
                 val resolved = runCatching { fs.realPath(new) }.getOrNull()
                 if (resolved == old) return result(ConfigMigrationStatus.ALREADY_MIGRATED, old, state)
-            }
-            state = findState(old, new)
-            if (state != null && source == null && destination?.type == ConfigEntryType.DIRECTORY &&
-                hasRecord(state, "complete-", old, new)) {
-                return installCompatibility(old, new, state, hadSource = false)
             }
             restoreOldEntry(old, new, state)
             source = fs.lstat(old)
@@ -100,15 +123,15 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
             }
             if (e is InterruptedException || e is InterruptedIOException) Thread.currentThread().interrupt()
             val recoveryFailed = try {
-                restoreOldEntry(old, new, state)
+                if (code != "COMMIT_STATE_UNKNOWN") restoreOldEntry(old, new, state)
                 false
             } catch (_: Exception) { true }
             val fallback = try {
                 val archive = state?.let { legacyArchive(it) }
                 when {
-                    fs.lstat(old) != null -> old
-                    state != null && hasRecord(state, "complete-", old, new) &&
+                    state != null && hasRecord(state, "commit-ready-", old, new) &&
                         fs.lstat(new)?.type == ConfigEntryType.DIRECTORY -> new
+                    fs.lstat(old) != null -> old
                     archive != null && fs.lstat(archive)?.type == ConfigEntryType.DIRECTORY -> archive
                     else -> new
                 }
@@ -171,7 +194,7 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
     }
 
     private fun restoreOldEntry(old: String, new: String, state: String?) {
-        if (state == null || fs.lstat(old) != null || hasRecord(state, "complete-", old, new)) return
+        if (state == null || fs.lstat(old) != null || hasRecord(state, "commit-ready-", old, new)) return
         val archive = legacyArchive(state)
         if (fs.lstat(archive)?.type == ConfigEntryType.DIRECTORY) fs.move(archive, old)
         else if (hasRecord(state, "rename-intent-", old, new) &&
@@ -187,6 +210,7 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
             fail("ALIAS_VERIFICATION")
         }
         record(state, "rename-intent-", old, new)
+        if (!hasRecord(state, "commit-ready-", old, new)) record(state, "commit-ready-", old, new)
         checkInterrupted()
         fs.move(old, new)
         fs.move(alias, old)
@@ -330,6 +354,7 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
     }
 
     private fun installCompatibility(old: String, new: String, state: String, hadSource: Boolean): ConfigMigrationResult {
+        ensureDirectory(child(state, "staging"))
         val alias = child(state, "alias-" + randomId())
         try {
             fs.symlink(alias, name(new))
@@ -350,10 +375,14 @@ class ConfigMigration(private val fs: ConfigMigrationFileSystem) {
         if (hadSource) {
             val archive = legacyArchive(state)
             if (fs.lstat(archive) != null) fail("ARCHIVE_ALREADY_EXISTS")
+            if (!matches(old, new, subset = true)) fail("ARCHIVE_VERIFICATION")
             record(state, "archive-intent-", old, new)
+        }
+        if (!hasRecord(state, "commit-ready-", old, new)) record(state, "commit-ready-", old, new)
+        if (hadSource) {
             // This pair of renames needs recovery on failure; generic SFTP has no atomic directory/link exchange.
             checkInterrupted()
-            fs.move(old, archive)
+            fs.move(old, legacyArchive(state))
         }
         fs.move(alias, old)
         if (fs.lstat(old)?.type != ConfigEntryType.SYMBOLIC_LINK || fs.realPath(old) != new) fail("ALIAS_VERIFICATION")

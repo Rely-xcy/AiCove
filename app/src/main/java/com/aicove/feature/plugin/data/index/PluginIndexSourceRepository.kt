@@ -33,6 +33,7 @@ data class PluginIndexSource(
 
 object PluginIndexDefaults {
     const val ALL_SOURCES_ID = "all"
+    const val DEV_DOCS_URL = "https://rely-xcy.github.io/AiCove/advanced/plugin-development.html"
 
     val builtIns = listOf(
         PluginIndexSource(

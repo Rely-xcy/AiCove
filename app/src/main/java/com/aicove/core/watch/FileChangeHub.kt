@@ -254,6 +254,20 @@ class FileChangeHub @Inject constructor(
             }
         }
 
+    /** 订阅已由宿主校验范围的任意远端目录；供插件等远端路径消费者使用。 */
+    fun watchRemoteDir(
+        remoteDir: String,
+        recursive: Boolean = false,
+        filter: WatchFilter = WatchFilter.DEFAULT,
+        domain: ChangeDomain = ChangeDomain.OTHER
+    ): Flow<FileChangeBatch> = remoteFileWatchPoller.watch(
+        remoteDir = remoteDir,
+        containerRoot = remoteDir.trimEnd('/'),
+        recursive = recursive,
+        filter = filter,
+        domain = domain
+    )
+
     /**
      * 容器路径 → 远端绝对目录；不属于当前工作区（`~/workspace` 之外）时返回 null。
      *
