@@ -31,6 +31,14 @@ class BuiltInSafeCommandsTest {
     }
 
     @Test
+    fun newAndLegacyConfigurationPaths_areBothSensitive() {
+        assertFalse(safe("cat ~/.aicove/mcp.json"))
+        assertFalse(safe("cat ~/.aicode/mcp.json"))
+        assertFalse(safe("grep token /root/.aicove/settings.json"))
+        assertTrue(safe("cat README.md"))
+    }
+
+    @Test
     fun gitReadOnlySubcommands_areSafe() {
         assertTrue(safe("git status"))
         assertTrue(safe("git status -s"))

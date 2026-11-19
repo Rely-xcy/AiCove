@@ -236,7 +236,7 @@ class PrepareIntegrationTest(unittest.TestCase):
         with patch.object(cycle, 'branch_head', side_effect=remote_head), patch.object(cycle, 'output') as out:
             cycle.publish(apk)
             self.assertEqual(head, remote_head(BRANCH))
-            self.assertEqual(apk.read_bytes(), Path(f'dist/aicode-universal-beta-{head[:8]}.apk').read_bytes())
+            self.assertEqual(apk.read_bytes(), Path(f'dist/aicove-universal-beta-{head[:8]}.apk').read_bytes())
             out.assert_called_with('published', 'true')
             cycle.publish(apk)
             out.assert_called_with('published', 'true')

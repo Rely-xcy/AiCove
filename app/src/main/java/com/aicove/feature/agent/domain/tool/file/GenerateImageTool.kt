@@ -129,7 +129,7 @@ class GenerateImageTool @Inject constructor(
         "output_path" to ToolParameter(
             name = "output_path",
             type = ParameterType.STRING,
-            description = "保存路径（可选）。不传默认保存到 ~/.aicode/generated-images/；传了则保存到指定路径，如 ~/workspace/assets/image.png。",
+            description = "保存路径（可选）。不传默认保存到 ~/.aicove/generated-images/；传了则保存到指定路径，如 ~/workspace/assets/image.png。",
             required = false
         )
     )
@@ -728,7 +728,7 @@ class GenerateImageTool @Inject constructor(
 
     internal companion object {
         const val TAG = "GenerateImageTool"
-        const val DEFAULT_OUTPUT_DIR = "~/.aicode/generated-images"
+        const val DEFAULT_OUTPUT_DIR = "~/.aicove/generated-images"
         const val DEFAULT_SIZE = "1024x1024"
         const val MAX_IMAGES = 4
         const val MAX_IMAGE_BYTES = 20L * 1024 * 1024

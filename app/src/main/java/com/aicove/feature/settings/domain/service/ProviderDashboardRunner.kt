@@ -704,6 +704,7 @@ class ProviderDashboardRunner @Inject constructor(
         return when {
             path.startsWith("/") -> path
             path.startsWith("~/") -> pathHomeResolver.expandHome(path)
+            path.startsWith(".aicove/scripts/") -> "$root/${path.removePrefix(".aicove/")}"
             path.startsWith(".aicode/scripts/") -> "$root/${path.removePrefix(".aicode/")}"
             path.startsWith("scripts/") -> "$root/$path"
             else -> "$root/scripts/$path"

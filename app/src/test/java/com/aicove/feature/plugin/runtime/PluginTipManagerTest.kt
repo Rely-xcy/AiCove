@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.runtime
 
+import com.aicove.feature.plugin.pluginTestContext
 import com.aicove.feature.plugin.domain.InstalledPlugin
 import com.aicove.feature.plugin.domain.LocalizedText
 import com.aicove.feature.plugin.domain.PluginContent
@@ -20,21 +21,26 @@ import org.junit.Test
 
 class PluginTipManagerTest {
 
-    private fun plugin(id: String): InstalledPlugin {
+    private fun plugin(id: String, displayName: LocalizedText = LocalizedText.single("Demo")): InstalledPlugin {
         val instance = mockk<InstalledPlugin>(relaxed = true)
         every { instance.id } returns id
         every { instance.isActive } returns true
-        every { instance.manifest } returns mockk { every { name } returns LocalizedText.single("Demo") }
+        every { instance.manifest } returns mockk { every { name } returns displayName }
         every { instance.content } returns PluginContent(runtime = mockk(relaxed = true))
         return instance
     }
 
-    private fun manager(vararg pluginIds: String): PluginTipManager {
+    private fun manager(
+        vararg pluginIds: String,
+        languageTag: String = "en-US",
+        name: LocalizedText = LocalizedText.single("Demo")
+    ): PluginTipManager {
         val plugins = mockk<PluginManager>(relaxed = true)
-        every { plugins.plugins } returns MutableStateFlow(pluginIds.map { plugin(it) })
+        every { plugins.plugins } returns MutableStateFlow(pluginIds.map { plugin(it, name) })
         every { plugins.ensureLoaded() } just Runs
         val runtime = mockk<PluginRuntimeManager>(relaxed = true)
-        return PluginTipManager(plugins, object : dagger.Lazy<PluginRuntimeManager> {
+        val context = pluginTestContext(languageTag)
+        return PluginTipManager(context, plugins, object : dagger.Lazy<PluginRuntimeManager> {
             override fun get(): PluginRuntimeManager = runtime
         })
     }
@@ -59,6 +65,15 @@ class PluginTipManagerTest {
         assertEquals("Demo", queued.pluginName)
         assertEquals("hello", queued.text)
         assertTrue(queued.id.startsWith("tip-"))
+    }
+
+    @Test
+    fun show_usesAppLocaleForChinesePluginName() {
+        val manager = manager("demo.tip", languageTag = "zh-Hans-CN", name = LocalizedText(mapOf(
+            "default" to "Demo", "zh-cn" to "中文插件"
+        )))
+        manager.show("demo.tip", tip("hello"))
+        assertEquals("中文插件", manager.tips.value.single().pluginName)
     }
 
     @Test

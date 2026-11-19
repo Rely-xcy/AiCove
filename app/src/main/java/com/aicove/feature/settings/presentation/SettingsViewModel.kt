@@ -2155,7 +2155,7 @@ class SettingsViewModel @Inject constructor(
             val result = apkDownloader.download(
                 url = asset.url,
                 mirror = updateCheckSettingsRepository.downloadMirror,
-                fileName = "aicode-${target.latestTag}.apk",
+                fileName = "aicove-${target.latestTag}.apk",
                 expectedSize = asset.size,
                 expectedSha256 = asset.sha256
             ) { downloaded, total ->

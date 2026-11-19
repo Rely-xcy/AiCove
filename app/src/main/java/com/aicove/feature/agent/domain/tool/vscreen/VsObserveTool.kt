@@ -50,7 +50,7 @@ class VsObserveTool @Inject constructor(
         "outputDir" to ToolParameter(
             name = "outputDir",
             type = ParameterType.STRING,
-            description = "截图落盘目录（mode=screenshot 时生效）；省略则写到 <工作区>/.aicode/vscreen",
+            description = "截图落盘目录（mode=screenshot 时生效）；省略则写到 <工作区>/.aicove/vscreen",
             required = false
         )
     )
@@ -71,7 +71,7 @@ class VsObserveTool @Inject constructor(
         val outputDir = args["outputDir"]?.jsonPrimitive?.contentOrNull
             ?: run {
                 val root = context.projectRoot.ifBlank { "/root/workspace" }
-                "$root/.aicode/vscreen"
+                "$root/.aicove/vscreen"
             }
         return controller.screenshot(outputDir).fold(
             onSuccess = { path ->

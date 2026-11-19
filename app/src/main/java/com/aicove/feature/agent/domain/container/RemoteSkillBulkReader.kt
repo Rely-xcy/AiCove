@@ -31,7 +31,9 @@ private const val WAIT_TIMEOUT_MS = 30_000L
 data class RemoteSkillBulkContext(
     val cacheKey: String,
     val workspaceRoot: String,
-    val home: String
+    val home: String,
+    val configRoot: String? = null,
+    val projectConfigRoot: String? = null
 )
 
 /** 非远程模式、工作区未落定或 SSH 未连接时返回 null——调用方据此走逐文件回退。 */
@@ -80,10 +82,10 @@ private data class RootSpec(
  * 深度与技能扫描器一致（4）；子代理只看顶层，故为 1。
  */
 private val ROOT_SPECS = listOf(
-    RootSpec("SG", "~/.aicode/skills", 4, RemoteBulkRootKind.SKILLS),
-    RootSpec("SP", "${WorkspacePathMapper.CONTAINER_ROOT}/.aicode/skills", 4, RemoteBulkRootKind.SKILLS),
-    RootSpec("AG", "~/.aicode/agents", 1, RemoteBulkRootKind.AGENTS),
-    RootSpec("AP", "${WorkspacePathMapper.CONTAINER_ROOT}/.aicode/agents", 1, RemoteBulkRootKind.AGENTS)
+    RootSpec("SG", "~/.aicove/skills", 4, RemoteBulkRootKind.SKILLS),
+    RootSpec("SP", "${WorkspacePathMapper.CONTAINER_ROOT}/.aicove/skills", 4, RemoteBulkRootKind.SKILLS),
+    RootSpec("AG", "~/.aicove/agents", 1, RemoteBulkRootKind.AGENTS),
+    RootSpec("AP", "${WorkspacePathMapper.CONTAINER_ROOT}/.aicove/agents", 1, RemoteBulkRootKind.AGENTS)
 )
 
 /**
@@ -181,7 +183,7 @@ class RemoteSkillBulkReader @Inject constructor(
 
     private fun fetch(context: RemoteSkillBulkContext): Map<String, Map<String, String>>? {
         val remoteRoots = ROOT_SPECS.associate { spec ->
-            spec.tag to remotePathFor(spec.containerRoot, context.workspaceRoot, context.home)
+            spec.tag to remotePathFor(spec.containerRoot, context.workspaceRoot, context.home, context.configRoot, context.projectConfigRoot)
         }
         val command = buildRemoteSkillBulkCommand(
             ROOT_SPECS.map { spec ->

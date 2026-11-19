@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Process
 import androidx.work.Configuration
 import androidx.hilt.work.HiltWorkerFactory
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.net.AppProxy
 import com.aicove.core.util.AILogger
 import com.aicove.core.util.FileLogger
@@ -136,6 +137,11 @@ class AIEditorApp : Application(), Configuration.Provider {
         FileLogger.init(base)
         AILogger.init(base)
         installCrashHandler()
+        // Hilt builds eager file repositories in super.onCreate; no writer may start before this gate.
+        val migration = BrandPaths.prepareHostDirectory(base.filesDir, migrate = !isCrashProcess(base))
+        if (!isCrashProcess(base)) {
+            FileLogger.i(TAG, "Config migration: ${migration.status}, root=${migration.physicalRoot}, failure=${migration.failureCode}")
+        }
         // 全局代理入口：必须在任何 Hilt 注入 / OkHttpClient 构建之前设置，
         // 使 App 侧全部 HTTP 链路（对话、MCP、更新检查等）按需走全局/提供商代理。
         // 用 base 而非下文才定义的局部 context：attachBaseContext 阶段 base 即合法 Context。
@@ -293,16 +299,16 @@ class AIEditorApp : Application(), Configuration.Provider {
         appScope.launch {
             ContainerInstaller.extractDocs(this@AIEditorApp)
         }
-        // 启动即把内置提示词全量释放到 ~/.aicode/prompts/（覆盖式，随 App 升级更新）；
-        // 用户自定义覆盖放在 ~/.aicode/prompts.custom/，同名即覆盖，不被升级覆盖。
+        // 启动即把内置提示词全量释放到 ~/.aicove/prompts/（覆盖式，随 App 升级更新）；
+        // 用户自定义覆盖放在 ~/.aicove/prompts.custom/，同名即覆盖，不被升级覆盖。
         appScope.launch {
             ContainerInstaller.extractPrompts(this@AIEditorApp)
         }
-        // 启动即释放套餐余量示例脚本等内置脚本到 ~/.aicode/scripts/
+        // 启动即释放套餐余量示例脚本等内置脚本到 ~/.aicove/scripts/
         appScope.launch {
             ContainerInstaller.extractScripts(this@AIEditorApp)
         }
-        // 启动即释放内置子代理定义（Explore）到 ~/.aicode/agents/；已存在不覆盖，用户改过或删掉都不会被升级拉回。
+        // 启动即释放内置子代理定义（Explore）到 ~/.aicove/agents/；已存在不覆盖，用户改过或删掉都不会被升级拉回。
         appScope.launch {
             ContainerInstaller.extractAgents(this@AIEditorApp)
         }
@@ -385,7 +391,7 @@ class AIEditorApp : Application(), Configuration.Provider {
                 if (config == null || config == remoteSshConnection.config) return@collect
                 runCatching {
                     remoteSshConnection.connect(config)
-                    // 连接成功后同步内置文档到远程 ~/.aicode/docs/，供 AI 查阅。
+                    // 连接成功后同步内置文档到远程 ~/.aicove/docs/，供 AI 查阅。
                     syncDocsToRemote()
                     releaseBuiltinAssetsToRemote()
                 }.onFailure { FileLogger.e(TAG, "SSH 连接失败，将在首次命令时重试", it) }
@@ -503,8 +509,8 @@ class AIEditorApp : Application(), Configuration.Provider {
     }
 
     /**
-     * 读取 assets/docs 下所有内置文档（含 guide/ advanced/ 等分类子目录），通过 SSH exec 同步到远程 ~/.aicode/docs/。
-     * 远程模式下 AI 查阅 ~/.aicode/docs/ 的设置说明文档时，需要这些文件存在于远程服务器。
+     * 读取 assets/docs 下所有内置文档（含 guide/ advanced/ 等分类子目录），通过 SSH exec 同步到远程 ~/.aicove/docs/。
+     * 远程模式下 AI 查阅 ~/.aicove/docs/ 的设置说明文档时，需要这些文件存在于远程服务器。
      * 连接成功与重连成功后调用，保证远程文档随 App 升级更新。失败仅记日志，不阻断流程。
      */
     private suspend fun syncDocsToRemote() {
@@ -516,7 +522,7 @@ class AIEditorApp : Application(), Configuration.Provider {
     }
 
     /**
-     * 释放内置子代理定义（Explore）与面板示例脚本到远程 `~/.aicode/agents`、`~/.aicode/scripts`。
+     * 释放内置子代理定义（Explore）与面板示例脚本到远程 `~/.aicove/agents`、`~/.aicove/scripts`。
      * 远程模式下全局 agents/scripts 以远端为准，内置默认需在远端存在才能开箱即用；仅补齐缺失、不覆盖用户修改。
      */
     private suspend fun releaseBuiltinAssetsToRemote() {

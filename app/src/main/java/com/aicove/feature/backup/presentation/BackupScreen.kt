@@ -68,6 +68,8 @@ import com.aicove.core.ui.dialogTextFieldColors
 import com.aicove.feature.backup.domain.BackupOptions
 import com.aicove.feature.backup.domain.ExportStats
 import com.aicove.feature.backup.domain.RestoreStats
+import com.aicove.core.plugin.BackupExtensionSource
+import com.aicove.core.util.appLanguageTag
 import com.aicove.feature.backup.domain.WorkspaceBackupMeta
 import com.aicove.feature.backup.domain.WorkspaceSkip
 import com.aicove.feature.backup.domain.WorkspaceSkipReason
@@ -108,6 +110,9 @@ internal fun BackupScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val languageTag = context.appLanguageTag()
+    val pluginEntries by remember(viewModel, languageTag) { viewModel.pluginBackupEntries(languageTag) }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val exportOptions by viewModel.exportOptions.collectAsStateWithLifecycle()
     val targets by viewModel.targets.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
@@ -202,6 +207,7 @@ internal fun BackupScreen(
                     LocalBackupTab(
                         scrollState = localScrollState,
                         exportOptions = exportOptions,
+                        pluginEntries = pluginEntries,
                         onUpdateOptions = viewModel::updateExportOptions,
                         working = state is BackupState.Working,
                         onOpenChatOptions = { showChatOptionsSheet = true },
@@ -262,7 +268,7 @@ internal fun BackupScreen(
                 pendingExportOptions = exportOptions
                 password = ""
                 pendingAction = null
-                exportLauncher.launch("aicode-backup-${System.currentTimeMillis()}.tar.gz")
+                exportLauncher.launch("aicove-backup-${System.currentTimeMillis()}.tar.gz")
             },
             onDismiss = {
                 password = ""
@@ -474,6 +480,7 @@ private enum class PendingAction { ExportPassword, Import }
 private fun LocalBackupTab(
     scrollState: ScrollState,
     exportOptions: BackupOptions,
+    pluginEntries: List<BackupExtensionSource.Entry>,
     onUpdateOptions: (BackupOptions) -> Unit,
     working: Boolean,
     onOpenChatOptions: () -> Unit,
@@ -612,6 +619,26 @@ private fun LocalBackupTab(
             )
             if (exportOptions.loginSecrets) {
                 SecretPasswordHint()
+            }
+        }
+
+        if (pluginEntries.isNotEmpty()) {
+            SettingsGroupHeader(text = stringResource(R.string.plugins_backup_section))
+            SettingsGroup {
+                pluginEntries.forEachIndexed { index, entry ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(title = entry.title, trailing = {
+                        AppSwitch(
+                            checked = entry.pluginId in exportOptions.pluginData,
+                            enabled = !working,
+                            onCheckedChange = { checked ->
+                                onUpdateOptions(exportOptions.copy(pluginData = if (checked) {
+                                    exportOptions.pluginData + entry.pluginId
+                                } else exportOptions.pluginData - entry.pluginId))
+                            }
+                        )
+                    })
+                }
             }
         }
 
@@ -1168,6 +1195,10 @@ private fun buildExportSummary(context: android.content.Context, stats: ExportSt
         appendLine()
         append(context.getString(R.string.backup_export_stat_undecryptable_secrets, stats.undecryptableSecrets))
     }
+    if (stats.pluginData + stats.skippedPluginData > 0) {
+        appendLine()
+        append(context.getString(R.string.plugins_backup_export_summary, stats.pluginData, stats.skippedPluginData))
+    }
 }
 
 /** 跳过的工作区列表：每项「名字（原因）」，超过 [MAX_SKIPPED_WORKSPACE_NAMES] 个则截断为「…等 M 个」。 */
@@ -1249,6 +1280,9 @@ internal fun buildRestoreStatsLines(context: android.content.Context, stats: Res
     if (stats.subagentFiles > 0) appendLine(context.getString(R.string.backup_stat_subagent_files, stats.subagentFiles))
     if (stats.panelScriptFiles > 0) appendLine(context.getString(R.string.backup_stat_panel_scripts, stats.panelScriptFiles))
     if (stats.loginSecrets > 0) appendLine(context.getString(R.string.backup_stat_login_secrets, stats.loginSecrets))
+    if (stats.pluginData + stats.skippedPluginData + stats.failedPluginData > 0) {
+        appendLine(context.getString(R.string.plugins_backup_restore_summary, stats.pluginData, stats.skippedPluginData, stats.failedPluginData))
+    }
     if (stats.skippedSecurityEntries > 0) {
         appendLine(context.getString(R.string.backup_stat_skipped_security, stats.skippedSecurityEntries))
     }

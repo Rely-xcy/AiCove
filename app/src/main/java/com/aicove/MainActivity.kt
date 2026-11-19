@@ -110,6 +110,8 @@ import com.aicove.feature.onboarding.domain.OnboardingStep
 import com.aicove.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aicove.feature.onboarding.presentation.OnboardingOverlay
 import com.aicove.feature.onboarding.presentation.OnboardingTargetRegistry
+import com.aicove.feature.plugin.domain.PluginUiSlots
+import com.aicove.feature.plugin.presentation.PluginEntryContext
 import com.aicove.feature.plugin.presentation.PluginManagementScreen
 import com.aicove.feature.plugin.presentation.PluginPageHost
 import com.aicove.feature.plugin.presentation.PluginWebViewCache
@@ -416,10 +418,13 @@ fun AppNavigation(
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
     val pluginsViewModel: com.aicove.feature.plugin.presentation.PluginsViewModel = hiltViewModel()
-    val drawerEntries = remember(pluginsViewModel) {
-        pluginsViewModel.slotEntries(com.aicove.feature.plugin.domain.PluginUiSlots.DRAWER_FOOTER)
+    val pluginUiEntries = rememberPluginHostEntries(pluginsViewModel)
+    val pluginLanguageTag = currentLanguageTag()
+    val pluginHostEntries = remember(pluginUiEntries, pluginLanguageTag) {
+        pluginUiEntries.map { it.toHostEntry(pluginLanguageTag) }
     }
-    val drawerPluginEntries by drawerEntries.collectAsStateWithLifecycle()
+    val openPluginEntry = rememberPluginHostNavigation(pluginsViewModel, navController)
+    val drawerPluginEntries = pluginHostEntries.filter { it.slot == PluginUiSlots.DRAWER_FOOTER }
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
@@ -717,7 +722,7 @@ fun AppNavigation(
             onExport = { session ->
                 pendingExportSessionId = session.id
                 val safeTitle = session.title.replace(Regex("[^\\w\\u4e00-\\u9fa5\\-]"), "_")
-                sessionExportLauncher.launch("aicode-session-$safeTitle-${System.currentTimeMillis()}.tar.gz")
+                sessionExportLauncher.launch("aicove-session-$safeTitle-${System.currentTimeMillis()}.tar.gz")
             },
             onNavigateToBrowser = {
                 openWorkbench(WorkbenchPaneKind.BROWSER)
@@ -728,10 +733,16 @@ fun AppNavigation(
                 if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
             },
             pluginEntries = drawerPluginEntries,
+            sessionMenuPluginEntries = pluginHostEntries.filter { it.slot == PluginUiSlots.CHAT_SESSION_MENU },
+            fileTreePluginEntries = pluginHostEntries.filter { it.slot == PluginUiSlots.FILES_TREE_MENU },
+            onSessionPluginEntry = { entry, sessionId ->
+                openPluginEntry(entry, PluginEntryContext(sessionId = sessionId))
+            },
+            onFileTreePluginEntry = { entry, path, isDirectory ->
+                openPluginEntry(entry, PluginEntryContext(sessionId = currentSessionId, path = path, isDirectory = isDirectory))
+            },
             onOpenPluginPage = { entry ->
-                // entryKey 形如 "pluginId:localId"，冒号在路径参数里会被当分隔符，必须编码
-                val key = android.net.Uri.encode("${entry.pluginId}:${entry.localId}")
-                navController.navigate("plugin_slot_page/$key")
+                openPluginEntry(entry, PluginEntryContext(sessionId = currentSessionId))
                 if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
             },
             searchQuery = chatSearchQuery,
@@ -799,6 +810,9 @@ fun AppNavigation(
                                         com.aicove.feature.plugin.presentation.PluginTipBanner(modifier = tipModifier)
                                     },
                                     viewModel = agentViewModel,
+                                    headerPluginEntries = pluginHostEntries.filter { it.slot == PluginUiSlots.CHAT_HEADER_MENU },
+                                    welcomePluginEntries = pluginHostEntries.filter { it.slot == PluginUiSlots.CHAT_WELCOME },
+                                    onOpenPluginEntry = { openPluginEntry(it, PluginEntryContext(sessionId = currentSessionId)) },
                                     settingsViewModel = settingsViewModel,
                                     workspaceViewModel = workspaceViewModel,
                                     onOpenDrawer = { scope.launch { drawerState.open() } },
@@ -834,6 +848,11 @@ fun AppNavigation(
                                 // rc5 的平板右栏脏状态确认：主分支把调用重构进了 if (paneOpen)，
                                 // 故把该参数落在这里，而不是保留旧位置那份重复调用
                                 editorLeaveGuard = editorLeaveGuard,
+                                pluginEntries = pluginUiEntries.filter { it.slot == PluginUiSlots.EDITOR_SELECTION_MENU },
+                                pluginLanguageTag = pluginLanguageTag,
+                                onPluginEntry = { entry, entryContext ->
+                                    openPluginEntry(entry.toHostEntry(pluginLanguageTag), entryContext.copy(sessionId = currentSessionId))
+                                },
                                 modifier = Modifier.weight(1f - paneSplit)
                             )
                         }
@@ -873,6 +892,8 @@ fun AppNavigation(
                         if (!expanded) scope.launch { drawerState.open() }
                     },
                     onOpenPlugins = { navController.navigate("plugins") },
+                    pluginEntries = pluginHostEntries,
+                    onOpenPluginEntry = { openPluginEntry(it, PluginEntryContext(sessionId = currentSessionId)) },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
                     onRerunOnboarding = {
                         // 从设置页「重新运行引导」：清状态回 in_progress、激活引导并回聊天页。
@@ -921,7 +942,8 @@ fun AppNavigation(
                         entry = entry,
                         languageTag = languageTag,
                         pluginsViewModel = pluginsViewModel,
-                        onClose = { navController.popBackStack() }
+                        onClose = { navController.popBackStack() },
+                        entryContext = { pluginPageContext(backStackEntry) }
                     )
                 }
             }
@@ -936,6 +958,7 @@ fun AppNavigation(
                     languageTag = languageTag,
                     onBack = { navController.popBackStack() },
                     onAddTool = { tool -> projectToolsViewModel.addToolToProject(tool, languageTag) },
+                    onRemoveTool = { tool -> projectToolsViewModel.removeToolFromProject(tool.key) },
                     onViewDetail = { tool ->
                         projectToolsViewModel.selectTool(tool)
                         navController.navigate("plugin_tool_detail/${tool.key}")
@@ -1033,6 +1056,11 @@ fun AppNavigation(
                 CodeEditorScreen(
                     path = entry.arguments?.getString("path").orEmpty(),
                     initialLine = entry.arguments?.getInt("line") ?: 0,
+                    pluginEntries = pluginUiEntries.filter { it.slot == PluginUiSlots.EDITOR_SELECTION_MENU },
+                    pluginLanguageTag = pluginLanguageTag,
+                    onPluginEntry = { pluginEntry, entryContext ->
+                        openPluginEntry(pluginEntry.toHostEntry(pluginLanguageTag), entryContext.copy(sessionId = currentSessionId))
+                    },
                     onBack = {
                         navController.popBackStack()
                         if (openDrawerOnBack && !expanded) scope.launch { drawerState.open() }

@@ -73,7 +73,10 @@ data class PluginPreview(
     /** 已安装的同 ID 插件版本；非空表示这次导入会替换它。 */
     val installedVersion: String?,
     /** 与已安装内容的包摘要完全相同。 */
-    val identical: Boolean
+    val identical: Boolean,
+    val installedSourceId: String? = null,
+    val installedRepository: String? = null,
+    val installedOfficial: Boolean? = null
 )
 
 sealed interface PluginPreviewResult {
@@ -353,7 +356,10 @@ class PluginManager internal constructor(
                 manifest = manifest,
                 content = content,
                 installedVersion = existing?.record?.version,
-                identical = existing?.record?.archiveSha256 == pkg.archiveSha256
+                identical = existing?.record?.archiveSha256 == pkg.archiveSha256,
+                installedSourceId = existing?.record?.sourceId,
+                installedRepository = existing?.record?.repository,
+                installedOfficial = existing?.record?.official
             )
         )
     }
@@ -545,7 +551,16 @@ class PluginManager internal constructor(
                 refreshDependencyState(record, content.content),
                 PluginStatus.OK,
                 manifest,
-                content.content
+                content.content.copy(
+                    configPage = content.content.configPage?.copy(
+                        installRevision = record.installRevision ?: "${record.installedAt}:${record.archiveSha256}"
+                    ),
+                    uiEntries = content.content.uiEntries.map { entry ->
+                        entry.copy(page = entry.page?.copy(
+                            installRevision = record.installRevision ?: "${record.installedAt}:${record.archiveSha256}"
+                        ))
+                    }
+                )
             )
         }
     }

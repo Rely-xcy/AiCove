@@ -1,6 +1,7 @@
 package com.aicove.feature.plugin.runtime
 
 import com.aicove.core.plugin.AgentLifecycleHooks
+import com.aicove.core.plugin.BackupExtensionSource
 import com.aicove.feature.agent.domain.mcp.McpServerContributionSource
 import com.aicove.feature.agent.domain.skill.SkillContributionSource
 import com.aicove.feature.agent.domain.subagent.AgentDefinitionContributionSource
@@ -16,6 +17,9 @@ import dagger.multibindings.IntoSet
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class PluginRuntimeModule {
+    @Binds
+    abstract fun bindBackupExtensions(implementation: PluginBackupArchiveService): BackupExtensionSource
+
     @Binds
     abstract fun bindAgentLifecycleHooks(implementation: PluginHookDispatcher): AgentLifecycleHooks
 

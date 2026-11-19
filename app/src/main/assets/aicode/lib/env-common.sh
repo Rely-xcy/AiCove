@@ -6,8 +6,8 @@
 # 且需存量设备重跑初始化，另需同步 LinuxContainerEngine.PROVISION_VERSION。
 
 # 公共库目录：用于定位 android-sdk.sh 与 scenarios/。由 provision.sh 在 source 前设置 SELF_DIR 后传入；
-# 单独 source 时回退到 ~/.aicode/lib。
-: "${AICODE_LIB_DIR:=${HOME:-/root}/.aicode/lib}"
+# 单独 source 时回退到 ~/.aicove/lib。
+: "${AICODE_LIB_DIR:=${HOME:-/root}/.aicove/lib}"
 
 # 多镜像候选（按优先级排序，换源时自动探测跳过不可用；阿里云对服务器访问全量 403 放最后，探测会跳过）
 MIRRORS="mirrors.huaweicloud.com mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn mirrors.cloud.tencent.com mirrors.aliyun.com"
@@ -15,10 +15,10 @@ MIRROR=""
 # 基础工具（不参与自定义勾选，始终安装）：git/ripgrep 是 AI 工作流与版本管理基础，bash/curl 是通用依赖
 BASE_PKGS="bash curl ripgrep git"
 
-# ── 诊断日志：写入宿主可见的 $HOME/.aicode/provision.log（容器内 /root/.aicode 绑定到 App 私有目录）。
+# ── 诊断日志：写入宿主可见的 $HOME/.aicove/provision.log（容器内 /root/.aicode 绑定到 App 私有目录）。
 # 终端 PTY 起不来或卡住时，App 侧「容器诊断」会把本文件尾部一并打进日志，用于判断脚本执行到了哪一步、
 # 菜单有没有弹出来。超过 256KB 只保留尾部 64KB，避免每次进终端追加一行而无限增长。全部静默失败，不阻塞初始化。
-LOG_FILE="$HOME/.aicode/provision.log"
+LOG_FILE="$HOME/.aicove/provision.log"
 plog() {
     [ -n "$HOME" ] || return 0
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$*" >> "$LOG_FILE" 2>/dev/null || return 0
@@ -588,8 +588,8 @@ git_config() {
     # 凭据注入最小化：只对工作区根目录（$HOME/workspace/）下的仓库生效——
     # credential.helper 写进 gitconfig.credential，经 includeIf 按目录条件加载，
     # 容器内其它目录的 git 仓库不会被注入（aicode 自定义 helper 解码凭据文件命中秒过，未命中时经文件 IPC 弹窗回填）。
-    # 用 $HOME 而非写死 /root：容器 home 由环境决定，保持一致（App 侧 GIT_CONFIG_GLOBAL 同指向 $HOME/.aicode/.gitconfig）。
-    AICODE_DIR="$HOME/.aicode"
+    # 用 $HOME 而非写死 /root：容器 home 由环境决定，保持一致（App 侧 GIT_CONFIG_GLOBAL 同指向 $HOME/.aicove/.gitconfig）。
+    AICODE_DIR="$HOME/.aicove"
     mkdir -p "$AICODE_DIR"
     cat > "$AICODE_DIR/gitconfig.credential" <<EOF
 [credential]

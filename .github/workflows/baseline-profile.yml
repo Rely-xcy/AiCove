@@ -171,6 +171,6 @@ jobs:
         if: steps.publish.outputs.published == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: aicode-beta-${{ steps.profile.outputs.sha }}
+          name: aicove-beta-${{ steps.profile.outputs.sha }}
           path: dist/*
           if-no-files-found: error

@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.runtime
 
+import com.aicove.feature.plugin.pluginTestContext
 import com.aicove.feature.plugin.domain.InstalledPlugin
 import com.aicove.feature.plugin.domain.LocalizedText
 import com.aicove.feature.plugin.domain.PluginContent
@@ -56,12 +57,13 @@ class PluginProviderRegistrarTest {
         every { content } returns PluginContent(providers = providers)
     }
 
-    private fun registrarFor(plugin: InstalledPlugin): PluginProviderRegistrar {
+    private fun registrarFor(plugin: InstalledPlugin, languageTag: String = "en-US"): PluginProviderRegistrar {
         val pluginManager = mockk<PluginManager>(relaxed = true) {
             every { plugins } returns MutableStateFlow(listOf(plugin))
             every { ensureLoaded() } just Runs
         }
-        return PluginProviderRegistrar(pluginManager, providerRepository)
+        val context = pluginTestContext(languageTag)
+        return PluginProviderRegistrar(context, pluginManager, providerRepository)
     }
 
     @Test
@@ -78,6 +80,15 @@ class PluginProviderRegistrarTest {
         assertEquals(PluginProviderRegistrar.PLACEHOLDER_API_KEY, saved.apiKey)
         assertTrue(saved.models.isEmpty())
         assertTrue(saved.isEnabled)
+    }
+
+    @Test
+    fun sync_usesAppLocaleForChineseProviderName() = runTest {
+        val localized = provider("echo").copy(name = LocalizedText(mapOf(
+            "default" to "Demo", "zh-cn" to "中文网关"
+        )))
+        registrarFor(plugin(providers = listOf(localized)), "zh-Hans-CN").sync(pluginId)
+        assertEquals("中文网关", stored.single().name)
     }
 
     @Test

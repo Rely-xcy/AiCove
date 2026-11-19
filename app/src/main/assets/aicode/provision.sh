@@ -5,7 +5,7 @@
 #   2) 容器内执行命令 `aicode`（等价于 `provision.sh --env`）：直接打开「环境安装」菜单，按场景
 #      安装开发环境，可反复使用，不受初始化标记影响。
 # 两个入口共用同一套逻辑：按容器内包管理器（apk/apt-get/dnf/yum/pacman）安装运行时，并可换国内镜像源。
-# 由 App 启动时提取到 ~/.aicode/provision.sh（容器内 /root/.aicode/provision.sh，经 -b 绑定可见）；
+# 由 App 启动时提取到 ~/.aicove/provision.sh（容器内 /root/.aicove/provision.sh，经 -b 绑定可见）；
 # 公共能力（包管理器探测/包名映射/版本探测/换源/场景）在 lib/env-common.sh，与本脚本一并提取。
 # 修改包清单/安装逻辑/镜像源后，需同步在 LinuxContainerEngine.PROVISION_VERSION 上 +1 触发存量设备重跑。
 # 注意：兜底 apk 源分支 v3.24 需与 assets 内 alpine-rootfs 的 Alpine 分支一致（见 ContainerInstaller.ROOTFS_ASSET_VERSION）。
@@ -28,15 +28,15 @@ if [ "$1" != "--env" ] && [ -f "$MARKER" ]; then
     [ "$state" = "$PROVISION_SKIPPED" ] && exit 0
 fi
 
-# ── 载入公共库（包名映射/换源/场景等）。按脚本自身所在目录定位：生产脚本在 /root/.aicode/provision.sh、
-# 库在 /root/.aicode/lib/；工作区草稿副本（aicode-env/）结构相同，故同一份脚本两处都能跑。
+# ── 载入公共库（包名映射/换源/场景等）。按脚本自身所在目录定位：生产脚本在 /root/.aicove/provision.sh、
+# 库在 /root/.aicove/lib/；工作区草稿副本（aicode-env/）结构相同，故同一份脚本两处都能跑。
 # 缺失时不阻塞：提示重启 App 重新提取后重进终端。──
 SELF_DIR=$(dirname "$0")
 [ "${SELF_DIR#/}" = "$SELF_DIR" ] && SELF_DIR="$(pwd)/$SELF_DIR"
 AICODE_LIB_DIR="$SELF_DIR/lib"
 LIB_FILE="$AICODE_LIB_DIR/env-common.sh"
 if [ ! -f "$LIB_FILE" ]; then
-    AICODE_LIB_DIR="${HOME:-/root}/.aicode/lib"
+    AICODE_LIB_DIR="${HOME:-/root}/.aicove/lib"
     LIB_FILE="$AICODE_LIB_DIR/env-common.sh"
 fi
 if [ ! -f "$LIB_FILE" ]; then

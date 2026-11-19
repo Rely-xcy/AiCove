@@ -5,9 +5,9 @@ description: AiCove User Agreement covering consent, AI and operational risks, l
 
 # AiCove User Agreement
 
-**Last updated: October 23, 2026**
+**Last updated: November 18, 2026**
 
-AiCove ("the App") is an open-source AI coding tool for Android maintained by jieapi (an individual developer, "the Developer"). This agreement explains your rights, obligations, and important risks when using the App. Please read it together with the [Privacy Policy](/en/privacy).
+AiCove ("the App") is an open-source AI coding tool for Android maintained by Rely-xcy ("the Developer"). This agreement explains your rights, obligations, and important risks when using the App. Please read it together with the [Privacy Policy](/en/privacy).
 
 ## 1. Reading and Consent
 
@@ -69,7 +69,7 @@ The Developer may update this agreement to reflect feature changes or legal requ
 
 For questions about this agreement or the App, use the contact details below. GitHub Issues is public; do not post API keys, passwords, or logs containing sensitive information.
 
-- Developer: jieapi (individual developer)
-- Email: xiaojieapi@qq.com
+- Maintainer: Rely-xcy
+- Contact: GitHub Issues (public; do not include sensitive information)
 - GitHub Issues: <https://github.com/Rely-xcy/AiCove/issues>
 - Project homepage: <https://github.com/Rely-xcy/AiCove>

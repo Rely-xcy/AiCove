@@ -71,6 +71,21 @@ class PluginChatService @Inject constructor(
     private val planApprovalManager: PlanApprovalManager
 ) {
 
+    fun listWorkspaces(pluginId: String): JsonElement {
+        ensureActive(pluginId)
+        return buildJsonObject {
+            put("current", workspaceRepository.currentPathOrNull()?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("workspaces", JsonArray(workspaceRepository.workspaces.value.map { workspace ->
+                buildJsonObject {
+                    put("name", workspace.name)
+                    put("path", workspace.path)
+                    put("remote", workspace.type.name == "REMOTE")
+                    put("available", workspace.available)
+                }
+            }))
+        }
+    }
+
     suspend fun listSessions(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
         val workspace = resolveWorkspace(params)

@@ -108,8 +108,10 @@ class RemoteSftpFileAccess @Inject constructor(
     }
 
     /** 把 AI 路径映射到远程服务器上的真实路径。 */
-    private fun toRemotePath(path: String): String =
-        remotePathFor(path, currentWorkspaceRoot(), connection.remoteHome)
+    private fun toRemotePath(path: String): String {
+        val workspace = currentWorkspaceRoot()
+        return remotePathFor(path, workspace, connection.remoteHome, connection.configRoot(), connection.projectConfigRoot(workspace))
+    }
 
     /** 把远程路径还原为 AI 视角的容器路径（回显用）。 */
     private fun toDisplayPathFromRemote(remotePath: String): String =
@@ -653,7 +655,13 @@ internal fun formatPermissions(perms: Set<FilePermission>): String {
 }
 
 /** AI 路径 → 远程真实路径：`~/workspace` 前缀映射到 [workspaceRoot]，其它绝对路径原样使用。 */
-internal fun remotePathFor(path: String, workspaceRoot: String, remoteHome: String?): String {
+internal fun remotePathFor(
+    path: String,
+    workspaceRoot: String,
+    remoteHome: String?,
+    configRoot: String? = null,
+    projectConfigRoot: String? = null
+): String {
     val root = workspaceRoot.trimEnd('/')
     // CONTAINER_ROOT 是 ~/workspace，展开 ~ 后做前缀匹配
     val wsRoot = (remoteHome ?: "~").trimEnd('/') + "/workspace"
@@ -663,13 +671,27 @@ internal fun remotePathFor(path: String, workspaceRoot: String, remoteHome: Stri
             if (home != null) home.trimEnd('/') + "/" + it.removePrefix("~/") else it
         } else it
     }
-    return when {
+    val resolved = when {
         p == wsRoot || p == "$wsRoot/" || p == CONTAINER_ROOT || p == "$CONTAINER_ROOT/" -> root
-        p.startsWith("$wsRoot/") ->
-            root + "/" + p.removePrefix("$wsRoot/")
+        p.startsWith("$wsRoot/") -> root + "/" + p.removePrefix("$wsRoot/")
         p.startsWith("/") -> p
         else -> root + "/" + p
     }
+    val configNames = listOf(
+        com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME,
+        com.aicove.core.branding.BrandPaths.Legacy.CONFIG_DIR_NAME
+    )
+    for (name in configNames) {
+        val global = remoteHome?.trimEnd('/')?.let { "$it/$name" }
+        if (configRoot != null && global != null && (resolved == global || resolved.startsWith("$global/"))) {
+            return configRoot.trimEnd('/') + resolved.removePrefix(global)
+        }
+        val project = "$root/$name"
+        if (projectConfigRoot != null && (resolved == project || resolved.startsWith("$project/"))) {
+            return projectConfigRoot.trimEnd('/') + resolved.removePrefix(project)
+        }
+    }
+    return resolved
 }
 
 /** 远程真实路径 → AI 视角的容器路径（回显用）。 */

@@ -42,21 +42,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import com.aicove.core.ui.AdaptiveModalBottomSheet
 import com.aicove.core.ui.AppConfirmDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import com.aicove.core.ui.AppTextField
 import com.aicove.core.ui.dialogTextFieldColors
 import com.aicove.feature.onboarding.domain.OnboardingStep
@@ -76,7 +72,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -118,14 +113,8 @@ import com.aicove.core.ui.containerOsLogo
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronRight
-import compose.icons.feathericons.CheckSquare
-import compose.icons.feathericons.Clipboard
 import compose.icons.feathericons.Copy
-import compose.icons.feathericons.Download
-import compose.icons.feathericons.Edit2
-import compose.icons.feathericons.FilePlus
 import compose.icons.feathericons.Folder
-import compose.icons.feathericons.FolderPlus
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.RefreshCw
@@ -185,6 +174,10 @@ fun ChatDrawerContent(
     pluginEntries: List<PluginSlotEntry> = emptyList(),
     pluginLanguageTag: String = "zh-CN",
     onOpenPluginPage: (PluginSlotEntry) -> Unit = {},
+    sessionMenuPluginEntries: List<PluginSlotEntry> = emptyList(),
+    fileTreePluginEntries: List<PluginSlotEntry> = emptyList(),
+    onSessionPluginEntry: (PluginSlotEntry, String) -> Unit = { _, _ -> },
+    onFileTreePluginEntry: (PluginSlotEntry, String, Boolean) -> Unit = { _, _, _ -> },
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -378,7 +371,9 @@ fun ChatDrawerContent(
                     onCopyEntry = onCopyEntry,
                     onCutEntry = onCutEntry,
                     onPasteEntry = onPasteEntry,
-                    onClearClipboard = onClearClipboard
+                    onClearClipboard = onClearClipboard,
+                    pluginEntries = fileTreePluginEntries,
+                    onPluginEntry = onFileTreePluginEntry
                 )
             }
         }
@@ -475,7 +470,9 @@ fun ChatDrawerContent(
                 menuSession = null
                 pendingDelete = session
             },
-            onDismiss = { menuSession = null }
+            onDismiss = { menuSession = null },
+            pluginEntries = sessionMenuPluginEntries,
+            onPluginEntry = onSessionPluginEntry
         )
     }
 
@@ -926,7 +923,9 @@ private fun FileBrowserTab(
     onCopyEntry: (String, String) -> Unit,
     onCutEntry: (String, String) -> Unit,
     onPasteEntry: (String, (Boolean, String?) -> Unit) -> Unit,
-    onClearClipboard: () -> Unit
+    onClearClipboard: () -> Unit,
+    pluginEntries: List<PluginSlotEntry>,
+    onPluginEntry: (PluginSlotEntry, String, Boolean) -> Unit
 ) {
     var creating by remember { mutableStateOf<CreateTarget?>(null) }
     var menuNode by remember { mutableStateOf<FileTreeNode?>(null) }
@@ -1112,7 +1111,9 @@ private fun FileBrowserTab(
                 menuNode = null
                 onPasteEntry(target) { _, _ -> /* 结果由调用方决定是否提示，这里保持静默 */ }
             },
-            onDismiss = { menuNode = null }
+            onDismiss = { menuNode = null },
+            pluginEntries = pluginEntries,
+            onPluginEntry = onPluginEntry
         )
     }
 
@@ -1212,95 +1213,6 @@ private fun ClipboardIndicator(
             modifier = Modifier.size(16.dp),
             tint = MaterialTheme.colorScheme.primary
         )
-    }
-}
-
-/** 文件树节点长按弹出的功能菜单：目录（含工作区根）可新建，非根节点可复制/剪切/重命名/删除，
- * 剪切板非空时目录可「粘贴到此处」。 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FileTreeActionSheet(
-    node: FileTreeNode,
-    clipboard: BrowseClipboard?,
-    onNewFile: () -> Unit,
-    onNewFolder: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-    onCopy: () -> Unit,
-    onCut: () -> Unit,
-    onPasteHere: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AdaptiveModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(),
-        containerColor = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = Spacing.xl)
-        ) {
-            Text(
-                text = node.displayName,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .padding(horizontal = Spacing.lg)
-                    .padding(bottom = Spacing.md)
-            )
-            // 剪切板非空且当前节点是目录 / 根：优先提供「粘贴到此处」。
-            if (clipboard != null && node.entry.isDirectory) {
-                SheetActionRow(
-                    icon = FeatherIcons.Clipboard,
-                    label = stringResource(R.string.file_browser_paste_here),
-                    tint = MaterialTheme.colorScheme.primary,
-                    onClick = onPasteHere
-                )
-            }
-            if (node.entry.isDirectory) {
-                SheetActionRow(
-                    icon = FeatherIcons.FilePlus,
-                    label = stringResource(R.string.file_browser_new_file),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onNewFile
-                )
-                SheetActionRow(
-                    icon = FeatherIcons.FolderPlus,
-                    label = stringResource(R.string.file_browser_new_folder),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onNewFolder
-                )
-            }
-            if (node.root == null) {
-                SheetActionRow(
-                    icon = FeatherIcons.Copy,
-                    label = stringResource(R.string.common_copy),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onCopy
-                )
-                SheetActionRow(
-                    icon = Icons.Filled.ContentCut,
-                    label = stringResource(R.string.common_cut),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onCut
-                )
-                SheetActionRow(
-                    icon = FeatherIcons.Edit2,
-                    label = stringResource(R.string.common_rename),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onRename
-                )
-                SheetActionRow(
-                    icon = FeatherIcons.Trash2,
-                    label = stringResource(R.string.common_delete),
-                    tint = MaterialTheme.colorScheme.error,
-                    onClick = onDelete
-                )
-            }
-        }
     }
 }
 
@@ -1436,120 +1348,6 @@ private val FileTreeNode.displayName: String get() = root?.label ?: entry.name
 /** 文件树一行除缩进与文本外的固定宽度开销（start 8 + 箭头 16 + 4 + 图标 20 + 8 + end 12），供预算整树统一行宽。 */
 private val FILE_TREE_ROW_OVERHEAD = 68.dp
 
-
-/**
- * 会话行长按弹出的功能菜单：置顶 / 重命名 / 导出 / 删除。底部 sheet 样式参照 git 分支的 RefActionSheet。
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SessionActionSheet(
-    session: ChatSession,
-    onTogglePin: () -> Unit,
-    onRename: () -> Unit,
-    onExport: () -> Unit,
-    onBatchSelect: () -> Unit,
-    onDelete: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState()
-    AdaptiveModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = Spacing.xl)
-        ) {
-            Text(
-                text = session.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .padding(horizontal = Spacing.lg)
-                    .padding(bottom = Spacing.md)
-            )
-            SheetActionRow(
-                icon = Icons.Outlined.PushPin,
-                label = stringResource(if (session.isPinned) R.string.chat_unpin_session else R.string.chat_pin_session),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onTogglePin()
-                }
-            )
-            SheetActionRow(
-                icon = FeatherIcons.Edit2,
-                label = stringResource(R.string.common_rename),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onRename()
-                }
-            )
-            SheetActionRow(
-                icon = FeatherIcons.Download,
-                label = stringResource(R.string.chat_export_session),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onExport()
-                }
-            )
-            SheetActionRow(
-                icon = FeatherIcons.CheckSquare,
-                label = stringResource(R.string.chat_batch_select),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onBatchSelect()
-                }
-            )
-            SheetActionRow(
-                icon = FeatherIcons.Trash2,
-                label = stringResource(R.string.common_delete),
-                tint = MaterialTheme.colorScheme.error,
-                onClick = {
-                    onDismiss()
-                    onDelete()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun SheetActionRow(
-    icon: ImageVector,
-    label: String,
-    tint: Color,
-    onClick: () -> Unit
-) {
-    Surface(onClick = onClick, color = Color.Transparent) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = tint
-            )
-            Spacer(Modifier.width(Spacing.lg))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = tint
-            )
-        }
-    }
-}
 
 /** 侧边栏会话分组：同一时间组（今天 / 昨天 / 7天内 / 30天内 / 月份）内的会话，按最后回复时间降序。 */
 internal data class SessionGroup(

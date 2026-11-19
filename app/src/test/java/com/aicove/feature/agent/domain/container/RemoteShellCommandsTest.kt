@@ -155,7 +155,7 @@ class RemoteShellCommandsTest {
         val key = "includeIf.gitdir:${dir.path}/.path"
         val parsed = runShell("git config --file ${remoteShellQuote(config.path)} --get ${remoteShellQuote(key)}")
         assertEquals(parsed.output, 0, parsed.exit)
-        assertEquals("~/.aicode/gitconfig.credential\n", parsed.output)
+        assertEquals("~/.aicove/gitconfig.credential\n", parsed.output)
         val helper = File(dir, "git-credential-aicode").apply {
             writeText("#!/bin/sh\nprintf '%s\\n' 'username=test-user' 'password=test-value'\n")
             setExecutable(true, true)

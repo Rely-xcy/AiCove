@@ -180,6 +180,8 @@ class RemoteSftpFileAccessCancelTest {
                 remoteWorkspacePath = "/srv/proj"
             )
             every { connection.remoteHome } returns "/home/dev"
+            every { connection.configRoot() } returns "/home/dev/.aicove"
+            every { connection.projectConfigRoot("/srv/proj") } returns "/srv/proj/.aicove"
             every { workspaceRepository.currentPathOrNull() } returns "/srv/proj"
             every { sftp.open(any(), any()) } returns remoteFile
             fileAccess = RemoteSftpFileAccess(

@@ -373,6 +373,7 @@
     <string name="settings_category_background">Background</string>
     <string name="settings_category_system_permissions">System permissions</string>
     <string name="settings_user_guide">User Guide</string>
+    <string name="settings_user_guide_url">https://rely-xcy.github.io/AiCove/en/</string>
 
     <!-- i18n: UI strings -->
     <!-- Common -->
@@ -586,8 +587,8 @@
     <string name="agreement_notice_suffix">" to understand the usage rules and data handling practices.\n\nBy tapping “Agree and continue”, you confirm that you have read and agree to both documents."</string>
     <string name="agreement_accept">Agree and continue</string>
     <string name="agreement_decline">Disagree</string>
-    <string name="agreement_terms_url">https://aicode.murk.top/en/terms</string>
-    <string name="agreement_privacy_url">https://aicode.murk.top/en/privacy</string>
+    <string name="agreement_terms_url">https://rely-xcy.github.io/AiCove/en/terms</string>
+    <string name="agreement_privacy_url">https://rely-xcy.github.io/AiCove/en/privacy</string>
 
     <!-- Ask User Question -->
     <string name="ask_confirm_title">AI needs your confirmation</string>

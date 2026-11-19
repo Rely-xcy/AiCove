@@ -2,6 +2,7 @@ package com.aicove.feature.credentials.data.repository
 
 import android.content.Context
 import android.util.Base64
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.credentials.domain.model.GitCredential
 import com.aicove.feature.credentials.domain.repository.CredentialRepository
@@ -30,11 +31,10 @@ class FileCredentialRepository @Inject constructor(
 
     private companion object {
         const val TAG = "FileCredentialRepo"
-        const val AICODE_DIR = com.aicove.core.branding.BrandPaths.HOST_DIR_NAME
         const val CREDENTIALS_NAME = "git-credentials"
     }
 
-    private val credentialsFile: File get() = File(File(context.filesDir, AICODE_DIR), CREDENTIALS_NAME)
+    private val credentialsFile: File get() = File(BrandPaths.hostDirectory(context.filesDir), CREDENTIALS_NAME)
 
     private val mutex = Mutex()
 

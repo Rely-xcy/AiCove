@@ -3,6 +3,10 @@ package com.aicove.feature.plugin.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicove.core.util.FileLogger
+import com.aicove.feature.plugin.data.PluginRecord
+import com.aicove.feature.plugin.data.PluginPackageReader
+import com.aicove.feature.plugin.data.index.PluginIndexDefaults
+import com.aicove.feature.plugin.domain.PluginInstallService
 import com.aicove.feature.plugin.data.index.NoMatchingReleaseException
 import com.aicove.feature.plugin.data.index.PluginIndexClient
 import com.aicove.feature.plugin.data.index.PluginIndexException
@@ -16,10 +20,11 @@ import com.aicove.feature.plugin.domain.PluginManager
 import com.aicove.feature.plugin.domain.PluginPreview
 import com.aicove.feature.plugin.domain.PluginPreviewResult
 import com.aicove.feature.plugin.domain.SemVer
-import com.aicove.feature.plugin.runtime.PluginProviderRegistrar
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -68,6 +73,8 @@ data class PluginStoreUiState(
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val sources: List<PluginIndexSource> = emptyList(),
+    val selectedSourceId: String? = null,
+    val rejectedPluginCount: Int = 0,
     val items: List<PluginStoreItem> = emptyList(),
     /** 每个已安装插件可用的最高版本更新条目；供已安装页展示「可更新」。 */
     val updatesByPluginId: Map<String, PluginStoreItem> = emptyMap(),
@@ -81,7 +88,7 @@ class PluginStoreViewModel @Inject constructor(
     private val client: PluginIndexClient,
     private val sourceRepository: PluginIndexSourceRepository,
     private val manager: PluginManager,
-    private val pluginProviderRegistrar: PluginProviderRegistrar
+    private val installService: PluginInstallService
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PluginStoreUiState())
@@ -91,30 +98,44 @@ class PluginStoreViewModel @Inject constructor(
     private val _refreshResult = MutableSharedFlow<Int>(extraBufferCapacity = 1)
     val refreshResult: SharedFlow<Int> = _refreshResult.asSharedFlow()
 
-    /** 来源地址列表变化时才重新拉取；markFetched 等只改时间戳的写入不会触发加载。 */
-    private var loadedUrls: List<String>? = null
+    // 同地址的不同来源也必须隔离；抓取时间戳不属于加载身份。
+    private var loadedSources: List<Pair<String, String>>? = null
+    private var loadJob: Job? = null
     private var loadToken = 0
 
     init {
         viewModelScope.launch {
-            sourceRepository.sources.collect { sources ->
-                _state.update { it.copy(sources = sources) }
-                val urls = sources.map { it.indexUrl }
-                if (urls != loadedUrls) {
-                    loadedUrls = urls
-                    loadAll(force = false)
+            sourceRepository.selection.collect { selection ->
+                val selected = if (selection.selectedSourceId == PluginIndexDefaults.ALL_SOURCES_ID) {
+                    selection.sources
+                } else selection.sources.filter { it.id == selection.selectedSourceId }
+                val key = selected.map { it.id to it.indexUrl }
+                val changed = key != loadedSources
+                _state.update {
+                    it.copy(
+                        sources = selection.sources,
+                        selectedSourceId = selection.selectedSourceId,
+                        items = if (changed) emptyList() else it.items,
+                        updatesByPluginId = if (changed) emptyMap() else it.updatesByPluginId,
+                        error = if (changed) null else it.error,
+                        rejectedPluginCount = if (changed) 0 else it.rejectedPluginCount
+                    )
+                }
+                if (changed) {
+                    loadedSources = key
+                    loadSelected(force = false)
                 }
             }
         }
         viewModelScope.launch {
             manager.plugins.collect { installed ->
-                val versions = installed.associate { it.id to it.record.version }
+                val records = installed.associate { it.id to it.record }
                 _state.update { current ->
                     val updatedItems = current.items.map { item ->
-                        val version = versions[item.plugin.id]
+                        val record = records[item.plugin.id]
                         item.copy(
-                            installedVersion = version,
-                            updateAvailable = isNewer(item.plugin.version, version)
+                            installedVersion = record?.version,
+                            updateAvailable = hasUpdate(item.plugin, item.source, record)
                         )
                     }
                     current.copy(
@@ -127,44 +148,91 @@ class PluginStoreViewModel @Inject constructor(
     }
 
     fun refresh() {
-        loadAll(force = true)
+        loadSelected(force = true)
     }
 
-    /** 按来源顺序依次拉取，条目也按来源顺序叠加；单个来源失败时保留它上次的条目。 */
-    private fun loadAll(force: Boolean) {
-        val sources = _state.value.sources
-        if (sources.isEmpty()) return
+    suspend fun selectSource(id: String): Result<Unit> = try {
+        sourceRepository.selectSource(id)
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun saveCustomSources(text: String): Result<Unit> =
+        sourceRepository.setCustomSources(text.lines())
+
+    private fun loadSelected(force: Boolean) {
         val token = ++loadToken
+        loadJob?.cancel()
+        val sources = if (_state.value.selectedSourceId == PluginIndexDefaults.ALL_SOURCES_ID) {
+            _state.value.sources
+        } else _state.value.sources.filter { it.id == _state.value.selectedSourceId }
+        if (sources.isEmpty()) {
+            _state.update { it.copy(loading = false, refreshing = false) }
+            return
+        }
         _state.update { it.copy(loading = true, refreshing = it.items.isNotEmpty(), error = null) }
-        viewModelScope.launch(Dispatchers.IO) {
-            val installed = manager.plugins.value.associate { it.id to it.record.version }
-            val previous = _state.value.items.groupBy { it.source.id }
-            val items = mutableListOf<PluginStoreItem>()
-            var firstError: PluginStoreError? = null
-            var failureCount = 0
-            sources.forEach { source ->
-                val result = runCatching { client.fetchIndex(source, forceRefresh = force) }
+        loadJob = viewModelScope.launch {
+            try {
+                var failedSources = 0
+                var rejected = 0
+                var lastError: Exception? = null
+                val items = mutableListOf<PluginStoreItem>()
+                for (source in sources) {
+                    try {
+                        val snapshot = client.fetchIndex(source, forceRefresh = force)
+                        if (token != loadToken) return@launch
+                        if (!snapshot.stale) sourceRepository.markFetched(source.id, snapshot.fetchedAt)
+                        else failedSources++
+                        rejected += snapshot.index.rejectedPluginCount
+                        val installed = manager.plugins.value.associate { it.id to it.record }
+                        items += snapshot.index.plugins.map { plugin ->
+                            val record = installed[plugin.id]
+                            PluginStoreItem(
+                                plugin = plugin, source = source,
+                                installedVersion = record?.version,
+                                updateAvailable = hasUpdate(plugin, source, record),
+                                compatible = client.isCompatible(plugin),
+                                official = source.official && PluginOfficialRepositories.isOfficial(plugin.repository)
+                            )
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failedSources++
+                        lastError = e
+                        FileLogger.w(TAG, "读取插件索引失败", e)
+                    }
+                }
                 if (token != loadToken) return@launch
-                result.onSuccess { snapshot ->
-                    items += snapshot.index.plugins.map { plugin ->
-                        val installedVersion = installed[plugin.id]
-                        PluginStoreItem(
-                            plugin = plugin,
-                            source = source,
-                            installedVersion = installedVersion,
-                            updateAvailable = isNewer(plugin.version, installedVersion),
-                            compatible = client.isCompatible(plugin),
-                            official = PluginOfficialRepositories.isOfficial(plugin.repository)
-                        )
-                    }
-                    if (!snapshot.stale) {
-                        sourceRepository.markFetched(source.id, snapshot.fetchedAt)
-                    }
-                }.onFailure { e ->
-                    FileLogger.w(TAG, "读取插件索引失败: ${source.id}", e)
-                    failureCount++
-                    if (firstError == null) {
-                        firstError = PluginStoreError(
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        items = items,
+                        updatesByPluginId = updatesOf(items),
+                        rejectedPluginCount = rejected,
+                        error = lastError?.takeIf { items.isEmpty() }?.let { error ->
+                            PluginStoreError(
+                                if (error is PluginIndexException) PluginStoreErrorCode.INVALID_INDEX else PluginStoreErrorCode.NETWORK,
+                                detail = error.message
+                            )
+                        }
+                    )
+                }
+                if (force || failedSources > 0) _refreshResult.tryEmit(failedSources)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (token != loadToken) return@launch
+                FileLogger.w(TAG, "读取插件索引失败", e)
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        error = PluginStoreError(
                             code = if (e is PluginIndexException) {
                                 PluginStoreErrorCode.INVALID_INDEX
                             } else {
@@ -172,21 +240,9 @@ class PluginStoreViewModel @Inject constructor(
                             },
                             detail = e.message
                         )
-                    }
-                    items += previous[source.id].orEmpty()
+                    )
                 }
-            }
-            _state.update {
-                it.copy(
-                    loading = false,
-                    refreshing = false,
-                    items = items,
-                    updatesByPluginId = updatesOf(items),
-                    error = firstError
-                )
-            }
-            if (force || failureCount > 0) {
-                _refreshResult.tryEmit(failureCount)
+                _refreshResult.tryEmit(1)
             }
         }
     }
@@ -203,26 +259,24 @@ class PluginStoreViewModel @Inject constructor(
                 when (result) {
                     is PluginPreviewResult.Ready -> {
                         val preview = result.preview
-                        val manifestVersion = preview.manifest.version.toString()
-                        if (preview.manifest.id != item.plugin.id ||
-                            preview.manifest.publisher != item.plugin.author ||
-                            preview.manifest.repository != item.plugin.repository ||
-                            asset.version != manifestVersion
-                        ) {
+                        val archiveSha256 = PluginPackageReader.sha256Hex(packageFile.file.readBytes())
+                        val mismatchedFields = storePackageMismatches(item.plugin, preview.manifest, asset.version, archiveSha256)
+                        if (mismatchedFields.isNotEmpty()) {
                             manager.discard(preview.token)
                             _state.update {
                                 it.copy(
                                     installingPluginId = null,
                                     error = PluginStoreError(
                                         code = PluginStoreErrorCode.PREVIEW_FAILED,
+                                        detail = "Manifest mismatch: ${mismatchedFields.joinToString()}",
                                         pluginId = item.plugin.id
                                     )
                                 )
                             }
                             return@launch
                         }
-                        val expectedRepository = if (item.official) null else item.plugin.repository
-                        val official = item.official
+                        val official = isVerifiedOfficialPackage(item.source, item.plugin, preview.manifest.repository)
+                        val expectedRepository = if (official) null else item.plugin.repository
                         _state.update {
                             it.copy(
                                 installingPluginId = null,
@@ -281,6 +335,10 @@ class PluginStoreViewModel @Inject constructor(
         }
     }
 
+    fun consumePreview() {
+        _state.update { it.copy(preview = null) }
+    }
+
     fun dismissPreview() {
         val preview = _state.value.preview ?: return
         _state.update { it.copy(preview = null) }
@@ -292,17 +350,17 @@ class PluginStoreViewModel @Inject constructor(
         if (_state.value.installingPluginId != null) return
         _state.update { it.copy(installingPluginId = preview.preview.manifest.id, error = null) }
         viewModelScope.launch(Dispatchers.IO) {
-            when (val result = manager.install(preview.preview.token, preview.origin)) {
+            when (val result = installService.commit(preview.preview, preview.origin)) {
                 is com.aicove.feature.plugin.domain.PluginInstallResult.Installed -> {
-                    runCatching { pluginProviderRegistrar.sync(result.pluginId) }
-                        .onFailure { FileLogger.e(TAG, "同步插件提供商失败: ${result.pluginId}", it) }
                     _state.update { current ->
                         val version = preview.preview.manifest.version.toString()
                         val installedItems = current.items.map { item ->
                             if (item.plugin.id == result.pluginId) {
                                 item.copy(
                                     installedVersion = version,
-                                    updateAvailable = isNewer(item.plugin.version, version)
+                                    updateAvailable = item.source.id == preview.origin.sourceId &&
+                                        item.source.indexUrl == preview.origin.indexUrl &&
+                                        isNewer(item.plugin.version, version)
                                 )
                             } else item
                         }
@@ -338,7 +396,10 @@ class PluginStoreViewModel @Inject constructor(
         return left > right
     }
 
-    /** 每个插件取一个可用的最高版本，同一插件出现在多个来源时只提示一次。 */
+    private fun hasUpdate(plugin: PluginIndexPlugin, source: PluginIndexSource, record: PluginRecord?): Boolean =
+        record != null && record.sourceId == source.id && record.indexUrl == source.indexUrl &&
+            isNewer(plugin.version, record.version)
+
     private fun updatesOf(items: List<PluginStoreItem>): Map<String, PluginStoreItem> =
         items.asSequence()
             .filter { it.updateAvailable && it.compatible }

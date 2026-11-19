@@ -10,7 +10,10 @@ data class PluginSlotEntry(
     val pluginId: String,
     val localId: String,
     val title: String,
-    val icon: String
+    val icon: String,
+    val slot: String = "",
+    val kind: String = "page",
+    val confirm: Boolean = false
 ) {
     val key: String get() = "$pluginId:$localId"
 }

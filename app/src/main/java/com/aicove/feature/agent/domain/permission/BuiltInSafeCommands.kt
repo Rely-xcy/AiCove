@@ -55,7 +55,7 @@ object BuiltInSafeCommands {
      * `cat /root/.aicode/mcp.json` 泄露 headers/env，`cat ~/.aicode/git-credentials` 直接就是登录凭据。
      */
     private val SENSITIVE_PATH_FRAGMENTS = listOf(
-        ".aicode/", "/data/data/", "/data/user/0/", "/data/misc/", "git-credentials"
+        ".aicove/", ".aicode/", "/data/data/", "/data/user/0/", "/data/misc/", "git-credentials"
     )
 
     /** 该段是否命中任一内置安全前缀。 */

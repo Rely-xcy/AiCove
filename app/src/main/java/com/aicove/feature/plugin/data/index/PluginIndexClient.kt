@@ -30,7 +30,7 @@ data class PluginReleaseAsset(
     val version: String,
     val name: String,
     val url: String,
-    val size: Long
+    val size: Long?
 )
 
 data class DownloadedPluginPackage(
@@ -124,10 +124,14 @@ class PluginIndexClient @Inject constructor(
     }
 
     /**
-     * 解析插件对应的 Release 资产。
+     * 优先使用索引中的直链；否则解析插件对应的 Release 资产。
      * version 为空时取 latest Release 中 `{id}_*.zip` 的最高版本；有 version 时精确查找 `{id}_{version}.zip`。
      */
     suspend fun resolveRelease(plugin: PluginIndexPlugin): PluginReleaseAsset = withContext(Dispatchers.IO) {
+        plugin.packageUrl?.let { url ->
+            val version = plugin.version ?: throw PluginIndexException("${plugin.id} 的 package_url 缺少 version")
+            return@withContext PluginReleaseAsset(version, assetName(plugin.id, version), url, size = null)
+        }
         val (owner, repo) = parseGitHubRepo(plugin.repository)
             ?: throw NoMatchingReleaseException("不是 GitHub 仓库: ${plugin.repository}")
         val expectedName = plugin.version?.let { assetName(plugin.id, it) }
@@ -160,10 +164,13 @@ class PluginIndexClient @Inject constructor(
     }
 
     suspend fun download(asset: PluginReleaseAsset): DownloadedPluginPackage = withContext(Dispatchers.IO) {
-        if (asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
+        if (asset.size != null && (asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES)) {
             throw PluginIndexException("资产大小非法: ${asset.size}")
         }
-        val bytes = fetchWithMirrors(asset.url, asset.size, noCache = true, expectedSize = asset.size)
+        val bytes = fetchWithMirrors(
+            asset.url, asset.size ?: MAX_ARCHIVE_BYTES, noCache = true, expectedSize = asset.size
+        )
+        if (bytes.isEmpty()) throw PluginIndexException("插件包为空")
         val file = File(context.cacheDir, "plugin-${sha256(bytes).take(16)}.zip")
         file.writeBytes(bytes)
         DownloadedPluginPackage(file, asset)

@@ -19,7 +19,7 @@ class GlobalDirectoryAgentSource @Inject constructor(
     /** 不启用远程批量读取的构造（单测与本地调用方）。 */
     internal constructor(fileAccess: FileAccessProvider) : this(fileAccess, BulkFileSource.Disabled)
 
-    val agentsRoot: String = "~/.aicode/agents"
+    val agentsRoot: String = "~/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME + "/agents"
 
     override fun listDefinitions(): List<AgentDefinition> =
         AgentDefinitionDirectoryScanner.scan(fileAccess, agentsRoot, bulk)

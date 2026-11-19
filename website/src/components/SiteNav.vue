@@ -102,7 +102,7 @@ const links = computed(() => [
   { label: copy.value.site.nav.links.features, href: "#features" },
   { label: copy.value.site.nav.links.download, href: "#download" },
   { label: copy.value.site.nav.links.sponsors, href: "#sponsors" },
-  { label: copy.value.site.nav.links.docs, href: "https://aicode.murk.top", external: true },
+  { label: copy.value.site.nav.links.docs, href: "https://rely-xcy.github.io/AiCove/", external: true },
   { label: copy.value.site.nav.links.changelog, href: "https://github.com/Rely-xcy/AiCove/releases", external: true }
 ]);
 

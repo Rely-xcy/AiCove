@@ -5,7 +5,7 @@ description: AiCove（Android 端 AI 编程工具）隐私政策：了解本地�
 
 # AiCove 隐私政策
 
-**最后更新：2026 年 10 月 23 日**
+**最后更新：2026 年 11 月 18 日**
 
 AiCove（以下简称“本应用”）是一款运行在 Android 上的开源 AI 编程工具（GPL-3.0 协议）。本政策说明本应用如何处理你的信息。
 
@@ -91,7 +91,7 @@ AiCove（以下简称“本应用”）是一款运行在 Android 上的开源 A
 
 如对本隐私政策有任何疑问，可通过以下方式联系。GitHub Issues 是公开渠道，请勿提交 API Key、密码或含敏感内容的日志：
 
-- 开发者：jieapi（个人开发者）
-- 联系邮箱：xiaojieapi@qq.com
+- 维护者：Rely-xcy
+- 联系方式：GitHub Issues（公开渠道，请勿提交敏感信息）
 - GitHub Issues：<https://github.com/Rely-xcy/AiCove/issues>
 - 项目主页：<https://github.com/Rely-xcy/AiCove>

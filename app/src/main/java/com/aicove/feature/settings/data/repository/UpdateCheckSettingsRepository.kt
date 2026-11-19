@@ -113,7 +113,7 @@ class UpdateCheckSettingsRepository @Inject constructor(
      */
     fun writeUpdateInfo(currentVersion: String, channel: UpdateChannel, result: UpdateCheckResult) {
         runCatching {
-            val dir = File(context.filesDir, "aicode").apply { mkdirs() }
+            val dir = com.aicove.core.branding.BrandPaths.hostDirectory(context.filesDir).apply { mkdirs() }
             val obj = JSONObject()
             obj.put("currentVersion", currentVersion)
             obj.put("channel", channel.name.lowercase())

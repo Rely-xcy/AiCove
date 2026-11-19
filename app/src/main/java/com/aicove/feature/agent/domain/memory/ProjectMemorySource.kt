@@ -27,7 +27,7 @@ class ProjectMemorySource(
         if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
             File(File(containerInstaller.aicodeDir, "memory/projects"), projectAicodeRoot.projectKey(projectRoot))
         } else {
-            File(projectRoot, ".aicode/memory")
+            File(com.aicove.core.branding.BrandPaths.projectDirectory(projectRoot), "memory")
         }
     }
 

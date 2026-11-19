@@ -9,17 +9,32 @@ import com.aicove.R
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.shizuku.ShizukuManager
 import com.aicove.feature.agent.domain.shizuku.ShizukuState
+import com.aicove.feature.plugin.data.PluginBackupPermissionRepository
 import com.aicove.feature.plugin.data.PluginDevSettingsRepository
+import com.aicove.feature.plugin.data.index.PluginIndexSourceRepository
+import com.aicove.feature.plugin.data.PluginOverlayPermissionRepository
 import com.aicove.feature.plugin.data.PluginRecord
 import com.aicove.feature.plugin.data.PluginShizukuPermissionRepository
+import com.aicove.feature.plugin.data.PluginStoreSettingsRepository
 import com.aicove.feature.plugin.domain.InstalledPlugin
 import com.aicove.feature.plugin.domain.PluginContent
+import com.aicove.feature.plugin.domain.PluginInstallService
 import com.aicove.feature.plugin.domain.PluginManager
 import com.aicove.feature.plugin.domain.PluginStatus
+import com.aicove.feature.plugin.overlay.PluginOverlayManager
+import com.aicove.feature.plugin.runtime.PluginChatService
 import com.aicove.feature.plugin.runtime.PluginDependencyResult
+import com.aicove.feature.plugin.runtime.PluginHookDispatcher
+import com.aicove.feature.plugin.runtime.PluginHttpService
+import com.aicove.feature.plugin.runtime.PluginIntrospectionService
+import com.aicove.feature.plugin.runtime.PluginModelService
 import com.aicove.feature.plugin.runtime.PluginProviderRegistrar
+import com.aicove.feature.plugin.runtime.PluginRuntimeManager
+import com.aicove.feature.plugin.runtime.PluginSecretStore
+import com.aicove.feature.plugin.runtime.PluginSystemService
 import com.aicove.feature.plugin.runtime.PluginTerminalRunner
 import com.aicove.feature.plugin.runtime.PluginTipManager
+import com.aicove.feature.plugin.runtime.PluginToolService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -59,6 +74,10 @@ class PluginsViewModelTest {
     private val terminal = mockk<PluginTerminalRunner>()
     private val tips = mockk<PluginTipManager>()
     private val permissions = mockk<PluginShizukuPermissionRepository>()
+    private val overlayPermissions = mockk<PluginOverlayPermissionRepository>()
+    private val backupPermissions = mockk<PluginBackupPermissionRepository>()
+    private val overlayManager = mockk<PluginOverlayManager>()
+    private val hookDispatcher = mockk<PluginHookDispatcher>()
     private val installed = MutableStateFlow(listOf(plugin("first")))
     private lateinit var viewModel: PluginsViewModel
 
@@ -73,9 +92,17 @@ class PluginsViewModelTest {
         coEvery { providers.sync(any()) } just runs
         coEvery { providers.removeAll(any()) } just runs
         coEvery { permissions.revoke(any()) } just runs
+        coEvery { overlayPermissions.revoke(any()) } just runs
+        coEvery { backupPermissions.revoke(any()) } just runs
         every { permissions.grants } returns flowOf(emptyMap())
+        every { overlayPermissions.grants } returns flowOf(emptyMap())
+        every { backupPermissions.grants } returns flowOf(emptyMap())
         every { terminal.closePlugin(any()) } just runs
         every { tips.dismissPlugin(any()) } just runs
+        every { overlayManager.closePlugin(any()) } just runs
+        every { hookDispatcher.dispatchPluginEnabled(any()) } just runs
+        coEvery { hookDispatcher.dispatchPluginDisabled(any()) } just runs
+        coEvery { hookDispatcher.dispatchPluginUninstalled(any()) } just runs
         val devSettings = mockk<PluginDevSettingsRepository>()
         every { devSettings.enabled } returns flowOf(false)
         val shizuku = mockk<ShizukuManager>()
@@ -88,9 +115,43 @@ class PluginsViewModelTest {
         every { resources.configuration } returns configuration
         val context = mockk<Context>()
         every { context.resources } returns resources
+        val indexSources = mockk<PluginIndexSourceRepository>()
+        every { indexSources.customIndexUrls } returns flowOf(emptyList())
+        val storeSettings = mockk<PluginStoreSettingsRepository>()
+        every { storeSettings.downloadMirror } returns flowOf("")
         viewModel = PluginsViewModel(
-            context, manager, mockk(), mockk(), mockk(), mockk(), mockk(), mockk(),
-            terminal, providers, permissions, shizuku, mockk(), tips, mockk(), devSettings
+            context = context,
+            manager = manager,
+            installService = mockk<PluginInstallService>(),
+            fileAccess = mockk(),
+            pathHomeResolver = mockk(),
+            workspaceRepository = mockk(),
+            fileChangeHub = mockk(),
+            commandEngine = mockk(),
+            eventBus = mockk(),
+            pluginRuntimeManager = mockk<PluginRuntimeManager>(),
+            pluginHookDispatcher = hookDispatcher,
+            pluginTerminalRunner = terminal,
+            pluginProviderRegistrar = providers,
+            shizukuPermissionRepository = permissions,
+            overlayPermissionRepository = overlayPermissions,
+            backupPermissionRepository = backupPermissions,
+            overlayManager = overlayManager,
+            shizukuManager = shizuku,
+            shizukuRunner = mockk(),
+            tipManager = tips,
+            devSettingsRepository = devSettings,
+            indexSourceRepository = indexSources,
+            storeSettingsRepository = storeSettings,
+            pageEnvironment = mockk<PluginPageEnvironment>(),
+            chatService = mockk<PluginChatService>(),
+            modelService = mockk<PluginModelService>(),
+            agentRunStateStore = mockk(),
+            secretStore = mockk<PluginSecretStore>(),
+            systemService = mockk<PluginSystemService>(),
+            introspectionService = mockk<PluginIntrospectionService>(),
+            toolService = mockk<PluginToolService>(),
+            httpService = mockk<PluginHttpService>()
         )
     }
 
@@ -132,8 +193,14 @@ class PluginsViewModelTest {
 
         assertEquals(R.string.plugins_operation_uninstall_cleanup_failed, nextMessage())
         awaitIdle()
-        verify(exactly = 1) { terminal.closePlugin(ID); tips.dismissPlugin(ID) }
-        coVerify(exactly = 1) { providers.removeAll(ID); permissions.revoke(ID) }
+        verify(exactly = 1) { terminal.closePlugin(ID); tips.dismissPlugin(ID); overlayManager.closePlugin(ID) }
+        coVerify(exactly = 1) {
+            providers.removeAll(ID)
+            permissions.revoke(ID)
+            overlayPermissions.revoke(ID)
+            backupPermissions.revoke(ID)
+            hookDispatcher.dispatchPluginUninstalled(ID)
+        }
     }
 
     @Test
@@ -157,8 +224,10 @@ class PluginsViewModelTest {
 
         assertEquals(R.string.plugins_operation_disabled, nextMessage())
         awaitIdle()
-        verify(exactly = 1) { terminal.closePlugin(ID); tips.dismissPlugin(ID) }
+        verify(exactly = 1) { terminal.closePlugin(ID); tips.dismissPlugin(ID); overlayManager.closePlugin(ID) }
         coVerify(exactly = 1) { providers.removeAll(ID) }
+        coVerify(exactly = 1) { hookDispatcher.dispatchPluginDisabled(ID) }
+        verify(exactly = 0) { hookDispatcher.dispatchPluginEnabled(any()) }
         coVerify(exactly = 0) { permissions.revoke(any()) }
     }
 

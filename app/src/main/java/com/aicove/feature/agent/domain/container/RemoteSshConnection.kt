@@ -1,5 +1,8 @@
 package com.aicove.feature.agent.domain.container
 
+import com.aicove.core.branding.BrandPaths
+import com.aicove.core.branding.ConfigMigrationResult
+import com.aicove.core.branding.ConfigRootSelection
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.workspace.domain.remote.RemoteAuth
 import com.aicove.feature.credentials.domain.model.GitCredential
@@ -87,7 +90,6 @@ class RemoteSshConnection @Inject constructor(
 
     private val mutex = Mutex()
     private val sftpLock = Mutex()
-    private val credentialSyncMutex = Mutex()
     private val docsSyncMutex = Mutex()
     internal val sftpOperationMutex = Mutex()
 
@@ -186,6 +188,69 @@ class RemoteSshConnection @Inject constructor(
     var connectionGeneration: Long = 0L
         private set
 
+    @Volatile
+    private var selectedConfigRoot: String? = null
+    private val projectConfigRoots = java.util.concurrent.ConcurrentHashMap<String, ConfigMigrationResult>()
+
+    fun configRoot(): String = selectedConfigRoot ?: throw IllegalStateException("SSH configuration root is not ready")
+
+    fun projectConfigRoot(workspacePath: String): String = projectConfigRoots[workspacePath]?.physicalRoot
+        ?: throw IllegalStateException("SSH project configuration root is not ready")
+
+    suspend fun prepareProjectConfig(
+        workspacePath: String,
+        expectedGeneration: Long = connectionGeneration
+    ): ConfigMigrationResult = mutex.withLock {
+        check(connectionGeneration == expectedGeneration) { "SSH connection changed" }
+        projectConfigRoots[workspacePath]?.let { return@withLock it }
+        check(isConnected()) { "SSH not connected" }
+        val client = sshClient ?: error("SSH not connected")
+        val result = selectConfigRoot(client,
+            "$workspacePath/${BrandPaths.Legacy.CONFIG_DIR_NAME}", "$workspacePath/${BrandPaths.CONFIG_DIR_NAME}")
+        projectConfigRoots[workspacePath] = result
+        result
+    }
+
+    private suspend fun selectConfigRoot(client: SSHClient, old: String, new: String): ConfigMigrationResult =
+        sftpOperationMutex.withLock {
+            coroutineScope {
+                val context = currentCoroutineContext()
+                val channel = AtomicReference<SFTPClient?>(null)
+                val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+                    try { awaitCancellation() } finally {
+                        if (!context.isActive) {
+                            runCatching { channel.get()?.close() ?: client.disconnect() }
+                        }
+                    }
+                }
+                try {
+                    withContext(Dispatchers.IO) {
+                        context.ensureActive()
+                        val sftp = client.newSFTPClient()
+                        channel.set(sftp)
+                        sftp.use {
+                            val result = ConfigRootSelection(RemoteConfigMigrationFileSystem(it) {
+                                context.ensureActive()
+                                check(sshClient === client) { "SSH connection changed" }
+                            }).select(old, new)
+                            context.ensureActive()
+                            val message = "Remote config migration: ${result.status}, root=${result.physicalRoot}, failure=${result.failureCode}"
+                            if (result.completed) FileLogger.i(TAG, message) else FileLogger.w(TAG, message)
+                            result
+                        }
+                    }
+                } catch (error: Exception) {
+                    FileLogger.w(TAG, "Remote config migration failed: $old -> $new", error)
+                    throw error
+                } finally {
+                    withContext(NonCancellable) {
+                        closer.cancelAndJoin()
+                        runCatching { channel.get()?.close() }
+                    }
+                }
+            }
+        }
+
     suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock {
         if (isConnected() && this.config == config) return@withLock
         disconnectInternal()
@@ -193,26 +258,45 @@ class RemoteSshConnection @Inject constructor(
         _connectionState.value = ConnectionState.CONNECTING
         try {
             withContext(Dispatchers.IO) {
-                val client = newSshClient(config)
+                val attempt = currentCoroutineContext()
+                val pending = AtomicReference<SSHClient?>(null)
+                val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+                    try { awaitCancellation() } finally {
+                        if (!attempt.isActive) runCatching { pending.get()?.disconnect() }
+                    }
+                }
+                try {
+                val client = newSshClient(config) { pending.set(it) }
+                attempt.ensureActive()
                 sshClient = client
                 connectionGeneration++
                 // 查远程真实 home（root 是 /root，普通用户是 /home/xxx），供文件工具展开 ~
-                runCatching {
-                    val s = client.startSession()
-                    val cmd = s.exec("echo \$HOME")
-                    remoteHome = java.io.BufferedReader(java.io.InputStreamReader(cmd.inputStream))
-                        .readText().trim().ifEmpty { null }
-                    s.close()
+                val home = client.startSession().use { session ->
+                    val cmd = session.exec("echo \$HOME")
+                    java.io.BufferedReader(java.io.InputStreamReader(cmd.inputStream)).readText().trim()
                 }
+                check(home.startsWith('/') && '\u0000' !in home) { "SSH HOME unavailable" }
+                val migration = selectConfigRoot(client,
+                    "${home.trimEnd('/')}/${BrandPaths.Legacy.CONFIG_DIR_NAME}",
+                    "${home.trimEnd('/')}/${BrandPaths.CONFIG_DIR_NAME}")
+                selectedConfigRoot = migration.physicalRoot
+                remoteHome = home
                 // 注册 transport 断开监听：连接断开时即时推状态，不等 supervisor 轮询
                 client.transport.setDisconnectListener { reason, info ->
                     FileLogger.w(TAG, "SSH 连接断开: $reason, $info")
-                    _connectionState.value = ConnectionState.DISCONNECTED
+                    if (sshClient === client) _connectionState.value = ConnectionState.DISCONNECTED
                 }
                 FileLogger.i(TAG, "SSH 已连接 ${config.host}:${config.port} as ${config.username}")
+                } catch (error: Exception) {
+                    runCatching { pending.get()?.disconnect() }
+                    throw error
+                } finally {
+                    withContext(NonCancellable) { closer.cancelAndJoin() }
+                }
             }
             _connectionState.value = ConnectionState.CONNECTED
         } catch (e: Exception) {
+            disconnectInternal()
             _connectionState.value = ConnectionState.FAILED
             throw e
         }
@@ -247,6 +331,8 @@ class RemoteSshConnection @Inject constructor(
         runCatching { sshClient?.disconnect() }
         sshClient = null
         remoteHome = null
+        selectedConfigRoot = null
+        projectConfigRoots.clear()
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
@@ -285,7 +371,8 @@ class RemoteSshConnection @Inject constructor(
     }
 
     fun isConnected(): Boolean =
-        sshClient?.isConnected == true && sshClient?.isAuthenticated == true
+        selectedConfigRoot != null && _connectionState.value == ConnectionState.CONNECTED &&
+            sshClient?.isConnected == true && sshClient?.isAuthenticated == true
 
     /** 开一个 exec session 执行命令。调用方负责关闭返回的 Command。 */
     fun startExecSession(command: String): Session.Command {
@@ -323,14 +410,25 @@ class RemoteSshConnection @Inject constructor(
      * 由 [disconnect] 统一管理。连接失效（未连接/未认证）时丢弃重建，覆盖 SFTP 通道崩溃后的自愈。
      */
     suspend fun sftp(): SFTPClient = sftpLock.withLock {
+        check(isConnected()) { "SSH configuration migration is not ready" }
+        val generation = connectionGeneration
         val cfg = config ?: throw IllegalStateException("SSH 未配置")
         sftpClient
             ?.takeIf { sftpSshClient?.isConnected == true && sftpSshClient?.isAuthenticated == true }
             ?.let { return@withLock it }
         closeSftpInternal()
         val client = withContext(Dispatchers.IO) { newSshClient(cfg) }
+        if (connectionGeneration != generation || config != cfg || !isConnected()) {
+            runCatching { client.disconnect() }
+            throw CancellationException("SSH connection changed")
+        }
         sftpSshClient = client
         val sftp = withContext(Dispatchers.IO) { client.newSFTPClient() }
+        if (connectionGeneration != generation || sftpSshClient !== client || !isConnected()) {
+            runCatching { sftp.close() }
+            runCatching { client.disconnect() }
+            throw CancellationException("SSH connection changed")
+        }
         sftpClient = sftp
         sftp
     }
@@ -459,7 +557,7 @@ class RemoteSshConnection @Inject constructor(
                         channel = sftp
                         checkActive()
                         val ops = agentFileOps
-                        val backend = RemoteDocsSftpBackend(sftp, home, checkActive) { path, bytes ->
+                        val backend = RemoteDocsSftpBackend(sftp, home, checkActive, configDirectory = configRoot()) { path, bytes ->
                             if (ops == null) false else {
                                 checkActive()
                                 try {
@@ -497,7 +595,7 @@ class RemoteSshConnection @Inject constructor(
     }
 
     /**
-     * 释放 App 内置资源（子代理定义、面板示例脚本等）到远程 `~/.aicode/<subdir>/`。
+     * 释放 App 内置资源（子代理定义、面板示例脚本等）到远程 `~/.aicove/<subdir>/`。
      * 仅补齐服务器上缺失的文件、**不覆盖已存在**（保留用户修改），脚本赋可执行位。
      * 与 [uploadDocs] 一样在连接/重连后调用——远程模式下全局 agents/scripts 以远端为准，
      * 内置默认需在远端存在才能「开箱即用」。二进制安全（base64 传输）。
@@ -506,11 +604,11 @@ class RemoteSshConnection @Inject constructor(
         destSubdir: String,
         files: Map<String, ByteArray>,
         executable: Boolean = false
-    ) {
-        if (files.isEmpty()) return
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
-        val destDir = home.trimEnd('/') + "/.aicode/" + destSubdir.trim('/')
+    ) = mutex.withLock {
+        if (files.isEmpty()) return@withLock
+        val client = sshClient ?: return@withLock
+        val home = remoteHome ?: return@withLock
+        val destDir = configRoot() + "/" + destSubdir.trim('/')
         withContext(Dispatchers.IO) {
             runCatching {
                 if (!tryAgentMkdirs(destDir)) {
@@ -534,19 +632,19 @@ class RemoteSshConnection @Inject constructor(
 
     /**
      * 把 App 的 git 凭据注入远程服务器（仅当用户开启「自动注入」时调用）：
-     * 写 `~/.aicode/git-credentials`（store 格式）+ `~/.aicode/gitconfig` + `~/.aicode/gitconfig.credential`。
+     * 写 `~/.aicove/git-credentials`（store 格式）+ `~/.aicove/gitconfig` + `~/.aicove/gitconfig.credential`。
      *
-     * 生效机制：[RemoteSshEngine] 执行命令时注入 `GIT_CONFIG_GLOBAL=$HOME/.aicode/gitconfig`，其中
+     * 生效机制：[RemoteSshEngine] 执行命令时注入 `GIT_CONFIG_GLOBAL=$HOME/.aicove/gitconfig`，其中
      * `[include] path=~/.gitconfig` 保留服务器用户自己的全局配置（署名等），`[includeIf "gitdir:<工作区根>/"]`
      * 限定只有工作区根目录下的仓库才加载 store helper——不影响用户在服务器上手动 git，也不影响其它目录的仓库。
      *
      * @param credentials 要注入的凭据列表（每 host 一条）。
      * @param workspaceRoot 远程工作区根路径（AI 的 ~/workspace 映射目录），限定注入范围。
      */
-    suspend fun uploadGitCredentialConfig(credentials: List<GitCredential>, workspaceRoot: String) = credentialSyncMutex.withLock {
+    suspend fun uploadGitCredentialConfig(credentials: List<GitCredential>, workspaceRoot: String) = mutex.withLock {
         val client = sshClient ?: return@withLock
         val home = remoteHome ?: return@withLock
-        val aicodeDir = home.trimEnd('/') + "/.aicode"
+        val aicodeDir = configRoot()
         val wsRoot = workspaceRoot.trimEnd('/').ifEmpty { return@withLock }
         withContext(Dispatchers.IO) {
             runCatching {
@@ -566,7 +664,7 @@ class RemoteSshConnection @Inject constructor(
                 check(helperScript.isNotBlank()) { "Git credential helper is empty" }
                 val remoteHelperScript = helperScript.replaceFirst(
                     "#!/bin/sh\n",
-                    "#!/bin/sh\nexport AICODE_CRED_NO_PROMPT=1\n"
+                    "#!/bin/sh\nexport ${BrandPaths.ENV_PREFIX}CRED_NO_PROMPT=1\nexport ${BrandPaths.Legacy.ENV_PREFIX}CRED_NO_PROMPT=1\nexport AICOVE_DIR=${remoteShellQuote(aicodeDir)}\n"
                 )
                 if (!tryAgentWrite("$aicodeDir/git-credential-aicode", remoteHelperScript.toByteArray(Charsets.UTF_8), executable = true)) {
                     writeRemoteFile("$aicodeDir/git-credential-aicode", remoteHelperScript.toByteArray(Charsets.UTF_8), executable = true)
@@ -579,7 +677,7 @@ class RemoteSshConnection @Inject constructor(
                     append("[include]\n")
                     append("    path = ~/.gitconfig\n")
                     append("[includeIf \"gitdir:${gitConfigValue(wsRoot)}/\"]\n")
-                    append("    path = ~/.aicode/gitconfig.credential\n")
+                    append("    path = ${gitConfigValue(aicodeDir)}/gitconfig.credential\n")
                 }
                 if (!tryAgentWrite("$aicodeDir/gitconfig", gitconfig.toByteArray(Charsets.UTF_8))) {
                     writeRemoteFile("$aicodeDir/gitconfig", gitconfig.toByteArray(Charsets.UTF_8))
@@ -587,7 +685,7 @@ class RemoteSshConnection @Inject constructor(
 
                 val credentialConfig = buildString {
                     append("[credential]\n")
-                    append("    helper = !AICODE_CRED_NO_PROMPT=1 $aicodeDir/git-credential-aicode\n")
+                    append("    helper = !${BrandPaths.ENV_PREFIX}CRED_NO_PROMPT=1 ${BrandPaths.Legacy.ENV_PREFIX}CRED_NO_PROMPT=1 AICOVE_DIR=${remoteShellQuote(aicodeDir)} ${remoteShellQuote("$aicodeDir/git-credential-aicode")}\n")
                 }
                 if (!tryAgentWrite("$aicodeDir/gitconfig.credential", credentialConfig.toByteArray(Charsets.UTF_8))) {
                     writeRemoteFile("$aicodeDir/gitconfig.credential", credentialConfig.toByteArray(Charsets.UTF_8))
@@ -601,10 +699,10 @@ class RemoteSshConnection @Inject constructor(
      * 撤销远程注入：删除 App 管理的三个配置/凭据文件。
      * `GIT_CONFIG_GLOBAL` 指向不存在的文件时 git 静默跳过，注入即失效，服务器用户配置不受影响。
      */
-    suspend fun removeGitCredentialConfig() = credentialSyncMutex.withLock {
+    suspend fun removeGitCredentialConfig() = mutex.withLock {
         val client = sshClient ?: return@withLock
         val home = remoteHome ?: return@withLock
-        val aicodeDir = home.trimEnd('/') + "/.aicode"
+        val aicodeDir = configRoot()
         withContext(Dispatchers.IO) {
             runCatching {
                 var allViaAgent = true

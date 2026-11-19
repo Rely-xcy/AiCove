@@ -10,8 +10,8 @@ import com.aicove.feature.agent.domain.tool.ToolParameter
 import com.aicove.feature.agent.domain.tool.ToolPermissionPolicy
 import com.aicove.feature.agent.domain.tool.ToolResult
 import com.aicove.feature.plugin.domain.PluginTool
+import com.aicove.core.util.appLanguageTag
 import java.security.MessageDigest
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -32,7 +32,7 @@ import kotlinx.serialization.json.longOrNull
 class PluginToolAdapter(
     private val context: Context,
     private val pluginId: String,
-    private val pluginName: String,
+    private val pluginName: () -> String,
     private val pluginVersion: String,
     private val tool: PluginTool,
     private val runtime: PluginRuntimeManager,
@@ -41,9 +41,9 @@ class PluginToolAdapter(
 
     override val name: String = buildNamespacedName(pluginId, tool.localId)
 
-    override val description: String = tool.description
-        .resolve(Locale.getDefault().toLanguageTag())
-        .ifBlank { tool.title.resolve(Locale.getDefault().toLanguageTag()) }
+    override val description: String
+        get() = tool.description.resolve(context.appLanguageTag())
+            .ifBlank { tool.title.resolve(context.appLanguageTag()) }
 
     override val parameters: Map<String, ToolParameter> = emptyMap()
 
@@ -92,12 +92,12 @@ class PluginToolAdapter(
         args: Map<String, JsonElement>,
         argsPreview: String
     ): PendingToolPermission {
-        val title = tool.title.resolve(Locale.getDefault().toLanguageTag())
+        val title = tool.title.resolve(context.appLanguageTag())
         return PendingToolPermission(
             id = callId,
             toolName = name,
             title = context.getString(R.string.plugin_tool_permission_title),
-            summary = context.getString(R.string.plugin_tool_permission_summary, pluginName, title),
+            summary = context.getString(R.string.plugin_tool_permission_summary, pluginName(), title)
             details = context.getString(
                 R.string.plugin_tool_permission_details,
                 pluginId,

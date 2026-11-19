@@ -1,5 +1,6 @@
 package com.aicove.feature.workspace.domain
 
+import com.aicove.core.branding.BrandPaths
 import com.aicove.feature.agent.domain.container.ContainerInstaller
 import com.aicove.feature.agent.domain.container.RemoteSshConnection
 import com.aicove.feature.settings.data.repository.ExecutionMode
@@ -12,11 +13,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 项目级 `.aicode` 配置目录的归属解析。
+ * 项目级 `.aicove` 配置目录的归属解析。
  *
- * - 本地模式：配置随工作区走（`<workspacePath>/.aicode`），可被 AI 直接编辑、可 git 追踪；
+ * - 本地模式：配置随工作区走（`<workspacePath>/.aicove`），可被 AI 直接编辑、可 git 追踪；
  * - 远程模式：工作区在 SSH 服务器上，[java.io.File] 无法在本地创建该目录（写入必失败），
- *   故改存 App 私有目录 `filesDir/aicode/projects/<项目名-标识哈希>/`。标识基于
+ *   故改存 App 私有目录 `filesDir/aicove/projects/<项目名-标识哈希>/`。标识基于
  *   「IP:端口:远程路径」，不同服务器上的同名路径不会互相覆盖。
  *
  * 与项目级记忆 [com.aicove.feature.agent.domain.memory.ProjectMemorySource] 使用同一套标识算法。
@@ -39,7 +40,7 @@ class ProjectAicodeRoot @Inject constructor(
         if (isRemote()) {
             File(File(containerInstaller.aicodeDir, PROJECTS_DIR), projectKey(workspacePath))
         } else {
-            File(workspacePath, AICODE_DIR)
+            BrandPaths.projectDirectory(workspacePath)
         }
 
     /** 远程项目级资源在私有目录下的标识：项目名 + 「IP:端口:路径」哈希前 8 位。 */
@@ -56,7 +57,6 @@ class ProjectAicodeRoot @Inject constructor(
         executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH
 
     private companion object {
-        const val AICODE_DIR = com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
         const val PROJECTS_DIR = "projects"
     }
 }

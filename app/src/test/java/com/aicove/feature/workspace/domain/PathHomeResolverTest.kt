@@ -62,14 +62,15 @@ class PathHomeResolverTest {
     fun aicodeRoot_localMode() {
         val resolver = newResolver(ExecutionMode.LOCAL_PROOT)
         resolver.containerHome = "/root"
-        assertEquals("/root/.aicode", resolver.aicodeRoot())
+        assertEquals("/root/.aicove", resolver.aicodeRoot())
     }
 
     @Test
     fun aicodeRoot_remoteMode_usesRemoteHome() {
         val resolver = newResolver(ExecutionMode.REMOTE_SSH)
         every { remoteSshConnection.remoteHome } returns "/home/dev/"
-        assertEquals("/home/dev/.aicode", resolver.aicodeRoot())
+        every { remoteSshConnection.configRoot() } returns "/home/dev/.aicove"
+        assertEquals("/home/dev/.aicove", resolver.aicodeRoot())
     }
 
     // ---------- expandHome()：~ 展开 ----------

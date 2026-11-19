@@ -227,10 +227,10 @@ def publish(apk):
     if branch_head(branch) != sha:
         raise ValueError('Remote head did not match the verified rebuild')
     Path('dist').mkdir(exist_ok=True)
-    shutil.copyfile(apk, f'dist/aicode-universal-beta-{sha[:8]}.apk')
+    shutil.copyfile(apk, f'dist/aicove-universal-beta-{sha[:8]}.apk')
     mapping = Path('app/build/outputs/mapping/universalBeta/mapping.txt')
     if mapping.is_file():
-        shutil.copyfile(mapping, f'dist/aicode-universal-beta-{sha[:8]}-mapping.txt')
+        shutil.copyfile(mapping, f'dist/aicove-universal-beta-{sha[:8]}-mapping.txt')
     output('published', 'true')
     print('Published profile and rebuilt Beta:', sha)
 

@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicove.R
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
+import com.aicove.feature.plugin.data.index.PluginIndexDefaults
 import com.aicove.feature.settings.presentation.component.LazyGroupItem
 import com.aicove.feature.settings.presentation.component.McpPill
 import com.aicove.feature.settings.presentation.component.ModelSearchField
@@ -75,34 +76,6 @@ import compose.icons.feathericons.Server
 import compose.icons.feathericons.ShoppingBag
 import compose.icons.feathericons.Tag
 
-/** 列表搜索无结果时的占位。 */
-@Composable
-internal fun PluginSearchEmptyState() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 48.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            Icon(
-                FeatherIcons.Search,
-                contentDescription = null,
-                modifier = Modifier.size(28.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
-            Text(
-                text = stringResource(R.string.plugins_search_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
 /** 非官方徽标用语义色的 warning 槽位，跟随主题与暗色模式。 */
 private val UnofficialBadgeBackground: Color
     @Composable @ReadOnlyComposable get() = MaterialTheme.semanticColors.warningContainer
@@ -112,6 +85,7 @@ private val UnofficialBadgeText: Color
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PluginStoreSection(
+    onShowPreview: (PluginStorePreview) -> Unit,
     onOpenDetail: (PluginStoreItem) -> Unit,
     viewModel: PluginStoreViewModel = hiltViewModel()
 ) {
@@ -120,7 +94,23 @@ internal fun PluginStoreSection(
     val context = LocalContext.current
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showSources by rememberSaveable { mutableStateOf(false) }
+    var previousSourceId by rememberSaveable { mutableStateOf(state.selectedSourceId) }
 
+    LaunchedEffect(state.selectedSourceId) {
+        if (previousSourceId != state.selectedSourceId) {
+            previousSourceId = state.selectedSourceId
+            searchQuery = ""
+            listState.scrollToItem(0)
+        }
+    }
+
+    LaunchedEffect(state.preview) {
+        state.preview?.let { preview ->
+            onShowPreview(preview)
+            viewModel.consumePreview()
+        }
+    }
     LaunchedEffect(viewModel) {
         viewModel.refreshResult.collect { failed ->
             val message = if (failed > 0) {
@@ -148,11 +138,32 @@ internal fun PluginStoreSection(
     // 安装/下载错误归属具体插件，只在该插件详情页展示；整页错误只处理索引错误。
     val indexError = state.error?.takeIf { it.pluginId == null }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        val selectedSource = state.sources.firstOrNull { it.id == state.selectedSourceId }
+            ?: PluginIndexDefaults.builtIns.first()
+        SettingsGroup(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)) {
+            SettingsRow(
+                icon = FeatherIcons.Server,
+                title = stringResource(
+                R.string.plugin_sources_current,
+                if (state.selectedSourceId == PluginIndexDefaults.ALL_SOURCES_ID) stringResource(R.string.muse_plugin_sources_all)
+                else pluginSourceName(selectedSource)
+            ),
+                onClick = { showSources = true }
+            )
+        }
+        if (state.rejectedPluginCount > 0) {
+            Text(
+                text = stringResource(R.string.plugin_sources_rejected, state.rejectedPluginCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = Spacing.xl, vertical = Spacing.xs)
+            )
+        }
         PullToRefreshBox(
             isRefreshing = state.refreshing,
             onRefresh = viewModel::refresh,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.weight(1f)
         ) {
         LazyColumn(
             state = listState,
@@ -222,6 +233,15 @@ internal fun PluginStoreSection(
             }
         }
         }
+    }
+    if (showSources) {
+        PluginStoreSourcesDialog(
+            sources = state.sources.ifEmpty { PluginIndexDefaults.builtIns },
+            selectedSourceId = state.selectedSourceId,
+            onSelect = viewModel::selectSource,
+            onSaveCustomSources = viewModel::saveCustomSources,
+            onDismiss = { showSources = false }
+        )
     }
 }
 
@@ -323,6 +343,7 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
 internal fun PluginStoreDetailSection(
     item: PluginStoreItem,
     onBack: () -> Unit,
+    onShowPreview: (PluginStorePreview) -> Unit,
     viewModel: PluginStoreViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -333,7 +354,12 @@ internal fun PluginStoreDetailSection(
     val languageTag = currentLanguageTag()
     val installing = state.installingPluginId == latest.plugin.id
 
-    val preview = state.preview?.takeIf { it.preview.manifest.id == latest.plugin.id }
+    LaunchedEffect(state.preview, latest.plugin.id) {
+        state.preview?.takeIf { it.preview.manifest.id == latest.plugin.id }?.let { preview ->
+            onShowPreview(preview)
+            viewModel.consumePreview()
+        }
+    }
 
     BackHandler(onBack = onBack)
     Column(modifier = Modifier.fillMaxSize()) {
@@ -436,15 +462,6 @@ internal fun PluginStoreDetailSection(
                 )
             }
         }
-    }
-    preview?.let {
-        PluginPreviewSheet(
-            preview = it.preview,
-            installing = installing,
-            error = state.error?.takeIf { error -> error.pluginId == it.preview.manifest.id }?.pluginError,
-            onInstall = viewModel::confirmInstall,
-            onDismiss = viewModel::dismissPreview
-        )
     }
 }
 

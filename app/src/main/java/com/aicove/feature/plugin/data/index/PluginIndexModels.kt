@@ -5,6 +5,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -24,7 +25,8 @@ internal val PluginIndexJson = Json {
 @Serializable
 data class PluginIndexDocument(
     @SerialName("schema_version") val schemaVersion: Int,
-    val plugins: List<PluginIndexPlugin> = emptyList()
+    val plugins: List<PluginIndexPlugin> = emptyList(),
+    @Transient val rejectedPluginCount: Int = 0
 )
 
 @Serializable
@@ -39,7 +41,9 @@ data class PluginIndexPlugin(
     val license: String? = null,
     val tags: List<String> = emptyList(),
     val version: String? = null,
-    @SerialName("min_app_version") val minAppVersion: String? = null
+    @SerialName("min_app_version") val minAppVersion: String? = null,
+    @SerialName("package_url") val packageUrl: String? = null,
+    @SerialName("package_sha256") val packageSha256: String? = null
 )
 
 /**

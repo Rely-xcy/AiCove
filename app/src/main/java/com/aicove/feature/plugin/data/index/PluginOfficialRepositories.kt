@@ -4,7 +4,7 @@ import java.net.URI
 
 /** 官方插件判定只看插件源码仓库是否归属 AiCove 官方 GitHub 账号/组织。 */
 object PluginOfficialRepositories {
-    val GITHUB_OWNERS = setOf("jieapi")
+    val GITHUB_OWNERS = setOf("rely-xcy")
 
     fun ownerOf(repository: String): String? {
         val uri = runCatching { URI(repository) }.getOrNull() ?: return null

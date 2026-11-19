@@ -19,7 +19,7 @@ class ProjectDirectorySkillSource @Inject constructor(
     /** 不启用远程批量读取的构造（单测与本地调用方）。 */
     internal constructor(fileAccess: FileAccessProvider) : this(fileAccess, BulkFileSource.Disabled)
 
-    val skillsRoot: String = "${WorkspacePathMapper.CONTAINER_ROOT}/.aicode/skills"
+    val skillsRoot: String = "${WorkspacePathMapper.CONTAINER_ROOT}/${com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME}/skills"
 
     override fun listSkills(): List<Skill> = SkillDirectoryScanner.scan(fileAccess, skillsRoot, bulk)
 

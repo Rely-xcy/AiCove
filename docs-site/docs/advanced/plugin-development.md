@@ -1,7 +1,7 @@
 # 开发插件
 
 ::: warning 预览功能
-目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**生命周期 hooks**，只能从本地 `.zip` 导入。hooks 分三种：只读观察只接收运行元数据；可写 hook 可在工具执行前拒绝调用或改写参数（改写后重新走完整权限判断），也可改写工具成功结果的数据，或在每次 provider HTTP 请求发出前改写 URL、headers 与 body；代审核 hook 可在宿主准备弹窗确认时批准或拒绝包括高危在内的 ASK 调用。只读观察看不到消息正文、工具参数或结果；可写 hook 会拿到对应调用的参数或结果，HTTP hook 还会拿到明文鉴权头与请求体，代审核 hook 能批准原本需要你确认的调用，只安装你信任的插件。提供商、在线分发等还没有实现，写进清单会被拒绝安装。AI 工具与 hooks 的业务逻辑在容器内的插件子进程中运行（`node` 或 `python3`）；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
+插件可从商店或本地 ZIP 安装，支持组合包、开发目录重载，提供**技能**、**子代理**、**工作区工具**、**页面／动作入口**、**AI 工具**、**MCP 服务器**、**OpenAI 兼容提供商**和**生命周期 hooks**。扩展宿主接口还包括模型句柄、文件监视、HTTP、加密键值存储、系统交互、悬浮窗与插件备份区段。hooks 分三种：只读观察只接收运行元数据；可写 hook 可在工具执行前拒绝调用或改写参数（改写后重新走完整权限判断），也可改写工具成功结果的数据，或在每次 provider HTTP 请求发出前改写 URL、headers 与 body；代审核 hook 可在宿主准备弹窗确认时批准或拒绝包括高危在内的 ASK 调用。只读观察看不到消息正文、工具参数或结果；可写 hook 会拿到对应调用的参数或结果，HTTP hook 可读取请求体，但已识别的敏感请求头用占位符代替，代审核 hook 能批准原本需要你确认的调用，只安装你信任的插件。发布入口可校验和导出包；远端提交须配置 AiCove 自有发布后端，当前未配置时明确不可提交。AI 工具与 hooks 的业务逻辑在容器内的插件子进程中运行（`node` 或 `python3`）；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
 :::
 
 一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是 Markdown、HTML 页面、工具 schema，以及可选的 `dist/main.js` 业务入口。
@@ -55,7 +55,7 @@ demo-kit/
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `manifestVersion` | 是 | 固定为 `1` |
-| `id` | 是 | `发布者.插件名`，两段都以小写字母开头，只含小写字母、数字、连字符，如 `community.demo-kit` |
+| `id` | 是 | `发布者.插件名`，每段以 Unicode 字母开头，可含字母、数字、下划线和连字符，每段最多 32 字符；也支持合法中文 ID |
 | `publisher` | 是 | 必须等于 `id` 的第一段 |
 | `name` / `description` | 是 | 展示给使用者的文字，可写成字符串，或按语言写成对象（见下） |
 | `version` | 是 | 语义化版本，如 `1.0.0`、`1.1.0-beta.1` |
@@ -74,7 +74,7 @@ demo-kit/
 "name": {"default": "Demo Kit", "zh-CN": "演示套件"}
 ```
 
-AiCove 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` → `en` → 第一项」的顺序挑选。语言标签写成 `zh`、`zh-CN`、`en` 这类即可，大小写和 `-`/`_` 不敏感。`name` 不能换行，`description` 可以。
+AiCove 优先匹配完整语言标签、书写系统、地区及语言，再使用 `default`、`en` 或第一项作为回退。中文会依书写系统与地区回退到简体 (`zh-CN`) 或繁体 (`zh-TW`)；例如系统返回 `zh-Hans-CN` 时会匹配简体名称，返回 `zh-Hant-TW` 时会匹配繁体名称。语言标签大小写不敏感，`-` 与 `_` 等价。`name` 不能换行，`description` 可以。
 
 ### 版本范围写法
 
@@ -104,7 +104,7 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 - 技能的名字由 AiCove 生成为 `插件ID:内容id`（如 `community.demo-kit:project-notes`），文件里的 `name` 会被忽略；
 - `description` 决定 AI 什么时候加载这个技能，会被压成一行写进系统提示词，请写清「何时使用」；
 - 正文不能为空；
-- 技能不能依赖同目录的脚本：插件包不会被放进容器，AI 也不会在容器里找到它。需要脚本时请把做法写进正文，让 AI 当场执行。
+- 插件包保存在本机容器可访问的全局配置目录，技能可引用包内脚本；远程执行环境不会自动获得手机上的插件文件。需要依赖时声明运行时依赖或随包打包，不要假定服务器已安装。
 
 ## 子代理文件
 
@@ -295,7 +295,7 @@ hooks 有三种模式：
 | `agent.permission.review` | 宿主判定为 ASK 后、弹出用户确认前 | `allow` / `deny` / `pass` |
 
 ::: warning 高权限能力
-`agent.http.before` 的 payload 包含明文 `Authorization` / `x-api-key` 等鉴权头和完整请求体（可能含对话内容）。启用这类插件等于把这些信息交给它；只安装可信来源。
+`agent.http.before` 的 payload 保留请求正文（可能含对话内容），已识别的 `Authorization`、API Key、Cookie 等敏感头以 `{{Token}}` 占位。同 origin 改写可保留宿主原始敏感值，跨 origin 不继承这些值。占位规则不构成对任意自定义正文的去敏保证。
 :::
 
 只读观察事件有八个：
@@ -448,10 +448,18 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 - **不能提权**：可写 hook 只能拒绝或缩小调用，不能批准工具、不能把宿主拒绝改成允许、不能绕过 PLAN 模式或权限策略；
 - 改写参数后必须重新走完整权限判断；审批后不会悄悄改写参数；
 - `agent.tool.after` 只处理成功结果，不能把错误改成成功，也不能伪造附件或图片；
-- `agent.http.before` 能看到并改写鉴权头；它不能改请求方法，也不能把请求改成非 JSON；改写后的响应解析仍按原 provider 格式，插件需自行保证 body 与目标端点兼容；
+- `agent.http.before` 不能读取已识别鉴权头的真实值；它不能改请求方法，也不能把请求改成非 JSON。跨 origin 改写会剥离原敏感头，响应仍按原 provider 格式解析；
 - `agent.permission.review` 能批准原本需要用户确认的调用，属于高权限能力；它不能改参数、不能覆盖宿主 DENY/PLAN、不能写入永久允许规则，也不能代审自己的工具；
 - hook 与 AI 工具共用同一个插件进程；进程拥有容器内的文件与命令能力，可写 hook 能读取对应工具的参数与结果，只安装可信插件；
 - 单项观察 hook 超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
+
+## 模型、悬浮窗与备份声明
+
+`contributes.modelAccess` 为 `{ "purpose": "说明调用模型的用途" }`，允许已启用插件通过宿主模型句柄发起请求，不暴露供应商 Key。请求不会自动执行模型返回的工具调用；需要工具时通过 `aicove.tools.execute` 并处理本插件的审批。模型句柄与在途流在停用、卸载或替换时失效。
+
+`contributes.overlay` 包含 `purpose` 和 `surfaces`，每个 surface 提供 `id`、包内 HTML `page`，以及可选的 `width`、`height`、`draggable`、`snap`（`none`／`x`／`y`／`both`）。插件详情中的独立授权和 Android 系统悬浮窗权限都满足后才可创建；撤权或卸载关闭窗口。
+
+`contributes.backup` 为 `{ "purpose": "说明附加数据用途" }`。需要备份开关时，在 `uiEntries` 声明 `slot: "backup.data"` 的 DATA 项，不填 `page` 或 `handler`。用户单独授权并在备份页勾选后，观察 hook `backup.export.before` 收到 `{dir:"data://backup-export"}`；宿主只归档这个暂存区。导入主数据成功后，`backup.import.finished` 收到 `{dir:"data://backup-import",stats:{chatSessions,workspaceFiles}}`，只向仍启用且获授权的对应插件回交数据。禁止符号链接和越界路径，区段最多 1000 个文件、单文件 16 MiB、总计 64 MiB；临时区会在结束或失败时清理。
 
 ## 插件事件
 
@@ -535,8 +543,13 @@ const off = aicode.events.on((event) => {
 | `settings.help` | 设置 · 帮助与关于 |
 | `drawer.footer` | 聊天侧栏底部（设置入口上方） |
 | `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
+| `chat.welcome` | 聊天空态 |
+| `chat.session.menu` | 被长按的会话菜单 |
+| `files.tree.menu` | 被长按的文件／目录菜单，仅动作 |
+| `editor.selection.menu` | 编辑器真实选区的动作菜单 |
+| `backup.data` | 备份数据开关，仅 DATA，不提供 page 或 handler |
 
-`page` 必须是包内的 `.html` / `.htm` 文件，最大 512 KiB。**单个插件在每个槽位最多 2 个入口**，超出会在解析阶段直接拒绝。侧栏与顶栏菜单各最多展示 3 个入口。停用或卸载插件后入口消失。
+页面入口用 `page` 指向包内 HTML，动作入口用 `handler` 调用同插件运行时，二者不能同时提供。设置六槽仅接受页面；文件和编辑器槽仅接受动作。动作声明 `confirm: true` 时执行前由宿主确认。页面最大 512 KiB，每插件每槽最多 2 个入口；停用或卸载后消失。
 
 > 旧版清单里的 `contributes.settingsPages` + `anchor` 已换成 `uiEntries` + `slot`，旧写法不再被识别。
 
@@ -555,7 +568,7 @@ const off = aicode.events.on((event) => {
 
 ### 页面里的宿主接口
 
-宿主向页面注入 `window.aicode`，所有方法返回 Promise：
+宿主向页面注入 `window.aicove`，同时保留兼容别名 `window.aicode`；下列原有写法仍可用。请求方法返回 Promise，事件订阅返回取消订阅函数：
 
 | 方法 | 作用 |
 | --- | --- |
@@ -584,7 +597,7 @@ const off = aicode.events.on((event) => {
 | `aicode.fs.readBinary(path)` | 读原始字节，返回 `{ base64, size }` |
 | `aicode.fs.writeBinary(path, base64)` | 写入 Base64 解码后的字节 |
 | `aicode.fs.rename(from, to)` | 移动/重命名，不能把目录移进自身 |
-| `aicode.fs.copy(from, to, overwrite?)` | 复制文件或目录，不能复制进自身 |
+| `aicode.fs.copy(from, to, {overwrite?, contextKey?})` | 复制文件或目录，不能复制进自身 |
 | `aicode.toast(message)` | 轻提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话内显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；插件声明用途且已单独授权后直接执行，`options.timeout` 以秒计 |
@@ -597,6 +610,16 @@ const off = aicode.events.on((event) => {
 | `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
 | `aicode.ui.setOverlay(visible, rect)` | 打开/关闭页面内全屏弹层并上报弹层矩形；宿主在全局背景图上按矩形挖洞，避免背景叠到弹层上 |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
+| `aicove.model.listProviders()` / `listModels(providerId)` | 列出可用提供商和模型，不返回密钥 |
+| `aicove.model.create(options)` / `close(handleId)` | 创建／释放宿主管理的模型句柄，须声明 modelAccess |
+| `aicove.model.start(options)` / `read(options)` / `cancel(streamId)` | 拉取式流请求；`stream(options, onEvent)` 封装 start/read 循环 |
+| `aicove.fs.watch(path, options?, handler)` | 订阅有界文件范围，Promise 返回取消订阅函数；页面隐藏或环境切换时暂停／失效 |
+| `aicove.tools.list({includeSchema?})` / `execute(name, args, options?)` | 查询和执行内置／MCP 工具；复用宿主策略，禁止经此递归调用插件工具 |
+| `aicove.tools.pending(sessionId?)` / `resolve(requestId, choice)` | 仅处理本插件命名空间内的工具审批 |
+| `aicove.http.request(options)` | 宿主 HTTP 请求，不自动附带宿主凭据、不跟随重定向 |
+| `aicove.secrets.get/set/delete/list` | 插件私有加密存储；list 只返回键名 |
+| `aicove.clipboard.read/write`、`share.text`、`ui.openUrl`、`app.info` | 系统交互和宿主信息 |
+| `aicove.overlay.create/update/close/postMessage` | 声明并单独授权后的系统悬浮窗 |
 
 返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
 
@@ -678,6 +701,10 @@ const off = aicode.events.on((event) => {
 - 宿主只对已启用且授予 `settings-pages.register` 的插件注入桥；插件停用后入口消失，页面请求会被拒绝；
 - 设置页入口最多按声明顺序展示，超出宿主限制的入口会被忽略。
 
+## 在对话中管理插件
+
+宿主工具 `plugin` 支持 `list`、`install`、`reload`、`enable`、`disable`、`uninstall`、`logs`。开发目录为 `~/.aicove/plugin-dev/<项目>`；`install(source="dev", path="目录名")` 和 `reload(plugin_id="发布者.插件名")` 都走统一安装服务。安装、重载、启停和卸载仍受当前运行模式与工具授权约束，不能用插件自调用绕过。
+
 ## 打包
 
 在目录里执行（注意最后的 `.`，确保 `plugin.json` 在压缩包根部）：
@@ -718,7 +745,7 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | plugin.json 缺少 / 无效字段 | 提示里会写出具体路径 |
 | 此版本不支持的字段 / 内容类型 | 用了目前未实现的能力，如 `providers`、`permissionReviewer` |
 | hooks 声明了 handler 却没有运行时 | 带 handler 的贡献都需要 `runtime`，在清单里补上 `dist/main.js` 入口 |
-| `uiEntries` 的 `slot` 无效 | 只能取 `settings.*` 六个分组或 `drawer.footer` / `chat.header.menu` |
+| `uiEntries` 的 `slot` 无效 | 只能使用本页列出的 13 个槽位，并符合 PAGE／ACTION／DATA 类型约束 |
 | `uiEntries` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
 | `uiEntries` 单槽位入口超过 2 个 | 同一槽位最多 2 个入口，超出拒绝安装 |
 | 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object`、MCP 文件没有有效 server |

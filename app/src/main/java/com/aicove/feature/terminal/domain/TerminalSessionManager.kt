@@ -154,7 +154,8 @@ class TerminalSessionManager @Inject constructor(
      * 启动时跑首次初始化菜单（脚本自行判断已完成/已跳过则秒退）；用 `;` 分隔保证脚本任何失败都不阻塞进入 shell。
      */
     private fun buildInteractiveCommand(): String {
-        val startup = "[ -f /root/.aicode/provision.sh ] && sh /root/.aicode/provision.sh; "
+        val root = com.aicove.core.branding.BrandPaths.CONFIG_ROOT
+        val startup = "[ -f $root/provision.sh ] && sh $root/provision.sh; "
         return "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
             startup +
             "export PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; " +

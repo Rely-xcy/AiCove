@@ -81,12 +81,13 @@ class CompactedHistoryArchivePruneTest {
             listOf(
                 "摘要（被折叠的历史原文已存档：" +
                     "$COMPACTED_HISTORY_CONTAINER_DIR/s-20260101-120000.md ，需要核对细节时可读取）",
-                "另一份 $COMPACTED_HISTORY_CONTAINER_DIR/s-20260102-120000.md"
+                "另一份 $COMPACTED_HISTORY_CONTAINER_DIR/s-20260102-120000.md",
+                "旧摘要 /root/.aicode/compacted-history/legacy-20260103-120000.md"
             )
         )
 
         assertEquals(
-            setOf("s-20260101-120000.md", "s-20260102-120000.md"),
+            setOf("s-20260101-120000.md", "s-20260102-120000.md", "legacy-20260103-120000.md"),
             names
         )
     }

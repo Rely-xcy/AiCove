@@ -5,7 +5,7 @@ description: Privacy Policy for AiCove, an Android AI coding tool. Learn how loc
 
 # AiCove Privacy Policy
 
-**Last updated: October 23, 2026**
+**Last updated: November 18, 2026**
 
 AiCove ("the App") is an open-source AI coding tool for Android, licensed under GPL-3.0. This policy explains how the App handles your information.
 
@@ -91,7 +91,7 @@ We may update this policy from time to time. Material changes will be described 
 
 If you have questions about this Privacy Policy, contact us through the following channels. GitHub Issues is public: do not submit API keys, passwords, or logs containing sensitive information.
 
-- Developer: jieapi (individual developer)
-- Contact email: xiaojieapi@qq.com
+- Maintainer: Rely-xcy
+- Contact: GitHub Issues (public; do not include sensitive information)
 - GitHub Issues: <https://github.com/Rely-xcy/AiCove/issues>
 - Project home: <https://github.com/Rely-xcy/AiCove>

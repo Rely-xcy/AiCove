@@ -31,7 +31,7 @@ sealed interface PluginWatchTarget {
  *
  * `~` 展开到当前环境的 home，裸相对路径挂到工作区根。本地模式下真实路径经
  * [com.aicove.feature.workspace.domain.WorkspacePathMapper] 映射，只会落到容器 rootfs、工作区与
- * `~/.aicode`，宿主 App 的其它私有目录没有对应的容器路径，因此天然不可达。
+ * `~/.aicove`，宿主 App 的其它私有目录没有对应的容器路径，因此天然不可达。
  */
 class PluginHostPaths(
     private val fileAccess: FileAccessProvider,
@@ -85,14 +85,16 @@ class PluginHostPaths(
     }
 
     /** 读取原始字节并以 Base64 返回；单文件受 [MAX_READ_BYTES] 限制。 */
-    fun readBinary(path: String): JsonElement {
+    fun readBinary(path: String): JsonElement = readBinary(path, MAX_READ_BYTES)
+
+    fun readBinary(path: String, maxBytes: Long): JsonElement {
         val target = resolve(path)
         if (!fileAccess.exists(target) || fileAccess.isDirectory(target)) {
             throw PluginHostException("NOT_FOUND", "not a file: $path")
         }
         val size = fileAccess.fileSize(target)
-        if (size > MAX_READ_BYTES) throw PluginHostException("TOO_LARGE", "file too large: $path")
-        val bytes = mapIoError(path) { fileAccess.readBytes(target) }
+        if (size > maxBytes) throw PluginHostException("TOO_LARGE", "file too large: $path")
+        val bytes = mapIoError(path) { fileAccess.readBytes(target, maxBytes) }
         return buildJsonObject {
             put("base64", Base64.getEncoder().encodeToString(bytes))
             put("size", bytes.size)

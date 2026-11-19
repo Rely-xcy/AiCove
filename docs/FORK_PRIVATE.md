@@ -15,23 +15,23 @@ git diff main fork/release --name-status
 rg -n "FORK_UPDATE_SUPPORTS_CHANNEL|ForkUpdateCheckService|forkUpdateCheckService|fork_update_|downloadUrl" app docs-site
 ```
 
-## 当前全部私有改动（2026-10-04 核对）
+## 当前私有改动（需提交前复核）
 
 | 类别 | 文件 | 说明 |
 |---|---|---|
-| 更新源 | `app/src/main/java/com/aicode/feature/settings/data/remote/ForkUpdateCheckService.kt` | fork 专属自建更新接口（新增文件）；文件头 KDoc 写有完整改回步骤 |
-| 更新源 | `app/src/main/java/com/aicode/feature/settings/data/remote/UpdateCheckService.kt` | `UpdateInfo` 加 `downloadUrl` 字段 |
-| 更新源 | `app/src/main/java/com/aicode/feature/settings/presentation/SettingsViewModel.kt` | 注入与 `checkUpdate` 换数据源；`NewVersion` 加 `downloadUrl` |
-| 更新源 | `app/src/main/java/com/aicode/feature/settings/presentation/component/UpdateCheckDialog.kt` | 「打开下载页」改开 APK 直链 |
-| 更新源 | `app/src/main/java/com/aicode/feature/settings/presentation/component/AboutSection.kt` | 通道开关按 `FORK_UPDATE_SUPPORTS_CHANNEL` 隐藏 |
-| 更新源 | `app/src/main/java/com/aicode/MainActivity.kt` | 弹窗按钮回调改走 `onOpenDownload` |
+| 更新源 | `app/src/main/java/com/aicove/feature/settings/data/remote/ForkUpdateCheckService.kt` | fork 专属自建更新接口（新增文件）；文件头 KDoc 写有完整改回步骤 |
+| 更新源 | `app/src/main/java/com/aicove/feature/settings/data/remote/UpdateCheckService.kt` | `UpdateInfo` 加 `downloadUrl` 字段 |
+| 更新源 | `app/src/main/java/com/aicove/feature/settings/presentation/SettingsViewModel.kt` | 注入与 `checkUpdate` 换数据源；`NewVersion` 加 `downloadUrl` |
+| 更新源 | `app/src/main/java/com/aicove/feature/settings/presentation/component/UpdateCheckDialog.kt` | 「打开下载页」改开 APK 直链 |
+| 更新源 | `app/src/main/java/com/aicove/feature/settings/presentation/component/AboutSection.kt` | 通道开关按 `FORK_UPDATE_SUPPORTS_CHANNEL` 隐藏 |
+| 更新源 | `app/src/main/java/com/aicove/MainActivity.kt` | 弹窗按钮回调改走 `onOpenDownload` |
 | 更新源 | `app/src/main/res/values/strings.xml`、`values-en/strings.xml` | `fork_` 前缀文案（中英各 2 条，键集对齐） |
 | 更新源 | `docs-site/docs/guide/about.md` | 关于页文档改描述自建更新源 |
-| CI | `.github/workflows/beta.yml` | Beta 由 `fork/release` 触发（`main` 上是上游原样 `[ main ]`） |
-| CI | `.github/workflows/ci.yml` | CI 触发分支含 `fork/release`（`main` 只有 `[ main ]`） |
-| 包名 | `app/build.gradle.kts` | `applicationId = "Rely.aicode"`（namespace 仍 `com.aicode` 不动） |
+| CI | `.github/workflows/beta.yml` | Beta 由 `fork/release` 触发（仅 `main` 触发上游 CI） |
+| CI | `.github/workflows/ci.yml` | CI 触发分支含 `fork/release`并与 `main` 分离 |
+| 包名 | `app/build.gradle.kts` | `applicationId = "Rely.aicove"`，namespace=`com.aicove`。历史旧包名由已安装存量用户迁移，不代表当前仍使用旧包名。 |
 | 包名 | `docs-site/docs/guide/container.md`、`guide/files.md`、`guide/logs.md` | 文档里的宿主路径 `/data/data/<包名>`、`Android/data/<包名>` 写的是 fork 实际包名 |
-| 版本号 | ~~`app/build.gradle.kts` 的 `forkVersionCode/forkVersionName`~~ | 已删（363bd354），回到派生 `gitCommitCount()` / `gitVersionName()` |
+| 版本号 | `app/build.gradle.kts` 的版本推导 | 使用 Git tag 与提交距离生成展示版本，回到派生 `gitCommitCount()` / `gitVersionName()` |
 
 ## 提上游 PR 的正确姿势
 
@@ -54,7 +54,7 @@ git diff upstream/main main | grep '^+' | grep -iE 'fork|rely'
 
 ## 已知取舍
 
-- 换包名 = 对设备来说是**另一个 App**：旧 `com.aicode` 的数据不继承、需要备份迁移；新旧包可共存。
+- 更换 applicationId 会让设备视为另一个 App；从旧包升级时需依赖明确的数据迁移，不能只改文案或常量。
 - 版本号回到派生后，`gitCommitCount()` 会随 fork 提交数虚高（比上游大）；本 fork 不打正式 tag、
   只走 Beta 分发，`android-release.yml` 的 versionCode 单调校验不会在 fork 上触发。若将来要在
   `fork/release` 上打正式 tag，需要重新评估写死版本号。

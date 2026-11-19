@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,7 +37,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aicove.R
-import com.aicove.core.theme.Radius
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
 import com.aicove.core.ui.AppSwitch
@@ -51,6 +51,7 @@ import com.aicove.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicove.feature.settings.presentation.component.SettingsRow
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
+import compose.icons.feathericons.Trash2
 import compose.icons.feathericons.Code
 import compose.icons.feathericons.Folder
 import compose.icons.feathericons.Package
@@ -69,6 +70,7 @@ internal fun DevPluginsPage(
     onRefresh: () -> Unit,
     onOpenDetail: (PluginDevProject) -> Unit,
     onSetEnabled: (PluginDevProject, Boolean) -> Unit,
+    onDelete: (PluginDevProject) -> Unit = {},
     busyPluginIds: Set<String> = emptySet()
 ) {
     PullToRefreshBox(
@@ -106,6 +108,7 @@ internal fun DevPluginsPage(
                             installed = installed,
                             onClick = { onOpenDetail(project) },
                             onSetEnabled = { onSetEnabled(project, it) },
+                            onDelete = { onDelete(project) },
                             operationRunning = project.pluginId in busyPluginIds
                         )
                     }
@@ -121,7 +124,8 @@ private fun DevPluginRow(
     installed: InstalledPlugin?,
     onClick: () -> Unit,
     onSetEnabled: (Boolean) -> Unit,
-    operationRunning: Boolean
+    onDelete: () -> Unit = {},
+    operationRunning: Boolean = false
 ) {
     val languageTag = currentLanguageTag()
     Row(
@@ -136,7 +140,7 @@ private fun DevPluginRow(
                 .size(40.dp)
                 .background(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(Radius.sm)
+                    shape = RoundedCornerShape(8.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -144,7 +148,7 @@ private fun DevPluginRow(
                 icon = installed?.content?.icon,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 iconSize = 22.dp,
-                shape = RoundedCornerShape(Radius.sm)
+                shape = RoundedCornerShape(8.dp)
             )
         }
 
@@ -189,6 +193,19 @@ private fun DevPluginRow(
         )
 
         Spacer(modifier = Modifier.width(Spacing.xs))
+
+        IconButton(
+            onClick = onDelete,
+            enabled = !operationRunning,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = FeatherIcons.Trash2,
+                contentDescription = stringResource(R.string.plugins_dev_delete),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(17.dp)
+            )
+        }
 
         Icon(
             imageVector = FeatherIcons.ChevronRight,
@@ -291,8 +308,7 @@ internal fun PluginDevDetailSection(
         ) {
             Text(
                 stringResource(
-                    if (operationRunning) R.string.plugins_operation_working
-                    else if (installed != null) R.string.plugins_dev_reload
+                    if (installed != null) R.string.plugins_dev_reload
                     else R.string.plugins_dev_install
                 )
             )
@@ -314,7 +330,7 @@ private fun DevHeaderCard(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.lg),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.semanticColors.cardSurface
     ) {
         Row(
@@ -328,7 +344,7 @@ private fun DevHeaderCard(
                     .size(48.dp)
                     .background(
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(Radius.mdLarge)
+                        shape = RoundedCornerShape(12.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -336,7 +352,7 @@ private fun DevHeaderCard(
                     icon = installed?.content?.icon,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     iconSize = 26.dp,
-                    shape = RoundedCornerShape(Radius.mdLarge)
+                    shape = RoundedCornerShape(12.dp)
                 )
             }
             Spacer(modifier = Modifier.width(Spacing.lg))

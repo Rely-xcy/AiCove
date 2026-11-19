@@ -61,6 +61,12 @@ interface FileWatchRemoteConnection {
 
     /** 服务器上的真实 home，未连上时为 null。 */
     val remoteHome: String?
+
+    val configRoot: String?
+        get() = remoteHome?.trimEnd('/')?.let { "$it/${com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME}" }
+
+    fun projectConfigRoot(workspacePath: String): String? =
+        workspacePath.trimEnd('/') + "/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
 }
 
 /** 总线对 AI 配置目录位置的需求：容器内 `/root/.aicode` 对应的宿主目录。 */
@@ -262,6 +268,12 @@ class FileChangeHub @Inject constructor(
             else -> return null
         }
         val base = workspacePath.trimEnd('/')
+        for (name in listOf(AICODE_DIR_NAME, com.aicove.core.branding.BrandPaths.Legacy.CONFIG_DIR_NAME)) {
+            if (rel == name || rel.startsWith("$name/")) {
+                val config = remoteConnection.projectConfigRoot(workspacePath) ?: return null
+                return config.trimEnd('/') + rel.removePrefix(name)
+            }
+        }
         return if (rel.isEmpty()) base else "$base/$rel"
     }
 
@@ -340,9 +352,9 @@ class FileChangeHub @Inject constructor(
      * 宿主这边只有 [FileWatchRemoteConnection.remoteHome] 知道；拼出来的路径也不能带 `~`，远端命令会给它加单引号。
      */
     private fun remoteAicodeDirOrNull(sub: String): String? {
-        val home = remoteConnection.remoteHome?.trim()?.trimEnd('/').orEmpty()
-        if (home.isEmpty()) return null
-        return if (sub.isEmpty()) "$home/$AICODE_DIR_NAME" else "$home/$AICODE_DIR_NAME/$sub"
+        val root = remoteConnection.configRoot?.trim()?.trimEnd('/').orEmpty()
+        if (root.isEmpty()) return null
+        return if (sub.isEmpty()) root else "$root/$sub"
     }
 
     /**

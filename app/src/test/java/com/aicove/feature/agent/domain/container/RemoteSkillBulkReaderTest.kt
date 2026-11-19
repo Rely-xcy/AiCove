@@ -43,12 +43,12 @@ class RemoteSkillBulkReaderTest {
         val encoded = Base64.getEncoder().encodeToString(bytes)
         val text = buildString {
             append("B\tSG\n")
-            append("F\t/home/u/.aicode/skills/demo/SKILL.md\t${bytes.size}\n")
+            append("F\t/home/u/.aicove/skills/demo/SKILL.md\t${bytes.size}\n")
             append("C\t$encoded\n")
             append("D\t0\n")
-            append("B\tSP\nF\t$workspace/.aicode/skills/proj/SKILL.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
-            append("B\tAG\nF\t/home/u/.aicode/agents/helper.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
-            append("B\tAP\nF\t$workspace/.aicode/agents/project-helper.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
+            append("B\tSP\nF\t$workspace/.aicove/skills/proj/SKILL.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
+            append("B\tAG\nF\t/home/u/.aicove/agents/helper.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
+            append("B\tAP\nF\t$workspace/.aicove/agents/project-helper.md\t${bytes.size}\nC\t$encoded\nD\t0\n")
             append("END\n")
         }
         return CommandResult(text, 0)
@@ -58,7 +58,7 @@ class RemoteSkillBulkReaderTest {
     fun filesUnder_localOrNotReadyContextFallsBackWithoutCommand() {
         context.set(null)
 
-        assertNull(reader.filesUnder("~/.aicode/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
         assertEquals(0, calls.get())
     }
 
@@ -66,7 +66,7 @@ class RemoteSkillBulkReaderTest {
     fun filesUnder_unknownRootFallsBackWithoutCommand() {
         response.set(successOutput())
 
-        assertNull(reader.filesUnder("~/.aicode/custom-skills"))
+        assertNull(reader.filesUnder("~/.aicove/custom-skills"))
         assertEquals(0, calls.get())
     }
 
@@ -74,10 +74,10 @@ class RemoteSkillBulkReaderTest {
     fun filesUnder_oneCommandServesAllFourRoots() {
         response.set(successOutput())
 
-        assertEquals(setOf("demo/SKILL.md"), reader.filesUnder("~/.aicode/skills")!!.keys)
-        assertEquals(setOf("proj/SKILL.md"), reader.filesUnder("~/workspace/.aicode/skills")!!.keys)
-        assertEquals(setOf("helper.md"), reader.filesUnder("~/.aicode/agents")!!.keys)
-        assertEquals(setOf("project-helper.md"), reader.filesUnder("~/workspace/.aicode/agents")!!.keys)
+        assertEquals(setOf("demo/SKILL.md"), reader.filesUnder("~/.aicove/skills")!!.keys)
+        assertEquals(setOf("proj/SKILL.md"), reader.filesUnder("~/workspace/.aicove/skills")!!.keys)
+        assertEquals(setOf("helper.md"), reader.filesUnder("~/.aicove/agents")!!.keys)
+        assertEquals(setOf("project-helper.md"), reader.filesUnder("~/workspace/.aicove/agents")!!.keys)
         assertEquals(1, calls.get())
     }
 
@@ -89,7 +89,7 @@ class RemoteSkillBulkReaderTest {
         val threads = (1..3).map {
             Thread {
                 start.await()
-                reader.filesUnder("~/.aicode/skills")?.let { files -> results += files }
+                reader.filesUnder("~/.aicove/skills")?.let { files -> results += files }
             }
         }
         threads.forEach { it.start() }
@@ -104,23 +104,23 @@ class RemoteSkillBulkReaderTest {
     @Test
     fun filesUnder_cacheKeyFollowsWorkspace() {
         response.set(successOutput())
-        reader.filesUnder("~/.aicode/skills")
+        reader.filesUnder("~/.aicove/skills")
         assertEquals(1, calls.get())
 
         context.set(contextFor("/srv/other"))
         response.set(successOutput(workspace = "/srv/other"))
-        assertEquals(setOf("proj/SKILL.md"), reader.filesUnder("~/workspace/.aicode/skills")!!.keys)
+        assertEquals(setOf("proj/SKILL.md"), reader.filesUnder("~/workspace/.aicove/skills")!!.keys)
         assertEquals(2, calls.get())
     }
 
     @Test
     fun filesUnder_cacheKeyFollowsMode() {
         response.set(successOutput())
-        reader.filesUnder("~/.aicode/skills")
+        reader.filesUnder("~/.aicove/skills")
         assertEquals(1, calls.get())
 
         context.set(RemoteSkillBulkContext("LOCAL_PROOT|/srv/ws|/home/u", "/srv/ws", "/home/u"))
-        reader.filesUnder("~/.aicode/skills")
+        reader.filesUnder("~/.aicove/skills")
         assertEquals(2, calls.get())
     }
 
@@ -138,7 +138,7 @@ class RemoteSkillBulkReaderTest {
                 }
             }
         )
-        val result = java.util.concurrent.FutureTask { changingReader.filesUnder("~/.aicode/skills") }
+        val result = java.util.concurrent.FutureTask { changingReader.filesUnder("~/.aicove/skills") }
         val thread = Thread(result)
         thread.start()
         try {
@@ -155,9 +155,9 @@ class RemoteSkillBulkReaderTest {
     @Test
     fun filesUnder_invalidateForcesNextScan() {
         response.set(successOutput())
-        reader.filesUnder("~/.aicode/skills")
+        reader.filesUnder("~/.aicove/skills")
         reader.invalidate()
-        reader.filesUnder("~/.aicode/skills")
+        reader.filesUnder("~/.aicove/skills")
 
         assertEquals(2, calls.get())
     }
@@ -166,8 +166,8 @@ class RemoteSkillBulkReaderTest {
     fun filesUnder_commandFailureFallsBackAndIsNotRetriedImmediately() {
         response.set(CommandResult("exit=3\n", 3))
 
-        assertNull(reader.filesUnder("~/.aicode/skills"))
-        assertNull(reader.filesUnder("~/.aicode/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
         assertEquals(1, calls.get())
     }
 
@@ -175,7 +175,7 @@ class RemoteSkillBulkReaderTest {
     fun filesUnder_missingRunnerResultFallsBack() {
         response.set(null)
 
-        assertNull(reader.filesUnder("~/.aicode/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
     }
 
     @Test
@@ -183,7 +183,7 @@ class RemoteSkillBulkReaderTest {
         val full = successOutput()
         response.set(CommandResult(full.output, 0, outputTruncated = true))
 
-        assertNull(reader.filesUnder("~/.aicode/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
     }
 
     @Test
@@ -191,7 +191,7 @@ class RemoteSkillBulkReaderTest {
         val full = successOutput()
         response.set(CommandResult(full.output.removeSuffix("END\n"), 0))
 
-        assertNull(reader.filesUnder("~/.aicode/skills"))
+        assertNull(reader.filesUnder("~/.aicove/skills"))
     }
 
     private companion object {

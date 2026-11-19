@@ -1,5 +1,7 @@
 package com.aicove.core.branding
 
+import java.io.File
+
 /**
  * 品牌标识的单一真源。
  *
@@ -13,23 +15,23 @@ package com.aicove.core.branding
  * 收拢到这里后，改品牌只改这一处字面量，其余代码引用常量。
  *
  * 注意：这些是**用户可见且可迁移**的标识，改动时必须配合迁移逻辑
- * （旧目录只搬不删、新目录优先旧目录兜底），不能直接替换了事。
+ * （旧数据优先、新冲突先备份、旧入口保留链接），不能直接替换了事。
  */
 object BrandPaths {
-    /** AI 配置目录在容器内的路径。 */
-    const val CONFIG_ROOT = "/root/.aicode"
+    /** AiCove 配置目录在容器内的主路径。 */
+    const val CONFIG_ROOT = "/root/.aicove"
 
-    /** AI 配置目录在宿主/服务器上的目录名（容器内与远端 $HOME 下同为此名）。 */
-    const val CONFIG_DIR_NAME = ".aicode"
+    /** AiCove 配置目录在宿主/服务器上的目录名。 */
+    const val CONFIG_DIR_NAME = ".aicove"
 
-    /** 宿主 filesDir 下的配置目录名。 */
-    const val HOST_DIR_NAME = "aicode"
+    /** 宿主 filesDir 下的 AiCove 数据目录名。 */
+    const val HOST_DIR_NAME = "aicove"
 
-    /** assets 里的配置目录名。 */
+    /** APK 内置资源目录；暂保留稳定路径，避免资源索引和第三方工具断裂。 */
     const val ASSETS_DIR_NAME = "aicode"
 
-    /** 环境变量前缀。 */
-    const val ENV_PREFIX = "AICODE_"
+    /** 新命令向容器子进程传递的环境变量前缀。 */
+    const val ENV_PREFIX = "AICOVE_"
 
     /**
      * 旧标识，仅供迁移读取使用。
@@ -43,5 +45,25 @@ object BrandPaths {
         const val HOST_DIR_NAME = "aicode"
         const val ASSETS_DIR_NAME = "aicode"
         const val ENV_PREFIX = "AICODE_"
+        const val CONFLICT_DIR_NAME = ".aicove-migration-conflicts"
     }
+
+    const val CONFLICT_DIR_NAME = ".aicove-migration-conflicts"
+
+    private val localRoots = ConfigRootSelection(LocalConfigMigrationFileSystem())
+
+    fun prepareHostDirectory(filesDir: File, migrate: Boolean = true): ConfigMigrationResult {
+        val old = File(filesDir, Legacy.HOST_DIR_NAME).absolutePath
+        val new = File(filesDir, HOST_DIR_NAME).absolutePath
+        return if (migrate) localRoots.select(old, new) else localRoots.existing(old, new)
+    }
+
+    fun hostDirectory(filesDir: File): File = File(prepareHostDirectory(filesDir).physicalRoot)
+
+    fun prepareProjectDirectory(workspacePath: String): ConfigMigrationResult = localRoots.select(
+        File(workspacePath, Legacy.CONFIG_DIR_NAME).absolutePath,
+        File(workspacePath, CONFIG_DIR_NAME).absolutePath
+    )
+
+    fun projectDirectory(workspacePath: String): File = File(prepareProjectDirectory(workspacePath).physicalRoot)
 }

@@ -22,7 +22,10 @@ class ToolPermissionManager @Inject constructor() {
     private val _pendingRequest = MutableStateFlow<PendingToolPermission?>(null)
     val pendingRequest: StateFlow<PendingToolPermission?> = _pendingRequest.asStateFlow()
 
-    /** 侧边栏用：当前正在等待授权的会话 id 集合。 */
+    private val _allPending = MutableStateFlow<List<PendingToolPermission>>(emptyList())
+    val allPending: StateFlow<List<PendingToolPermission>> = _allPending.asStateFlow()
+
+    /** 侧边栏用：当前正在等待授权的聊天会话 id 集合。 */
     private val _awaitingSessionIds = MutableStateFlow<Set<String>>(emptySet())
     val awaitingSessionIds: StateFlow<Set<String>> = _awaitingSessionIds.asStateFlow()
 
@@ -51,12 +54,26 @@ class ToolPermissionManager @Inject constructor() {
 
     /** 取某会话当前的待决请求（stopAgent 停止单个会话时用，避免误取其它会话的弹窗）。 */
     fun pendingForSession(sessionId: String): PendingToolPermission? =
-        synchronized(lock) { pending.values.firstOrNull { it.request.sessionId == sessionId }?.request }
+        synchronized(lock) {
+            pending.values.firstOrNull {
+                it.request.sessionId == sessionId && it.request.origin == PendingToolPermission.ORIGIN_CHAT
+            }?.request
+        }
+
+    fun pendingForPluginSession(sessionId: String): PendingToolPermission? =
+        synchronized(lock) {
+            pending.values.firstOrNull {
+                it.request.sessionId == sessionId && it.request.origin == PendingToolPermission.ORIGIN_PLUGIN
+            }?.request
+        }
 
     /** 在持锁区内调用：把内部表投影到两个对外 StateFlow。 */
     private fun publish() {
-        _pendingRequest.value = pending.values.firstOrNull()?.request
-        _awaitingSessionIds.value = pending.values.mapNotNull { it.request.sessionId.ifBlank { null } }.toSet()
+        val all = pending.values.map { it.request }
+        val chat = all.filter { it.origin == PendingToolPermission.ORIGIN_CHAT }
+        _allPending.value = all
+        _pendingRequest.value = chat.firstOrNull()
+        _awaitingSessionIds.value = chat.mapNotNull { it.sessionId.ifBlank { null } }.toSet()
     }
 
     private class Entry(

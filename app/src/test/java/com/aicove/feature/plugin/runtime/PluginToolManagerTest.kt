@@ -1,6 +1,7 @@
 package com.aicove.feature.plugin.runtime
 
-import android.content.Context
+import com.aicove.feature.plugin.overlay.PluginOverlayManager
+import com.aicove.feature.plugin.pluginTestContext
 import com.aicove.feature.agent.domain.tool.ToolRegistry
 import com.aicove.feature.plugin.data.PluginRecord
 import com.aicove.feature.plugin.domain.InstalledPlugin
@@ -19,12 +20,16 @@ import org.junit.Test
 class PluginToolManagerTest {
     private val runtime = mockk<PluginRuntimeManager>(relaxed = true)
     private val terminalRunner = mockk<PluginTerminalRunner>(relaxed = true)
+    private val modelService = mockk<PluginModelService>(relaxed = true)
+    private val overlayManager = mockk<PluginOverlayManager>(relaxed = true)
     private val manager = PluginToolManager(
-        context = mockk<Context>(),
+        context = pluginTestContext("zh-Hans-CN"),
         pluginManager = mockk<PluginManager>(),
         toolRegistry = ToolRegistry(),
         runtime = runtime,
-        terminalRunner = terminalRunner
+        terminalRunner = terminalRunner,
+        modelService = modelService,
+        overlayManager = overlayManager
     )
     private val syncMethod = PluginToolManager::class.java.getDeclaredMethod("sync", List::class.java)
         .apply { isAccessible = true }
@@ -64,7 +69,9 @@ class PluginToolManagerTest {
         sync(updated)
         verify(exactly = 1) { runtime.closeOtherVersions(record.id, "1.1.0") }
         verify(exactly = 0) { runtime.closePlugin(any()) }
-        verify { terminalRunner wasNot Called }
+        verify(exactly = 1) { terminalRunner.closePlugin(record.id) }
+        verify(exactly = 1) { modelService.closePlugin(record.id) }
+        verify(exactly = 1) { overlayManager.reloadPlugin(record.id) }
     }
 
     @Test
@@ -99,6 +106,8 @@ class PluginToolManagerTest {
         sync(disabled)
         verify(exactly = 1) { runtime.closePlugin(record.id) }
         verify(exactly = 1) { terminalRunner.closePlugin(record.id) }
+        verify(exactly = 1) { modelService.closePlugin(record.id) }
+        verify(exactly = 1) { overlayManager.closePlugin(record.id) }
     }
 
     @Test

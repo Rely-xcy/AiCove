@@ -146,8 +146,8 @@ class SkillConfigRepository @Inject constructor(
     companion object {
         private const val TAG = "SkillConfigRepository"
         private const val CONFIG_FILE = "skills.json"
-        private const val GLOBAL_CONFIG_PATH = "~/.aicode/$CONFIG_FILE"
-        private const val AICODE_DIR = ".aicode"
+        private const val GLOBAL_CONFIG_PATH = "~/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME + "/$CONFIG_FILE"
+        private const val AICODE_DIR = com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
         private const val SKILLS_DIR = "skills"
         private val JSON = Json { ignoreUnknownKeys = true; isLenient = true }
         private val PRETTY_JSON = Json { prettyPrint = true }

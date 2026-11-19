@@ -80,6 +80,7 @@ class WorkspaceRepositoryRemoteRootEmptyTest {
         every { executionModeHolder.currentMode() } returns ExecutionMode.REMOTE_SSH
         every { remoteSshConnection.connectionState } returns MutableStateFlow(connectionState)
         every { remoteSshConnection.config } returns config
+        every { remoteSshConnection.remoteHome } returns REMOTE_HOME
         every { remoteSshConnection.isConnected() } returns (connectionState == ConnectionState.CONNECTED)
         // 构造期与 DataStore 委托都会碰到这两处（strict mock 下未 stub 即抛）
         every { context.applicationContext } returns context
@@ -159,6 +160,20 @@ class WorkspaceRepositoryRemoteRootEmptyTest {
         assertFalse("不能落到远端根目录上去列", command.contains("cd ''"))
         assertEquals(listOf("alpha", "beta"), repo.workspaces.value.map { it.name })
         assertEquals("/srv/ai/code/alpha", repo.workspaces.value.first().path)
+    }
+
+    @Test
+    fun defaultWorkspacePathsUseTheSelectedPhysicalConfigRootDuringFallback() = runBlocking {
+        for (configured in listOf("~/.aicove/workspaces", "~/.aicode/workspaces", "~//.aicove//workspaces//", "~/./.aicove/./workspaces")) {
+            executedCommands.clear()
+            val repo = createRepository(config(configured), listing = "alpha\n")
+            every { remoteSshConnection.configRoot() } returns "$REMOTE_HOME/.aicode"
+
+            repo.refreshAvailability()
+
+            assertTrue(executedCommands.single().startsWith("cd '$REMOTE_HOME/.aicode/workspaces' "))
+            assertEquals("$REMOTE_HOME/.aicode/workspaces/alpha", repo.workspaces.value.single().path)
+        }
     }
 
     // ── ① 文案：默认工作区没建出来时，Toast 要说清是路径没配，而不是服务器权限/磁盘 ────

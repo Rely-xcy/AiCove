@@ -267,11 +267,12 @@ class StorageUsageScanner @Inject constructor(
         private const val CHECKPOINTS_DIR = "checkpoints"
         private const val AICODE_DIR = com.aicove.core.branding.BrandPaths.HOST_DIR_NAME
         private const val PREFS_DIR = "shared_prefs"
-        private const val ATTACHMENTS_RELATIVE = ".aicode/attachments"
+        private const val ATTACHMENTS_RELATIVE = com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME + "/attachments"
 
         /** 已被其它分类覆盖的 filesDir 子项，不再计入「其他数据」。 */
         private val CLASSIFIED_DIRS = setOf(
-            PROJECTS_DIR, AICODE_DIR, IMAGES_DIR, CHECKPOINTS_DIR, "logs", "ai-logs"
+            PROJECTS_DIR, AICODE_DIR, com.aicove.core.branding.BrandPaths.Legacy.HOST_DIR_NAME,
+            IMAGES_DIR, CHECKPOINTS_DIR, "logs", "ai-logs"
         )
 
         private const val TOP_SESSIONS = 5

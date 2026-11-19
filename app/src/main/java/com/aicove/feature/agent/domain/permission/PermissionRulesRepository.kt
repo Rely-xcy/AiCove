@@ -77,13 +77,13 @@ class PermissionRulesRepository @Inject constructor(
         const val TAG = "PermissionRules"
         const val PERMISSIONS_FILE = "permissions.json"
         /** 项目级配置目录名，容器内即 `~/workspace/.aicode`。 */
-        const val AICODE_DIR_NAME = ".aicode"
+        const val AICODE_DIR_NAME = com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
         val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
     }
 
     /** 全局权限文件：`filesDir/aicode/permissions.json`，与 mcp.json 同级。 */
     private val globalFile: File
-        get() = File(File(context.filesDir, "aicode"), PERMISSIONS_FILE)
+        get() = File(com.aicove.core.branding.BrandPaths.hostDirectory(context.filesDir), PERMISSIONS_FILE)
 
     /** 当前工作区的项目级权限文件：`workspacePath/.aicode/permissions.json`。 */
     private fun projectFileForPath(workspacePath: String): File =

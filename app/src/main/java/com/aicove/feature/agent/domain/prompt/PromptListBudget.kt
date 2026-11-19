@@ -49,7 +49,7 @@ internal object PromptListBudget {
 
     /** 子代理清单的摘要行：同上，另点明未展开的仍可派发。 */
     fun subAgentsNote(omitted: Int, total: Int): String =
-        "- 其余 $omitted 个未展开（共 $total 个子代理，均可照常派发）：名称见 `~/.aicode/agents/` 或项目 `.aicode/agents/` 下的文件名"
+        "- 其余 $omitted 个未展开（共 $total 个子代理，均可照常派发）：名称见 `~/.aicove/agents/` 或项目 `.aicove/agents/` 下的文件名"
 
     /**
      * 逐行填充到预算用完，再补一行摘要 [note]（参数为：未展开条数、总条数）。

@@ -8,7 +8,7 @@ import kotlinx.coroutines.CancellationException
 private const val TAG = "RemoteAgentProvisioner"
 
 /** 远端 agent 默认安装目录。`~` 由 [FileAccessProvider] 的远程实现展开为登录用户 home。 */
-const val REMOTE_AGENT_DEFAULT_DIR: String = "~/.aicode/agent"
+const val REMOTE_AGENT_DEFAULT_DIR: String = "~/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME + "/agent"
 
 /** 远端 CPU 架构。文件名后缀跟 `uname -m` 的常见两种取值对齐，其余架构暂不支持。 */
 enum class RemoteAgentArch(val suffix: String, private val unameNames: Set<String>) {

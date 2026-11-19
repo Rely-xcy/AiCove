@@ -16,6 +16,8 @@ import com.aicove.feature.browser.presentation.BrowserScreen
 import com.aicove.feature.browser.presentation.BrowserViewModel
 import com.aicove.feature.git.presentation.GitViewModel
 import com.aicove.feature.git.presentation.component.GitScreen
+import com.aicove.feature.plugin.domain.PluginUiEntry
+import com.aicove.feature.plugin.presentation.PluginEntryContext
 import com.aicove.feature.terminal.presentation.TerminalViewModel
 import com.aicove.feature.terminal.presentation.component.TerminalScreen
 
@@ -41,6 +43,9 @@ internal fun WorkbenchPaneContent(
     onClose: () -> Unit,
     onOpenFile: ((String) -> Unit)? = null,
     editorLeaveGuard: EditorLeaveGuard? = null,
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "en",
+    onPluginEntry: (PluginUiEntry, PluginEntryContext) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier) {
@@ -52,7 +57,10 @@ internal fun WorkbenchPaneContent(
                 initialLine = editorLine,
                 onBack = onClose,
                 embedded = true,
-                leaveGuard = editorLeaveGuard
+                leaveGuard = editorLeaveGuard,
+                pluginEntries = pluginEntries,
+                pluginLanguageTag = pluginLanguageTag,
+                onPluginEntry = onPluginEntry
             )
 
             WorkbenchPaneKind.TERMINAL -> {

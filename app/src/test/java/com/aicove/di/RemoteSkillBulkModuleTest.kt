@@ -25,6 +25,8 @@ class RemoteSkillBulkModuleTest {
         every { workspace.currentPathOrNull() } returns "/srv/ws"
         every { connection.config } answers { config }
         every { connection.remoteHome } returns "/home/user"
+        every { connection.configRoot() } returns "/home/user/.aicove"
+        every { connection.projectConfigRoot("/srv/ws") } returns "/srv/ws/.aicove"
         every { connection.connectionGeneration } answers { generation }
         every { connection.isConnected() } returns true
     }

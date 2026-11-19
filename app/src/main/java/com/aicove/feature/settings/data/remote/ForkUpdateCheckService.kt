@@ -83,7 +83,7 @@ class ForkUpdateCheckService @Inject constructor(
                 // 拿不到直链就不给 asset：弹窗会退回「浏览器打开」，而不是进一个必然失败的内嵌下载。
                 val asset = url?.let {
                     UpdateAsset(
-                        name = obj.stringOrEmpty("name").ifBlank { "aicode-update.apk" },
+                        name = obj.stringOrEmpty("name").ifBlank { "aicove-update.apk" },
                         url = it,
                         size = size,
                         sha256 = sha256

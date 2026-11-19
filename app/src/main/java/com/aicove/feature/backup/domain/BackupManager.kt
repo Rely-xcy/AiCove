@@ -99,7 +99,8 @@ data class BackupOptions(
      * 勾选后**必须**提供非空口令：这些值能直接用于登录，不允许写进明文备份里；
      * 不勾选时上面这些字段不会进导出包（供应商配置与连接配置本身照常导出）。
      */
-    val loginSecrets: Boolean = false
+    val loginSecrets: Boolean = false,
+    val pluginData: Set<String> = emptySet()
 )
 
 /**
@@ -128,7 +129,9 @@ data class ExportStats(
      * 本次导出里「本机 Keystore 解不开、按密文原样写进备份」的敏感字段个数（API Key、代理密码、
      * 自定义请求头等）。不为 0 时导出摘要必须明示：这些值只对原设备可用，换机导入后需要重填。
      */
-    val undecryptableSecrets: Int = 0
+    val undecryptableSecrets: Int = 0,
+    val pluginData: Int = 0,
+    val skippedPluginData: Int = 0
 ) {
     /** 因远程相关原因被跳过的工作区数。 */
     val skippedRemoteWorkspaces: Int get() = skippedWorkspaces.count { it.reason.isRemote }
@@ -246,13 +249,16 @@ data class RestoreStats(
      * 在设置里显示为空，需要用户重新填写。导入摘要不管是否为 0 都要输出这一行，
      * 否则用户无法区分「全部可用」与「根本没检查」。
      */
-    val undecryptableSecrets: Int = 0
+    val undecryptableSecrets: Int = 0,
+    val pluginData: Int = 0,
+    val skippedPluginData: Int = 0,
+    val failedPluginData: Int = 0
 ) {
     /** 是否已经写入了任何业务数据：失败提示据此区分「一条都没写」与「写了半套」。 */
     val hasWrittenData: Boolean
         get() = providers + remoteConnections + remoteMounts + chatSessions + agentMessages +
             todoItems + mcpServers + globalPermissionRules + workspaceFiles + skillFiles +
-            subagentFiles + panelScriptFiles + memoryFiles + sessionBriefs + loginSecrets > 0
+            subagentFiles + panelScriptFiles + memoryFiles + sessionBriefs + loginSecrets + pluginData > 0
 
     operator fun plus(other: RestoreStats) = RestoreStats(
         providers = providers + other.providers,
@@ -276,7 +282,10 @@ data class RestoreStats(
         skippedWorkspaceFiles = skippedWorkspaceFiles + other.skippedWorkspaceFiles,
         undecryptableSecrets = undecryptableSecrets + other.undecryptableSecrets,
         loginSecrets = loginSecrets + other.loginSecrets,
-        skippedLoginSecrets = skippedLoginSecrets + other.skippedLoginSecrets
+        skippedLoginSecrets = skippedLoginSecrets + other.skippedLoginSecrets,
+        pluginData = pluginData + other.pluginData,
+        skippedPluginData = skippedPluginData + other.skippedPluginData,
+        failedPluginData = failedPluginData + other.failedPluginData
     )
 }
 

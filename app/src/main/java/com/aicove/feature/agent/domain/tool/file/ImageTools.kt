@@ -9,19 +9,12 @@ import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicove.feature.agent.data.local.entity.LlmCallRecordEntity
-import com.aicove.feature.agent.data.remote.anthropic.AnthropicApi
-import com.aicove.feature.agent.data.remote.gemini.GeminiApi
-import com.aicove.feature.agent.data.remote.openai.OpenAIApi
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.model.AgentImage
 import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.agent.domain.provider.AIProvider
 import com.aicove.feature.agent.domain.provider.AIResponse
-import com.aicove.feature.agent.domain.provider.AnthropicAdapter
-import com.aicove.feature.agent.domain.provider.fixedTemperature
-import com.aicove.feature.agent.domain.provider.GeminiAdapter
-import com.aicove.feature.agent.domain.provider.OpenAIAdapter
-import com.aicove.feature.agent.domain.provider.toReasoningCapability
+import com.aicove.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.agent.domain.tool.AbstractContextualTool
 import com.aicove.feature.agent.domain.tool.ParameterType
@@ -30,10 +23,8 @@ import com.aicove.feature.agent.domain.tool.ToolParameter
 import com.aicove.feature.agent.domain.tool.ToolResult
 import com.aicove.feature.settings.data.remote.ModelMetadataService
 import com.aicove.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicove.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicove.feature.settings.data.repository.VisionModelSettingsRepository
 import com.aicove.feature.settings.domain.model.AIProviderConfig
-import com.aicove.feature.settings.domain.model.ProviderType
 import com.aicove.feature.settings.domain.repository.AIProviderRepository
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import kotlinx.coroutines.CancellationException
@@ -60,14 +51,11 @@ class ViewImageTool @Inject constructor(
     private val visionSessionStore: VisionSessionStore,
     private val aiProviderRepository: AIProviderRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
-    private val generalSettingsRepository: GeneralSettingsRepository,
     private val visionModelSettingsRepository: VisionModelSettingsRepository,
     private val modelMetadataService: ModelMetadataService,
     private val sessionUseCase: SessionUseCase,
     private val llmCallRecordDao: LlmCallRecordDao,
-    private val openAIApi: OpenAIApi,
-    private val anthropicApi: AnthropicApi,
-    private val geminiApi: GeminiApi,
+    private val providerFactory: ProviderInstanceFactory,
     @param:ApplicationContext private val appContext: Context
 ) : AbstractContextualTool() {
     override val name = "viewImage"
@@ -335,33 +323,8 @@ class ViewImageTool @Inject constructor(
         return null
     }
 
-    private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider {
-        val provider: AIProvider = when (config.type) {
-            ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
-                it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
-            }
-            ProviderType.GEMINI -> GeminiAdapter(geminiApi)
-            else -> OpenAIAdapter(openAIApi).also {
-                it.chatCacheKeyEnabled = config.openaiChatCacheKey
-            }
-        }
-        provider.apiKey = config.apiKey
-        provider.baseUrl = config.baseUrl
-        provider.model = config.effectiveModel
-        provider.useFullUrl = config.useFullUrl
-        provider.useResponseApi = config.useResponseApi
-        provider.providerId = config.id
-        provider.logSessionId = sessionId
-        provider.customHeaders = config.customHeaders
-        val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)
-        provider.maxOutputTokens = metadata.outputTokens
-        provider.reasoningCapability = metadata.toReasoningCapability()
-        provider.temperature = if (metadata.supportsCustomTemperature) fixedTemperature(config.effectiveModel) else null
-        provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
-        provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
-        provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
-    }
+    private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider =
+        providerFactory.create(config, sessionId, rotateKeys = false)
 
     private fun encodeImage(path: String, detail: String): EncodeOutcome {
         return try {

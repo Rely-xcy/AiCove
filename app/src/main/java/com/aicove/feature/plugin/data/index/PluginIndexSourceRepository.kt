@@ -10,8 +10,8 @@ import java.net.URI
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -21,7 +21,6 @@ private val Context.pluginIndexDataStore by preferencesDataStore(
     corruptionHandler = preferencesCorruptionHandler
 )
 
-/** 一个索引来源。身份由规范化地址派生，改显示名称不会改变来源身份。 */
 data class PluginIndexSource(
     val id: String,
     val name: String,
@@ -33,17 +32,31 @@ data class PluginIndexSource(
 }
 
 object PluginIndexDefaults {
-    const val OFFICIAL_URL = "https://raw.githubusercontent.com/jieapi/AiCode-Plugins-Store/main/index.json"
-    const val OFFICIAL_NAME = "AiCove Plugins"
-    const val OFFICIAL_ID = "aicode.official"
+    const val ALL_SOURCES_ID = "all"
 
-    val official = PluginIndexSource(
-        id = OFFICIAL_ID,
-        name = OFFICIAL_NAME,
-        indexUrl = OFFICIAL_URL,
-        official = true
+    val builtIns = listOf(
+        PluginIndexSource(
+            id = "aicove.official",
+            name = "AiCove",
+            indexUrl = "https://raw.githubusercontent.com/Rely-xcy/AiCove-Plugins-Store/main/index.json",
+            official = true
+        ),
+        PluginIndexSource(
+            id = "aicode.official",
+            name = "Upstream",
+            indexUrl = "https://raw.githubusercontent.com/jieapi/AiCode-Plugins-Store/main/index.json",
+            official = false
+        ),
+        PluginIndexSource(
+            id = "muse.store",
+            name = "Muse",
+            indexUrl = "https://raw.githubusercontent.com/xzyy03/Muse-Plugins-Store/main/index.json",
+            official = false
+        )
     )
 }
+
+data class PluginIndexSelection(val sources: List<PluginIndexSource>, val selectedSourceId: String)
 
 @Serializable
 private data class StoredSource(
@@ -54,124 +67,121 @@ private data class StoredSource(
 )
 
 @Serializable
-private data class StoredSources(val sources: List<StoredSource> = emptyList())
+private data class StoredSources(
+    val sources: List<StoredSource> = emptyList(),
+    val selectedSourceId: String = PluginIndexDefaults.ALL_SOURCES_ID
+)
 
-/**
- * 索引来源的持久化。官方来源永远由宿主常量提供且固定排在最前；
- * 自定义来源只有一个按行编辑的地址列表，列表顺序就是商店里各来源条目的叠加顺序。
- */
 @Singleton
 class PluginIndexSourceRepository @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
-    val sources: Flow<List<PluginIndexSource>> = context.pluginIndexDataStore.data.map { preferences ->
-        val stored = preferences[KEY]?.let { raw ->
-            runCatching { PluginIndexJson.decodeFromString<StoredSources>(raw) }.getOrNull()
-        } ?: StoredSources()
-        buildList {
-            add(
-                PluginIndexDefaults.official.copy(
-                    lastFetchedAt = stored.sources.firstOrNull { it.id == PluginIndexDefaults.OFFICIAL_ID }?.lastFetchedAt ?: 0
-                )
-            )
-            stored.sources
-                .filter { it.id != PluginIndexDefaults.OFFICIAL_ID }
-                .map { it.toModel() }
-                .forEach(::add)
-        }
+    val selection: Flow<PluginIndexSelection> = context.pluginIndexDataStore.data.map { preferences ->
+        val stored = decode(preferences[KEY])
+        val available = availableSources(stored)
+        PluginIndexSelection(
+            available,
+            stored.selectedSourceId.takeIf { id ->
+                id == PluginIndexDefaults.ALL_SOURCES_ID || available.any { it.id == id }
+            } ?: PluginIndexDefaults.ALL_SOURCES_ID
+        )
     }
 
-    /** 自定义来源地址，顺序即展示顺序；官方来源不在其中。 */
+    val sources: Flow<List<PluginIndexSource>> = selection.map { it.sources }
+
     val customIndexUrls: Flow<List<String>> = sources.map { list ->
-        list.filterNot { it.official }.map { it.indexUrl }
+        list.filterNot { source -> PluginIndexDefaults.builtIns.any { it.id == source.id } }.map { it.indexUrl }
     }
 
-    /** 用输入行整体替换自定义来源；空行、无效地址与重复地址会被忽略，其余保持输入顺序。 */
-    suspend fun setCustomSources(lines: List<String>): Result<Unit> = runCatching {
-        val existing = sources.first().filterNot { it.official }.associateBy { it.indexUrl }
-        val next = linkedMapOf<String, PluginIndexSource>()
-        lines.forEach { raw ->
-            val url = runCatching { normalizeIndexUrl(raw) }.getOrNull() ?: return@forEach
-            if (url in next) return@forEach
-            next[url] = existing[url] ?: PluginIndexSource(
-                id = sourceId(url),
-                name = defaultName(url),
-                indexUrl = url,
-                official = false
-            )
-        }
+    suspend fun selectSource(id: String) {
         updateStored { stored ->
-            val officialEntries = stored.sources.filter { it.id == PluginIndexDefaults.OFFICIAL_ID }
-            stored.copy(sources = officialEntries + next.values.map { it.toStored() })
+            require(id == PluginIndexDefaults.ALL_SOURCES_ID || availableSources(stored).any { it.id == id }) {
+                "Unknown plugin source"
+            }
+            stored.copy(selectedSourceId = id)
         }
     }
 
-    /** 记录最近一次成功拉取时间，仅用于离线展示。 */
+    suspend fun setCustomSources(lines: List<String>): Result<Unit> = try {
+        val urls = lines.filter { it.isNotBlank() }.map(::normalizeIndexUrl).distinct()
+            .filterNot { url -> PluginIndexDefaults.builtIns.any { it.indexUrl == url } }
+        updateStored { stored ->
+            val existing = stored.sources.associateBy { it.indexUrl }
+            val custom = urls.map { url ->
+                existing[url] ?: StoredSource(sourceId(url), defaultName(url), url)
+            }
+            val builtIns = stored.sources.filter { row -> PluginIndexDefaults.builtIns.any { it.id == row.id } }
+            val selected = stored.selectedSourceId.takeIf { id ->
+                id == PluginIndexDefaults.ALL_SOURCES_ID ||
+                    PluginIndexDefaults.builtIns.any { it.id == id } || custom.any { it.id == id }
+            } ?: PluginIndexDefaults.ALL_SOURCES_ID
+            stored.copy(sources = builtIns + custom, selectedSourceId = selected)
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     suspend fun markFetched(id: String, fetchedAt: Long) {
         updateStored { stored ->
-            when {
-                stored.sources.any { it.id == id } -> stored.copy(
-                    sources = stored.sources.map {
-                        if (it.id == id) it.copy(lastFetchedAt = fetchedAt) else it
-                    }
-                )
-                id == PluginIndexDefaults.OFFICIAL_ID -> stored.copy(
-                    sources = stored.sources + StoredSource(
-                        id = PluginIndexDefaults.OFFICIAL_ID,
-                        name = PluginIndexDefaults.OFFICIAL_NAME,
-                        indexUrl = PluginIndexDefaults.OFFICIAL_URL,
-                        lastFetchedAt = fetchedAt
-                    )
-                )
-                else -> stored
-            }
+            val source = availableSources(stored).firstOrNull { it.id == id } ?: return@updateStored stored
+            val updated = StoredSource(source.id, source.name, source.indexUrl, fetchedAt)
+            stored.copy(sources = if (stored.sources.any { it.id == id }) {
+                stored.sources.map { if (it.id == id) updated else it }
+            } else stored.sources + updated)
         }
     }
 
     private suspend fun updateStored(block: (StoredSources) -> StoredSources) {
         context.pluginIndexDataStore.edit { preferences ->
-            val current = preferences[KEY]?.let { raw ->
-                runCatching { PluginIndexJson.decodeFromString<StoredSources>(raw) }.getOrNull()
-            } ?: StoredSources()
-            preferences[KEY] = PluginIndexJson.encodeToString(block(current))
+            preferences[KEY] = PluginIndexJson.encodeToString(block(decode(preferences[KEY])))
         }
     }
 
-    private fun StoredSource.toModel() = PluginIndexSource(
-        id = id,
-        name = name,
-        indexUrl = indexUrl,
-        official = false,
-        lastFetchedAt = lastFetchedAt
-    )
+    private fun availableSources(stored: StoredSources): List<PluginIndexSource> =
+        PluginIndexDefaults.builtIns.map { source ->
+            source.copy(lastFetchedAt = stored.sources.firstOrNull { it.id == source.id }?.lastFetchedAt ?: 0)
+        } + stored.sources.filterNot { row ->
+            PluginIndexDefaults.builtIns.any { it.id == row.id || it.indexUrl == row.indexUrl }
+        }.map { PluginIndexSource(it.id, it.name, it.indexUrl, official = false, lastFetchedAt = it.lastFetchedAt) }
 
-    private fun PluginIndexSource.toStored() = StoredSource(
-        id = id,
-        name = name,
-        indexUrl = indexUrl,
-        lastFetchedAt = lastFetchedAt
-    )
+    private fun decode(raw: String?): StoredSources = raw?.let {
+        runCatching { PluginIndexJson.decodeFromString<StoredSources>(it) }.getOrNull()
+    } ?: StoredSources()
 
-    private companion object {
-        val KEY = stringPreferencesKey("sources_json")
+    companion object {
+        private val KEY = stringPreferencesKey("sources_json")
 
-        fun normalizeIndexUrl(raw: String): String {
+        internal fun normalizeIndexUrl(raw: String): String {
             val text = raw.trim()
             val uri = URI(text)
-            require(uri.scheme == "https" || uri.scheme == "http") { "scheme" }
-            require(uri.host != null) { "host" }
-            require(uri.userInfo == null) { "userInfo" }
-            require(!text.contains('#')) { "fragment" }
-            return text
+            require(uri.scheme in setOf("https", "http") && uri.host != null) { "Invalid index URL" }
+            require(uri.userInfo == null && uri.fragment == null) { "Invalid index URL" }
+            if (uri.host.lowercase() !in setOf("github.com", "www.github.com")) return text
+            require(uri.query == null) { "Use a repository or index file URL" }
+            val parts = uri.rawPath.trim('/').split('/')
+            require(parts.size >= 2 && parts.none { it.isBlank() || it == "." || it == ".." }) { "Invalid repository URL" }
+            val base = "https://raw.githubusercontent.com/${parts[0]}/${parts[1].removeSuffix(".git")}"
+            return when {
+                parts.size == 2 -> "$base/main/index.json"
+                parts.size >= 5 && parts[2] == "blob" -> "$base/${parts.drop(3).joinToString("/")}"
+                parts.size == 4 && parts[2] == "tree" -> "$base/${parts[3]}/index.json"
+                else -> throw IllegalArgumentException("Use a repository or index file URL")
+            }
         }
 
-        /** 自定义来源没有单独的名称输入，用主机名作展示名。 */
-        fun defaultName(indexUrl: String): String =
-            runCatching { URI(indexUrl).host }.getOrNull() ?: indexUrl
-
-        fun sourceId(indexUrl: String): String {
-            val digest = MessageDigest.getInstance("SHA-256").digest(indexUrl.toByteArray(Charsets.UTF_8))
-            return digest.joinToString("") { "%02x".format(it) }.take(24)
+        private fun defaultName(indexUrl: String): String {
+            val uri = URI(indexUrl)
+            val parts = uri.path.trim('/').split('/')
+            return if (uri.host == "raw.githubusercontent.com" && parts.size >= 2) {
+                "${parts[0]}/${parts[1]}"
+            } else uri.host
         }
+
+        private fun sourceId(indexUrl: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(indexUrl.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }.take(24)
     }
 }

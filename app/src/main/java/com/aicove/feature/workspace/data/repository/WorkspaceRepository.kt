@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.datastore.preferencesCorruptionHandler
 import com.aicove.R
 import com.aicove.core.util.FileLogger
@@ -314,6 +315,9 @@ class WorkspaceRepository @Inject constructor(
             }
         }
 
+        if (isLocal()) {
+            _workspaces.value.filter { it.available }.forEach { prepareProjectConfig(it) }
+        }
         val savedName = context.workspaceDataStore.data.first()[currentNameKeyForMode()]
         val saved = savedName?.let { name -> _workspaces.value.firstOrNull { it.name == name } }
         val target = saved?.takeIf { it.available }
@@ -324,6 +328,7 @@ class WorkspaceRepository @Inject constructor(
             } ?: context.getString(R.string.workspace_unavailable_current, saved.name)
             FileLogger.w(TAG, "上次工作区不可用，回退: ${saved.name} -> ${target?.name}")
         }
+        prepareProjectConfig(target)
         _current.value = target
         val location = if (isLocal()) projectsRoot.absolutePath else remoteSshConnection.config?.remoteWorkspacePath ?: ""
         // 只有真的落到可用工作区才报成功形状的 INFO；否则降为 WARN 并写明「无可用工作区」，
@@ -339,6 +344,16 @@ class WorkspaceRepository @Inject constructor(
         if (!isLocal() && target != null && !(symlinkHandledByScan && target.name == symlinkCandidateName)) {
             remoteSshConnection.updateWorkspaceSymlink(target.path)
             syncRemoteCredentials(target.path)
+        }
+    }
+
+    private suspend fun prepareProjectConfig(workspace: Workspace?) {
+        if (workspace == null) return
+        if (isLocal()) {
+            val result = BrandPaths.prepareProjectDirectory(workspace.path)
+            FileLogger.i(TAG, "Project config migration: ${result.status}, root=${result.physicalRoot}, failure=${result.failureCode}")
+        } else {
+            remoteSshConnection.prepareProjectConfig(workspace.path)
         }
     }
 
@@ -377,7 +392,14 @@ class WorkspaceRepository @Inject constructor(
      */
     private fun remoteWorkspaceRootOrNull(cfg: RemoteConnectionConfig?): String? {
         if (cfg == null) return null
-        return pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/')).ifEmpty { null }
+        val expanded = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
+        val path = expanded.split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
+            .let { if (expanded.startsWith('/')) "/$it" else it }
+        val home = remoteSshConnection.remoteHome?.trimEnd('/')
+        if (home != null && path in listOf("$home/.aicove/workspaces", "$home/.aicode/workspaces")) {
+            return remoteSshConnection.configRoot().trimEnd('/') + "/workspaces"
+        }
+        return path.ifEmpty { null }
     }
 
     /** 远程工作区根（remoteWorkspacePath 展开 ~ 后）的绝对路径；未配置或为空时 null。 */
@@ -477,6 +499,7 @@ class WorkspaceRepository @Inject constructor(
         if (fallback == null && isLocal()) {
             fallback = createLocalFallbackWorkspace()
         }
+        prepareProjectConfig(fallback)
         _current.value = fallback
         context.workspaceDataStore.edit { prefs ->
             val key = currentNameKeyForMode()
@@ -576,6 +599,7 @@ class WorkspaceRepository @Inject constructor(
     /** 切换当前工作区并持久化。 */
     suspend fun selectWorkspace(name: String) = withContext(Dispatchers.IO) {
         val target = _workspaces.value.firstOrNull { it.name == name && it.available } ?: return@withContext
+        prepareProjectConfig(target)
         _current.value = target
         context.workspaceDataStore.edit { it[currentNameKeyForMode()] = name }
         FileLogger.i(TAG, "切换工作区: $name")

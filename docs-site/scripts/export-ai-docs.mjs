@@ -4,7 +4,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const SITE_URL = 'https://aicode.murk.top'
+const SITE_URL = 'https://rely-xcy.github.io/AiCove'
 const here = dirname(fileURLToPath(import.meta.url))
 const docsDir = join(here, '..', 'docs')
 const distDir = join(here, '..', '.vitepress', 'dist')

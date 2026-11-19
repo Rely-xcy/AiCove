@@ -60,7 +60,7 @@ class PromptListBudgetTest {
         val text = PromptListBudget.limit(fortyLines, PromptListBudget.SUBAGENTS, PromptListBudget::subAgentsNote)
 
         assertTrue(text.contains("共 40 个子代理"))
-        assertTrue(text.contains("`~/.aicode/agents/`"))
+        assertTrue(text.contains("`~/.aicove/agents/`"))
         assertTrue(text.length <= PromptListBudget.SUBAGENTS)
     }
 

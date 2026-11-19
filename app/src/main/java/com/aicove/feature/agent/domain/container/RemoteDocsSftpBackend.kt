@@ -16,9 +16,10 @@ internal class RemoteDocsSftpBackend(
     private val client: SFTPClient,
     home: String,
     private val checkActive: suspend () -> Unit,
+    configDirectory: String = home.trimEnd('/') + "/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME,
     private val agentWrite: suspend (String, ByteArray) -> Boolean = { _, _ -> false }
 ) : BuiltinDocsSync.Backend {
-    private val root = home.trimEnd('/') + "/.aicode/docs"
+    private val root = configDirectory.trimEnd('/') + "/docs"
 
     init {
         require(root.startsWith('/') && root.drop(1).split('/').all {

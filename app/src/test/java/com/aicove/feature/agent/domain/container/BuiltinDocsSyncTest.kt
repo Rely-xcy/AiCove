@@ -596,7 +596,7 @@ class BuiltinDocsSyncTest {
     }
 
     private class SftpFixture {
-        val root = "/home/test/.aicode/docs"
+        val root = "/home/test/.aicove/docs"
         val destination = "$root/a.md"
         val client = mockk<SFTPClient>(relaxed = true)
         val files = mutableMapOf(destination to "old".toByteArray())
@@ -606,7 +606,7 @@ class BuiltinDocsSyncTest {
         val renameFlags = mutableListOf<Set<RenameFlags>>()
         var renameFailure: Exception? = null
         var beforeRename: () -> Unit = {}
-        private val directories = mutableSetOf("/home", "/home/test", "/home/test/.aicode", root)
+        private val directories = mutableSetOf("/home", "/home/test", "/home/test/.aicove", root)
 
         init {
             every { client.lstat(any()) } answers {

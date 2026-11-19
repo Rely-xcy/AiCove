@@ -46,9 +46,9 @@ const columns = computed(() => [
     title: copy.value.site.footer.columns.quickLinks.title,
     links: [
       { label: copy.value.site.footer.columns.quickLinks.links.releases, href: "https://github.com/Rely-xcy/AiCove/releases/latest" },
-      { label: copy.value.site.footer.columns.quickLinks.links.download, href: "https://aicode.murk.top/download" },
-      { label: copy.value.site.footer.columns.quickLinks.links.guide, href: "https://aicode.murk.top" },
-      { label: copy.value.site.footer.columns.quickLinks.links.quickStart, href: "https://aicode.murk.top/guide/quick-start" }
+      { label: copy.value.site.footer.columns.quickLinks.links.download, href: "https://github.com/Rely-xcy/AiCove/releases/latest" },
+      { label: copy.value.site.footer.columns.quickLinks.links.guide, href: "https://rely-xcy.github.io/AiCove/" },
+      { label: copy.value.site.footer.columns.quickLinks.links.quickStart, href: "https://rely-xcy.github.io/AiCove/guide/quick-start" }
     ]
   },
   {

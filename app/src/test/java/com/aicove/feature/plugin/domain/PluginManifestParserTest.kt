@@ -154,8 +154,18 @@ class PluginManifestParserTest {
     fun identity_isValidated() {
         assertRejected(base.replace("\"community.demo-kit\"", "\"Community.Demo\""), PluginErrorCode.FIELD_INVALID, "id")
         assertRejected(base.replace("\"community.demo-kit\"", "\"demo\""), PluginErrorCode.FIELD_INVALID, "id")
+        assertRejected(base.replace("\"community.demo-kit\"", "\"community/../demo\""), PluginErrorCode.FIELD_INVALID, "id")
         assertRejected(base.replace("\"publisher\": \"community\"", "\"publisher\": \"other\""), PluginErrorCode.FIELD_INVALID, "publisher")
+        assertRejected(base.replace("\"publisher\": \"community\"", "\"publisher\": \"community/../demo\""), PluginErrorCode.FIELD_INVALID, "publisher")
+        assertRejected(base.replace("\"publisher\": \"community\"", "\"publisher\": \"community\\u0000demo\""), PluginErrorCode.FIELD_INVALID, "publisher")
         assertRejected(base.replace("\"version\": \"1.0.0\"", "\"version\": \"1.0\""), PluginErrorCode.FIELD_INVALID, "version")
+
+        val unicode = base
+            .replace("\"id\": \"community.demo-kit\"", "\"id\": \"社区.演示套件\"")
+            .replace("\"publisher\": \"community\"", "\"publisher\": \"社区\"")
+        val parsed = success(unicode)
+        assertEquals("社区.演示套件", parsed.id)
+        assertEquals("社区", parsed.publisher)
     }
 
     @Test
@@ -608,25 +618,58 @@ class PluginManifestParserTest {
     private fun settingsManifest(
         slot: String = "settings.ai",
         page: String = "ui/memory.html",
-        pluginApi: String = "^1.0.0"
-    ): String = """
-        {
-          "manifestVersion": 1,
-          "id": "demo.memory",
-          "name": "Memory",
-          "version": "1.0.0",
-          "publisher": "demo",
-          "repository": "https://example.com/demo/memory",
-          "description": "Memory demo",
-          "license": "MIT",
-          "engines": {"pluginApi": "$pluginApi"},
-          "contributes": {
-            "uiEntries": [
-              {"id": "memory", "title": "记忆", "slot": "$slot", "page": "$page"}
-            ]
-          }
-        }
-    """.trimIndent()
+        pluginApi: String = "^1.0.0",
+        uiEntries: String = "{\"id\": \"memory\", \"title\": \"记忆\", \"slot\": \"$slot\", \"page\": \"$page\"}",
+        runtimeBlock: String = "",
+        additionalContributions: String = ""
+    ): String {
+        val contributions = additionalContributions
+        return """
+            {
+              "manifestVersion": 1,
+              "id": "demo.memory",
+              "name": "Memory",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/memory",
+              "description": "Memory demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "$pluginApi"},
+              $runtimeBlock
+              "contributes": {"uiEntries": [$uiEntries]$contributions}
+            }
+        """.trimIndent()
+    }
+
+    @Test
+    fun uiEntry_supportsAllThirteenHostSlots() {
+        val slots = listOf(
+            "settings.general", "settings.ai", "settings.environment", "settings.permissions",
+            "settings.data", "settings.help", "drawer.footer", "chat.header.menu", "chat.welcome",
+            "chat.session.menu", "files.tree.menu", "editor.selection.menu", "backup.data"
+        )
+        val entries = slots.mapIndexed { index, slot ->
+            val common = "\"id\":\"entry$index\",\"title\":\"Entry $index\",\"slot\":\"$slot\""
+            when (slot) {
+                "files.tree.menu", "editor.selection.menu" -> "{$common,\"handler\":\"plugin.entry$index\"}"
+                "backup.data" -> "{$common}"
+                else -> "{$common,\"page\":\"ui/entry$index.html\"}"
+            }
+        }.joinToString(",")
+        val json = settingsManifest(
+            uiEntries = entries,
+            runtimeBlock = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},",
+            additionalContributions = """,
+                "backup": {"purpose": "Export additional data"},
+                "hooks": [{"id": "backup-export", "event": "backup.export.before", "handler": "backup.export"}]
+            """.trimIndent()
+        )
+
+        val manifest = success(json)
+
+        assertEquals(PluginUiSlots.ALL, slots.toSet())
+        assertEquals(slots, manifest.uiEntries.map { it.slot })
+    }
 
     @Test
     fun uiEntry_isParsedWithDefaultIcon() {

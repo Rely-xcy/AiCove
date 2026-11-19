@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_sources_current">插件源：%1$s</string>
+    <string name="plugin_sources_title">插件源</string>
+    <string name="plugin_sources_upstream">上游</string>
+    <string name="plugin_sources_hint">点击一个来源立即切换并记住选择。商店仅显示所选来源的插件，不会自动跨源更新。</string>
+    <string name="plugin_sources_selected">已选择</string>
+    <string name="plugin_sources_custom">自定义索引</string>
+    <string name="plugin_sources_custom_hint">每行一个 GitHub 仓库或索引直链。保存后点击上方列表中的来源即可切换；删除某行并保存可移除该自定义源。</string>
+    <string name="plugin_sources_saved">已保存，可在上方选择来源。</string>
+    <string name="plugin_sources_save_error">保存失败。请检查每行是否为有效的 GitHub 仓库地址或 HTTP(S) 索引链接，然后重试。</string>
+    <string name="plugin_sources_select_error">切换来源失败，请重试。</string>
+    <string name="plugin_sources_rejected">此来源中有 %1$d 条无效或不兼容的插件记录已跳过。</string>
+</resources>

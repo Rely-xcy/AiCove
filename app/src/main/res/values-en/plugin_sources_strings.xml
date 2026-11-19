@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plugin_sources_current">Plugin source: %1$s</string>
+    <string name="plugin_sources_title">Plugin sources</string>
+    <string name="plugin_sources_upstream">Upstream</string>
+    <string name="plugin_sources_hint">Tap a source to switch and remember your choice. The store only shows plugins from the selected source and does not automatically update across sources.</string>
+    <string name="plugin_sources_selected">Selected</string>
+    <string name="plugin_sources_custom">Custom indexes</string>
+    <string name="plugin_sources_custom_hint">One GitHub repository or direct index URL per line. Save, then select a source above to switch. Remove a line and save to delete that custom source.</string>
+    <string name="plugin_sources_saved">Saved. You can select a source above.</string>
+    <string name="plugin_sources_save_error">Could not save. Check that each line is a valid GitHub repository URL or HTTP(S) index URL, then try again.</string>
+    <string name="plugin_sources_select_error">Could not switch sources. Please try again.</string>
+    <string name="plugin_sources_rejected">Skipped %1$d invalid or incompatible plugin entries in this source.</string>
+</resources>

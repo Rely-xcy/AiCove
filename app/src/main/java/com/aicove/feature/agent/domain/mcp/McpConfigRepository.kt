@@ -72,7 +72,7 @@ class McpConfigRepository @Inject constructor(
         const val CONFIG_FILE = "mcp.json"
         const val DEFAULT_JSON = """{"mcpServers":{}}"""
         /** 项目级配置目录名，容器内即 `~/workspace/.aicode`。 */
-        const val AICODE_DIR_NAME = ".aicode"
+        const val AICODE_DIR_NAME = com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
         val JSON = Json { ignoreUnknownKeys = true; isLenient = true }
         val PRETTY_JSON = Json { prettyPrint = true }
     }

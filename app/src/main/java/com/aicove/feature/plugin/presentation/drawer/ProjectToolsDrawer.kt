@@ -172,7 +172,7 @@ private fun ProjectHeaderCard(
             IconButton(onClick = onOpenSettings) {
                 Icon(
                     imageVector = FeatherIcons.Settings,
-                    contentDescription = "全部配置",
+                    contentDescription = stringResource(R.string.muse_plugin_project_tools_all_config),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )

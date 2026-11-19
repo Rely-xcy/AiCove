@@ -59,6 +59,12 @@ object FileChangeHubModule {
 
         override val remoteHome: String?
             get() = connection.remoteHome
+
+        override val configRoot: String?
+            get() = runCatching { connection.configRoot() }.getOrNull()
+
+        override fun projectConfigRoot(workspacePath: String): String? =
+            runCatching { connection.projectConfigRoot(workspacePath) }.getOrNull()
     }
 
     @Provides

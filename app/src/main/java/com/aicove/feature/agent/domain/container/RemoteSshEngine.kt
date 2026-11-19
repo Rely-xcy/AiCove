@@ -264,7 +264,7 @@ class RemoteSshEngine @Inject constructor(
      *  仅当用户开启「自动注入」时该文件存在（含 include 用户全局配置 + includeIf 限定工作区根），
      *  文件不存在时 git 静默跳过——不影响用户在服务器上手动 git。 */
     private fun buildCdCommand(command: String, projectPath: String?): String {
-        val prefix = "export GIT_CONFIG_GLOBAL=\"\$HOME/.aicode/gitconfig\"; "
+        val prefix = "export GIT_CONFIG_GLOBAL=${remoteShellQuote(connection.configRoot().trimEnd('/') + "/gitconfig")}; "
         if (projectPath == null) return prefix + command
         return prefix + buildRemoteWorkspaceCdCommand(projectPath) + " && $command"
     }

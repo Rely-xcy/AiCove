@@ -42,16 +42,20 @@ object RemoteSkillBulkModule {
         val generation = connection.connectionGeneration
         val config = connection.config
         val home = connection.remoteHome
-        if (mode != ExecutionMode.REMOTE_SSH || workspaceRoot == null || home == null ||
+        val configRoot = runCatching { connection.configRoot() }.getOrNull()
+        val projectRoot = workspaceRoot?.let { runCatching { connection.projectConfigRoot(it) }.getOrNull() }
+        if (mode != ExecutionMode.REMOTE_SSH || workspaceRoot == null || home == null || configRoot == null || projectRoot == null ||
             config == null || !connection.isConnected() || generation != connection.connectionGeneration
         ) {
             null
         } else {
             RemoteSkillBulkContext(
                 cacheKey = listOf(mode.name, config.host, config.port.toString(), config.username,
-                    generation.toString(), workspaceRoot, home).joinToString("") { "${it.length}:$it" },
+                    generation.toString(), workspaceRoot, home, configRoot, projectRoot).joinToString("") { "${it.length}:$it" },
                 workspaceRoot = workspaceRoot,
-                home = home
+                home = home,
+                configRoot = configRoot,
+                projectConfigRoot = projectRoot
             )
         }
     }

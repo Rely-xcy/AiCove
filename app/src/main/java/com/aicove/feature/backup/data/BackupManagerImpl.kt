@@ -1,6 +1,7 @@
 package com.aicove.feature.backup.data
 
 import android.content.Context
+import com.aicove.core.plugin.BackupExtensionSource
 import com.aicove.core.security.KeystoreCipher
 import com.aicove.core.util.FileLogger
 import com.aicove.core.util.GitIgnoreMatcher
@@ -149,7 +150,8 @@ class BackupManagerImpl @Inject constructor(
     private val backupTargetDao: BackupTargetDao,
     /** MCP 授权令牌文件；与 McpTokenStore 用同一个限定符，不在这里另抄一份路径。 */
     @param:Named("mcpOAuthFile") private val mcpOAuthFile: File,
-    private val availableSpace: AvailableSpaceProvider
+    private val availableSpace: AvailableSpaceProvider,
+    private val backupExtensions: BackupExtensionSource
 ) : BackupManager {
 
     private val json = Json {
@@ -157,6 +159,9 @@ class BackupManagerImpl @Inject constructor(
         encodeDefaults = true
         prettyPrint = false
     }
+
+    private val archiveWriter = BackupArchiveWriter(json, ::createTempFile)
+    private val pluginSections = BackupPluginSections(backupExtensions)
 
     /** 导入时敏感字段的加解密入口；与导出同一套语义，差别只在谁负责保留原密文。 */
     private val secretCipher = SecretCipher(
@@ -197,7 +202,10 @@ class BackupManagerImpl @Inject constructor(
                     temp.delete()
                 }
             }
-            val stats = plan.toExportStats(written, secrets.undecryptable)
+            val stats = plan.toExportStats(written.workspaceFiles, secrets.undecryptable).copy(
+                pluginData = written.plugins.completed.size,
+                skippedPluginData = written.plugins.skipped.size
+            )
             FileLogger.i(
                 TAG,
                 "导出完成：工作区文件 ${stats.workspaceFiles} 个，实写 ${stats.exportedWorkspaces}/${stats.candidateWorkspaces} 个工作区，" +
@@ -232,16 +240,16 @@ class BackupManagerImpl @Inject constructor(
                             tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU)
                             // 单会话导出只带会话/消息/待办，不带任何设置：写明「没带设置」，
                             // 否则导入时会把设置字段的默认值当成真值回写一遍（见 restoreMeta）。
-                            writeMetadataEntry(tar, BackupMetadata(
+                            archiveWriter.writeMetadataEntry(tar, BackupMetadata(
                                 schemaVersion = currentSchemaVersion(),
                                 appVersion = appVersionName(),
                                 createdAt = System.currentTimeMillis(),
                                 appSettingsIncluded = false
                             ))
-                            writeJsonlFileEntry(tar, FILE_SESSIONS) { writer ->
+                            archiveWriter.writeJsonlFileEntry(tar, FILE_SESSIONS) { writer ->
                                 writer.writeLine(json.encodeToString(ChatSessionDto.serializer(), session.toDto()))
                             }
-                            writeJsonlFileEntry(tar, FILE_MESSAGES) { writer ->
+                            archiveWriter.writeJsonlFileEntry(tar, FILE_MESSAGES) { writer ->
                                 var lastTs = 0L
                                 var lastId = ""
                                 while (true) {
@@ -252,7 +260,7 @@ class BackupManagerImpl @Inject constructor(
                                     lastId = batch.last().id
                                 }
                             }
-                            writeJsonlFileEntry(tar, FILE_TODOS) { writer ->
+                            archiveWriter.writeJsonlFileEntry(tar, FILE_TODOS) { writer ->
                                 var lastTs = 0L
                                 var lastId = ""
                                 while (true) {
@@ -435,7 +443,8 @@ class BackupManagerImpl @Inject constructor(
         options: BackupOptions,
         workspacePlan: WorkspaceBackupPlan,
         secrets: ExportSecretTally
-    ): Map<String, Int> {
+    ): BackupArchiveWriter.Result {
+        var pluginOutcome = BackupExtensionSource.Outcome()
         // 工作区名 -> 实际写入的文件数：与第一遍的计划分开统计，摘要里「实际写入」以此为准。
         val writtenFiles = mutableMapOf<String, Int>()
         // 元数据与凭据段必须用同一份读取结果：分两次读可能把同一批供应商写成两套不一致的记录。
@@ -456,7 +465,7 @@ class BackupManagerImpl @Inject constructor(
             GzipCompressorOutputStream(fos).use { gz ->
                 TarArchiveOutputStream(gz).use { tar ->
                     tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU)
-                    writeMetadataEntry(tar, buildMetadata(options, workspacePlan, providers, connections, mcpServers))
+                    archiveWriter.writeMetadataEntry(tar, buildMetadata(options, workspacePlan, providers, connections, mcpServers))
                     if (options.loginSecrets) {
                         writeLoginSecretEntries(tar, options, secrets, providers, connections, mcpServers)
                     }
@@ -469,11 +478,12 @@ class BackupManagerImpl @Inject constructor(
                     if (options.memoryFiles) {
                         writeMemoryEntries(tar)
                     }
+                    pluginOutcome = pluginSections.export(tar, options.pluginData)
                     if (options.sessionBriefs) {
                         writeSessionBriefEntries(tar)
                     }
                     if (options.chatHistory) {
-                        writeJsonlFileEntry(tar, FILE_SESSIONS) { writer ->
+                        archiveWriter.writeJsonlFileEntry(tar, FILE_SESSIONS) { writer ->
                             var lastTs = 0L
                             var lastId = ""
                             while (true) {
@@ -484,7 +494,7 @@ class BackupManagerImpl @Inject constructor(
                                 lastId = batch.last().id
                             }
                         }
-                        writeJsonlFileEntry(tar, FILE_MESSAGES) { writer ->
+                        archiveWriter.writeJsonlFileEntry(tar, FILE_MESSAGES) { writer ->
                             var lastTs = 0L
                             var lastId = ""
                             while (true) {
@@ -495,7 +505,7 @@ class BackupManagerImpl @Inject constructor(
                                 lastId = batch.last().id
                             }
                         }
-                        writeJsonlFileEntry(tar, FILE_TODOS) { writer ->
+                        archiveWriter.writeJsonlFileEntry(tar, FILE_TODOS) { writer ->
                             var lastTs = 0L
                             var lastId = ""
                             while (true) {
@@ -510,7 +520,7 @@ class BackupManagerImpl @Inject constructor(
                 }
             }
         }
-        return writtenFiles
+        return BackupArchiveWriter.Result(writtenFiles, pluginOutcome)
     }
 
     private suspend fun buildMetadata(
@@ -573,43 +583,6 @@ class BackupManagerImpl @Inject constructor(
         // 密钥字段已拆到凭据段：metadata 里这些位置恒为空，导入侧据此不再把它们当真实值回写。
         secretsInSeparateSegment = true
     )
-
-    private fun writeMetadataEntry(tar: TarArchiveOutputStream, metadata: BackupMetadata) {
-        val content = json.encodeToString(BackupMetadata.serializer(), metadata).toByteArray(Charsets.UTF_8)
-        writeTarEntry(tar, FILE_METADATA, content)
-    }
-
-    private fun writeTarEntry(tar: TarArchiveOutputStream, name: String, content: ByteArray) {
-        val entry = TarArchiveEntry(name).apply { size = content.size.toLong() }
-        tar.putArchiveEntry(entry)
-        tar.write(content)
-        tar.closeArchiveEntry()
-    }
-
-    /**
-     * 先将 jsonl 写入一个临时文件，获取确切的 [File.length] 设置 TarArchiveEntry.size，
-     * 然后流式拷入 TarArchiveOutputStream，避免在 Header 中 size 设为 0 导致写入越界异常。
-     */
-    private suspend fun writeJsonlFileEntry(
-        tar: TarArchiveOutputStream,
-        entryName: String,
-        block: suspend (JsonlWriter) -> Unit
-    ) {
-        val tmp = createTempFile()
-        try {
-            FileOutputStream(tmp).use { fos ->
-                val writer = JsonlWriter(fos)
-                block(writer)
-                writer.flush()
-            }
-            val entry = TarArchiveEntry(entryName).apply { size = tmp.length() }
-            tar.putArchiveEntry(entry)
-            FileInputStream(tmp).use { fis -> fis.copyTo(tar) }
-            tar.closeArchiveEntry()
-        } finally {
-            tmp.delete()
-        }
-    }
 
     // ── 工作区文件备份 ──────────────────────────────────────────
 
@@ -780,7 +753,7 @@ class BackupManagerImpl @Inject constructor(
                         FileLogger.w(TAG, "跳过越界的资产路径：$base/$relative")
                     } else {
                         runCatching { fileAccess.readBytes("$base/$rel") }
-                            .onSuccess { writeTarEntry(tar, "${root.prefix}$rel", it) }
+                            .onSuccess { archiveWriter.writeTarEntry(tar, "${root.prefix}$rel", it) }
                             .onFailure { FileLogger.w(TAG, "读取资产文件失败，跳过：$base/$rel（${it.message}）") }
                     }
                 }
@@ -846,8 +819,8 @@ class BackupManagerImpl @Inject constructor(
      * （`~/workspace/.aicode/memory`），走 [FileAccessProvider]，本地与远程同一套读写入口。
      */
     private fun memoryRoots(): List<MemoryRoot> = listOf(
-        MemoryRoot(MEMORY_GLOBAL_PREFIX, "~/.aicode/memory"),
-        MemoryRoot(MEMORY_PROJECT_PREFIX, "${WorkspacePathMapper.CONTAINER_ROOT}/.aicode/memory")
+        MemoryRoot(MEMORY_GLOBAL_PREFIX, "~/.aicove/memory"),
+        MemoryRoot(MEMORY_PROJECT_PREFIX, "${WorkspacePathMapper.CONTAINER_ROOT}/.aicove/memory")
     )
 
     /** 把勾选的记忆目录下的每个文件写成一个 tar 条目（`memories/global|project/<相对路径>`）。 */
@@ -864,7 +837,7 @@ class BackupManagerImpl @Inject constructor(
                     FileLogger.w(TAG, "跳过越界的记忆路径：$base/$relative")
                 } else {
                     runCatching { fileAccess.readBytes("$base/$rel") }
-                        .onSuccess { writeTarEntry(tar, "${root.prefix}$rel", it) }
+                        .onSuccess { archiveWriter.writeTarEntry(tar, "${root.prefix}$rel", it) }
                         .onFailure { FileLogger.w(TAG, "读取记忆文件失败，跳过：$base/$rel（${it.message}）") }
                 }
             }
@@ -872,7 +845,7 @@ class BackupManagerImpl @Inject constructor(
     }
 
     private suspend fun writeSessionBriefEntries(tar: TarArchiveOutputStream) {
-        writeJsonlFileEntry(tar, FILE_SESSION_BRIEFS) { writer ->
+        archiveWriter.writeJsonlFileEntry(tar, FILE_SESSION_BRIEFS) { writer ->
             sessionBriefDao.getAllOnce().forEach { writer.writeLine(json.encodeToString(SessionBriefDto.serializer(), it.toDto())) }
         }
     }
@@ -927,7 +900,7 @@ class BackupManagerImpl @Inject constructor(
         connections: List<RemoteConnectionEntity>,
         mcpServers: List<McpServerConfig>
     ) {
-        writeJsonlFileEntry(tar, FILE_SECRET_GIT_CREDENTIALS) { writer ->
+        archiveWriter.writeJsonlFileEntry(tar, FILE_SECRET_GIT_CREDENTIALS) { writer ->
             // 走仓储读解码后的值：git-credentials 是 base64 再整体反转的混淆格式，解析规则只该有一处。
             credentialRepository.getAll().first().forEach { cred ->
                 writer.writeLine(
@@ -938,7 +911,7 @@ class BackupManagerImpl @Inject constructor(
                 )
             }
         }
-        writeJsonlFileEntry(tar, FILE_SECRET_BACKUP_TARGETS) { writer ->
+        archiveWriter.writeJsonlFileEntry(tar, FILE_SECRET_BACKUP_TARGETS) { writer ->
             backupTargetDao.getAllOnce().forEach { entity ->
                 writer.writeLine(json.encodeToString(BackupTargetDto.serializer(), entity.toExportDto(secrets)))
             }
@@ -946,14 +919,14 @@ class BackupManagerImpl @Inject constructor(
         // 供应商密钥与连接密码：配置本身已在 metadata 里，这里只补密钥字段。
         // 只写了勾选的段，避免导出包里出现用户没选的数据。
         if (options.providers && providers.isNotEmpty()) {
-            writeJsonlFileEntry(tar, FILE_SECRET_PROVIDERS) { writer ->
+            archiveWriter.writeJsonlFileEntry(tar, FILE_SECRET_PROVIDERS) { writer ->
                 providers.forEach { entity ->
                     writer.writeLine(json.encodeToString(ProviderSecretsDto.serializer(), entity.toSecretDto(secrets)))
                 }
             }
         }
         if (options.remoteConnections && connections.isNotEmpty()) {
-            writeJsonlFileEntry(tar, FILE_SECRET_CONNECTIONS) { writer ->
+            archiveWriter.writeJsonlFileEntry(tar, FILE_SECRET_CONNECTIONS) { writer ->
                 connections.forEach { entity ->
                     writer.writeLine(json.encodeToString(ConnectionSecretsDto.serializer(), entity.toSecretDto(secrets)))
                 }
@@ -963,7 +936,7 @@ class BackupManagerImpl @Inject constructor(
         // 只写有内容的记录：空 map 写进去等于「用户要清空」，导入时会把本机同名配置的凭据抹掉。
         val mcpWithCredentials = mcpServers.filter { it.toSecretsDto().hasAnyCredential() }
         if (options.mcpServers && mcpWithCredentials.isNotEmpty()) {
-            writeJsonlFileEntry(tar, FILE_SECRET_MCP_SERVERS) { writer ->
+            archiveWriter.writeJsonlFileEntry(tar, FILE_SECRET_MCP_SERVERS) { writer ->
                 mcpWithCredentials.forEach { server ->
                     writer.writeLine(json.encodeToString(McpServerSecretsDto.serializer(), server.toSecretsDto()))
                 }
@@ -972,7 +945,7 @@ class BackupManagerImpl @Inject constructor(
         // 口令列在 SharedPreferences 里是 Keystore 密文，而公开接口只返回解密后的值（解不开时是空串）：
         // 按字段搬运会把口令从备份里抹掉，所以按原文搬运，只对口令列做「解得开就写明文」。
         val rawPrefs = sshLoginPrefs().all.mapNotNull { (key, value) -> (value as? String)?.let { key to it } }.toMap()
-        writeTarEntry(
+        archiveWriter.writeTarEntry(
             tar,
             FILE_SECRET_SSH_LOGIN_KEYS,
             json.encodeToString(
@@ -987,11 +960,11 @@ class BackupManagerImpl @Inject constructor(
             }
             val exported = exportSecretBytes(bytes, KeystoreCipher::isEncryptedBytes, decryptSecretBytesOrNull)
             if (exported.undecryptable) secrets.noteUndecryptable()
-            writeTarEntry(tar, "$SECRET_SSH_KEYS_PREFIX${file.name}", exported.bytes)
+            archiveWriter.writeTarEntry(tar, "$SECRET_SSH_KEYS_PREFIX${file.name}", exported.bytes)
         }
         // MCP 授权令牌与 git-credentials 同一种混淆文件，直接整份搬运；本机没有就是没有，不算解不开。
         runCatching { mcpOAuthFile.takeIf { it.isFile }?.readBytes() }.getOrNull()?.let { bytes ->
-            writeTarEntry(tar, FILE_SECRET_MCP_OAUTH, bytes)
+            archiveWriter.writeTarEntry(tar, FILE_SECRET_MCP_OAUTH, bytes)
         }
     }
 
@@ -1208,6 +1181,8 @@ class BackupManagerImpl @Inject constructor(
         val segmentedSecrets = SegmentedCredentialSecrets()
         var metadata: BackupMetadata? = null
         var stats = RestoreStats()
+        val pluginImport = pluginSections.importSession()
+        var restoreFailure: Throwable? = null
         try {
             var entry = tar.nextEntry
             // 先校验格式再动数据：metadata 缺失或排在后面时，已写入的会话与文件会留在本机，
@@ -1281,6 +1256,7 @@ class BackupManagerImpl @Inject constructor(
                             entry.name.startsWith(MEMORY_PREFIX) -> stats += restoreMemoryEntry(tar, entry)
                             entry.name.startsWith(SECRET_PREFIX) ->
                                 restoreLoginSecretEntry(tar, entry, segmentedSecrets) { stats += it }
+                            entry.name.startsWith("plugins/") -> pluginImport.accept(tar, entry)
                         }
                     }
                 }
@@ -1291,12 +1267,24 @@ class BackupManagerImpl @Inject constructor(
                 error("不是有效的 AiCove 备份文件：缺少 metadata.json")
             }
             FileLogger.i(TAG, "tar 解析完成，开始还原元数据段")
-            return stats + restoreMeta(meta, segmentedSecrets)
+            stats += restoreMeta(meta, segmentedSecrets)
+            val plugins = pluginImport.finish(BackupExtensionSource.Summary(stats.chatSessions, stats.workspaceFiles))
+            stats += RestoreStats(pluginData = plugins.completed.size, skippedPluginData = plugins.skipped.size,
+                failedPluginData = plugins.failed.size)
+            return stats
         } catch (e: PartialRestoreException) {
             // 子段（旧格式 / 元数据段）已有自己的计数：合并，别把外层已写的条目丢掉
-            throw PartialRestoreException(stats + e.partialStats, e.cause ?: e)
+            throw PartialRestoreException(stats + e.partialStats, e.cause ?: e).also { restoreFailure = it }
         } catch (e: Throwable) {
-            throw PartialRestoreException(stats, e)
+            throw PartialRestoreException(stats, e).also { restoreFailure = it }
+        } finally {
+            try {
+                pluginImport.close()
+            } catch (cleanupError: Exception) {
+                val failure = restoreFailure
+                if (failure != null) failure.addSuppressed(cleanupError)
+                else throw PartialRestoreException(stats, cleanupError)
+            }
         }
     }
 
@@ -1856,22 +1844,6 @@ private data class WorkspaceBackupPlan(
         remoteConnected = remoteConnected,
         undecryptableSecrets = undecryptableSecrets
     )
-}
-
-/** 带内部缓冲的 jsonl 写入器：行缓冲满 64KB 时刷入 tar 流，避免逐行写系统调用。 */
-private class JsonlWriter(private val out: OutputStream) {
-    private val buffer = ByteArrayOutputStream(64 * 1024)
-
-    fun writeLine(line: String) {
-        buffer.write(line.toByteArray(Charsets.UTF_8))
-        buffer.write('\n'.code)
-        if (buffer.size() >= 64 * 1024) flush()
-    }
-
-    fun flush() {
-        buffer.writeTo(out)
-        buffer.reset()
-    }
 }
 
 /** 打开的 tar 流封装：加密导入时附带解密用的临时文件，关闭时一并清理。 */

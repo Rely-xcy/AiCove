@@ -99,7 +99,7 @@ internal class ProjectRuleReader(private val fileAccess: FileAccessProvider) {
         const val TAG = "ProjectRuleReader"
 
         /** 全局 AI 配置目录的容器路径：本地是 `/root/.aicode`，远程是服务器用户 home 下的 `.aicode`。 */
-        const val GLOBAL_RULE_DIR = "~/.aicode"
+        const val GLOBAL_RULE_DIR = "~/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME
 
         /** `AGENTS.md` 优先、`CLAUDE.md` 兜底。 */
         val RULE_FILE_NAMES = listOf("AGENTS.md", "CLAUDE.md")

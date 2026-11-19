@@ -25,7 +25,7 @@
             <span>{{ copy.site.hero.download }}</span>
           </a>
           <a
-            href="https://aicode.murk.top"
+            href="https://rely-xcy.github.io/AiCove/"
             target="_blank"
             rel="noopener noreferrer"
             class="btn btn--outline btn--lg btn--arrow"

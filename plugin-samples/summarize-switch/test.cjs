@@ -37,8 +37,8 @@ function boot(options = {}) {
       case 'workspaces.list':
         data = { current: '/source', workspaces: [{ path: '/source', name: 'Source' }, { path: '/target', name: 'Target' }] };
         break;
-      case 'chat.sessions': data = { sessions: [{ id: 'source', title: 'Source session' }] }; break;
-      case 'chat.messages': {
+      case 'chat.listSessions': data = { sessions: [{ id: 'source', title: 'Source session' }] }; break;
+      case 'chat.listMessages': {
         if (params.sessionId === 'new') {
           data = { messages: [{ role: 'assistant', content: 'summary-result', timestamp: 999 }], hasMore: false };
         } else {
@@ -47,16 +47,16 @@ function boot(options = {}) {
         }
         break;
       }
-      case 'chat.create': data = { session: { id: 'new' } }; break;
-      case 'chat.send': sent = true; data = { accepted: true }; break;
-      case 'chat.runState':
+      case 'chat.createSession': data = { session: { id: 'new' } }; break;
+      case 'chat.sendMessage': sent = true; data = { accepted: true }; break;
+      case 'chat.getRunState':
         assert.ok(sent);
         data = { run: { running: polls++ > 0, status: polls === 1 ? 'idle' : 'running' } };
         break;
-      case 'chat.waitRun':
+      case 'chat.waitForRun':
         data = { timedOut: options.timeout || false, run: { running: false, status: options.failure ? 'error' : 'success', error: options.failure ? 'model failed' : undefined } };
         break;
-      case 'chat.open': data = { accepted: true }; break;
+      case 'chat.openSession': data = { accepted: true }; break;
       case 'ui.close': data = { ok: true }; break;
       default: throw new Error(`Unexpected method: ${method}`);
     }
@@ -82,13 +82,13 @@ test('summary reads all pages in chronological order and opens then closes the p
   await component.run();
   assert.equal(component.failed, false);
   assert.equal(component.summary, 'summary-result');
-  const prompt = calls.find(c => c.method === 'chat.send').params.text;
+  const prompt = calls.find(c => c.method === 'chat.sendMessage').params.text;
   assert.ok(prompt.indexOf('message-0') < prompt.indexOf('message-204'));
   assert.ok(prompt.includes('message-204'));
-  assert.equal(calls.find(c => c.method === 'chat.create').params.workspacePath, '/target');
-  assert.equal(calls.filter(c => c.method === 'chat.runState').length, 2);
-  assert.equal(calls.filter(c => c.method === 'chat.messages' && c.params.sessionId === 'source').length, 2);
-  assert.deepEqual(calls.slice(-2).map(c => c.method), ['chat.open', 'ui.close']);
+  assert.equal(calls.find(c => c.method === 'chat.createSession').params.workspacePath, '/target');
+  assert.equal(calls.filter(c => c.method === 'chat.getRunState').length, 2);
+  assert.equal(calls.filter(c => c.method === 'chat.listMessages' && c.params.sessionId === 'source').length, 2);
+  assert.deepEqual(calls.slice(-2).map(c => c.method), ['chat.openSession', 'ui.close']);
 });
 
 for (const [name, options, message] of [
@@ -102,6 +102,6 @@ for (const [name, options, message] of [
     assert.equal(component.failed, true);
     assert.equal(component.busy, false);
     assert.ok(component.status.includes(message));
-    assert.equal(calls.some(c => c.method === 'chat.open' || c.method === 'ui.close'), false);
+    assert.equal(calls.some(c => c.method === 'chat.openSession' || c.method === 'ui.close'), false);
   });
 }

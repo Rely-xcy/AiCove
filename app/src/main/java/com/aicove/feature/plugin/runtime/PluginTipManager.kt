@@ -1,9 +1,11 @@
 package com.aicove.feature.plugin.runtime
 
+import android.content.Context
 import com.aicove.core.util.FileLogger
+import com.aicove.core.util.appLanguageTag
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.plugin.domain.PluginManager
 import dagger.Lazy
-import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,6 +41,7 @@ class PluginTipException(val code: String, message: String) : Exception(message)
  */
 @Singleton
 class PluginTipManager @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
     private val runtimeManager: Lazy<PluginRuntimeManager>
 ) {
@@ -64,7 +67,7 @@ class PluginTipManager @Inject constructor(
         val tip = PluginTip(
             id = "tip-${UUID.randomUUID()}",
             pluginId = pluginId,
-            pluginName = plugin.manifest?.name?.resolve(Locale.getDefault().toLanguageTag()) ?: pluginId,
+            pluginName = plugin.manifest?.name?.resolve(context.appLanguageTag()) ?: pluginId,
             title = title,
             text = text,
             actionLabel = actionLabel,

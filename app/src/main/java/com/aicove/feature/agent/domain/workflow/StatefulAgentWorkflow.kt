@@ -13,9 +13,6 @@ import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicove.feature.agent.data.local.entity.LlmCallRecordEntity
-import com.aicove.feature.agent.data.remote.anthropic.AnthropicApi
-import com.aicove.feature.agent.data.remote.gemini.GeminiApi
-import com.aicove.feature.agent.data.remote.openai.OpenAIApi
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.model.AgentImage
 import com.aicove.feature.agent.domain.model.AgentMessage
@@ -47,6 +44,7 @@ import com.aicove.feature.agent.domain.provider.clampedFrom
 import com.aicove.feature.agent.domain.provider.AIProvider
 import com.aicove.feature.agent.domain.provider.AIResponse
 import com.aicove.feature.agent.domain.provider.AIStreamChunk
+import com.aicove.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicove.feature.agent.domain.tool.AgentTool
 import com.aicove.feature.agent.domain.tool.StreamingAgentTool
 import com.aicove.feature.agent.domain.tool.ToolCall
@@ -63,21 +61,11 @@ import com.aicove.feature.agent.presentation.MODE_REMINDER_PREFIX
 import com.aicove.feature.settings.data.remote.ModelMetadataService
 import com.aicove.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicove.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicove.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicove.feature.settings.data.repository.MemorySettingsRepository
-import com.aicove.feature.settings.data.repository.ProviderKeyRotator
 import com.aicove.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aicove.feature.settings.domain.model.AIProviderConfig
-import com.aicove.feature.agent.domain.provider.AnthropicAdapter
-import com.aicove.feature.agent.domain.provider.fixedTemperature
-import com.aicove.feature.agent.domain.provider.GeminiAdapter
-import com.aicove.feature.agent.domain.provider.AllKeysFailedException
-import com.aicove.feature.agent.domain.provider.KeySwitchOutcome
 import com.aicove.feature.agent.domain.provider.isContextWindowOverflowError
-import com.aicove.feature.agent.domain.provider.isKeySwitchFailure
 import com.aicove.feature.agent.domain.provider.parseContextWindowLimit
-import com.aicove.feature.agent.domain.provider.OpenAIAdapter
-import com.aicove.feature.settings.domain.model.ProviderType
 import com.aicove.feature.settings.domain.repository.AIProviderRepository
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import kotlinx.coroutines.CancellationException
@@ -110,9 +98,7 @@ import javax.inject.Inject
  */
 class StatefulAgentWorkflow @Inject constructor(
     private val aiProviderRepository: AIProviderRepository,
-    private val openAIApi: OpenAIApi,
-    private val anthropicApi: AnthropicApi,
-    private val geminiApi: GeminiApi,
+    private val providerFactory: ProviderInstanceFactory,
     private val promptProvider: SystemPromptProvider,
     private val permissionManager: ToolPermissionManager,
     private val policyEngine: ToolPermissionPolicyEngine,
@@ -123,13 +109,11 @@ class StatefulAgentWorkflow @Inject constructor(
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val titleModelSettingsRepository: TitleModelSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
-    private val generalSettingsRepository: GeneralSettingsRepository,
     private val memorySettingsRepository: MemorySettingsRepository,
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
     private val llmCallRecordDao: LlmCallRecordDao,
-    private val keyRotator: ProviderKeyRotator,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val fileAccess: FileAccessProvider,
@@ -203,7 +187,7 @@ class StatefulAgentWorkflow @Inject constructor(
         const val MODE_REMINDER_AUTO_FILE = "agent/auto-mode.md"
         val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
         /** 模型直出图片落盘目录（与 GenerateImageTool 保持一致）。 */
-        const val GENERATED_IMAGE_DIR = "~/.aicode/generated-images"
+        const val GENERATED_IMAGE_DIR = "~/" + com.aicove.core.branding.BrandPaths.CONFIG_DIR_NAME + "/generated-images"
         const val MAX_GENERATED_IMAGE_BYTES = 20L * 1024 * 1024
     }
 
@@ -390,60 +374,8 @@ class StatefulAgentWorkflow @Inject constructor(
      * 用于上下文压缩等独立请求场景，完全不占用或修改主对话所用的 Provider 单例。
      * 同时把提供商级 LLM 缓存开关（Anthropic 断点 / OpenAI cache key）应用到实例。
      */
-    private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider {
-        val provider: AIProvider = when (config.type) {
-            ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
-                it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
-            }
-            ProviderType.GEMINI -> GeminiAdapter(geminiApi)
-            else -> OpenAIAdapter(openAIApi).also {
-                it.chatCacheKeyEnabled = config.openaiChatCacheKey
-            }
-        }
-        // 多 Key 模式下由轮换器决定本次用哪个 Key（会话内粘住，Key 不可用时切下一个并重发）。
-        val activeKeys = config.effectiveApiKeys
-        provider.apiKey = keyRotator.activeKey(config, sessionId)
-            ?: throw IllegalStateException("「${config.name}」的 Key 均在冷却中，请稍后重试")
-        // 只有真正的多 Key 才需要自动切换：单 Key 冷却后没有可切换目标，只会把用户锁死一段时间。
-        val keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? =
-            if (activeKeys.size > 1) {
-                { error, failedKey, triedKeys ->
-                    if (!error.isKeySwitchFailure(config.effectiveKeySwitchStatusCodes)) {
-                        null
-                    } else {
-                        val switched = keyRotator.reportFailure(config.id, sessionId, failedKey, triedKeys)
-                        if (switched == null) {
-                            throw AllKeysFailedException(
-                                "「${config.name}」的 ${activeKeys.size} 个 Key 均失败：${error.message ?: error.javaClass.simpleName}",
-                                error
-                            )
-                        }
-                        KeySwitchOutcome(switched.newKey, switched.newIndex, switched.total)
-                    }
-                }
-            } else {
-                null
-            }
-        provider.keySwitcher = keySwitcher
-        provider.baseUrl = config.baseUrl
-        provider.model = config.effectiveModel
-        provider.useFullUrl = config.useFullUrl
-        provider.useResponseApi = config.useResponseApi
-        provider.providerId = config.id
-        provider.logSessionId = sessionId
-        provider.customHeaders = config.customHeaders
-        val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)
-        // 模型元数据的输出上限（models.dev limit.output）：不传时 Anthropic 会把输出卡在 adapter 兜底值上。
-        provider.maxOutputTokens = metadata.outputTokens
-        // 思考能力随模型走：adapter 用它判断能否关闭与降级目标，未命中元数据时由厂商表兜底。
-        provider.reasoningCapability = metadata.toReasoningCapability()
-        // 元数据说不接受自定义温度就不发该字段（kimi-k3、gpt-5 系带了直接 400）；允许的只发官方固定值。
-        provider.temperature = if (metadata.supportsCustomTemperature) fixedTemperature(config.effectiveModel) else null
-        provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
-        provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
-        provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
-    }
+    private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider =
+        providerFactory.create(config, sessionId)
 
     /** 核心 Reducer，接收旧状态与 Action，返回新状态以及触发的副作用列表 (纯函数) */
     private fun reduce(

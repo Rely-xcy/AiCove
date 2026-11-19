@@ -275,7 +275,8 @@ class BackupWorkspaceSecurityTest {
         mcpOAuthFile = File(context.filesDir, "aicode/mcp-oauth.json"),
         availableSpace = object : AvailableSpaceProvider {
             override fun availableBytes(dir: File): Long = Long.MAX_VALUE
-        }
+        },
+        backupExtensions = mockk(relaxed = true)
     )
 
     private fun writeFile(file: File, content: String): File = file.apply {

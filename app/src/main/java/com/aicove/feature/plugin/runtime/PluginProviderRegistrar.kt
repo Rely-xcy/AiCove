@@ -1,10 +1,12 @@
 package com.aicove.feature.plugin.runtime
 
+import android.content.Context
 import com.aicove.feature.plugin.domain.PluginManager
+import com.aicove.core.util.appLanguageTag
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.settings.domain.model.AIProviderConfig
 import com.aicove.feature.settings.domain.model.ProviderType
 import com.aicove.feature.settings.domain.repository.AIProviderRepository
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.first
  */
 @Singleton
 class PluginProviderRegistrar @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
     private val providerRepository: AIProviderRepository
 ) {
@@ -32,7 +35,7 @@ class PluginProviderRegistrar @Inject constructor(
         val stale = existing.filterNot { it in wanted }
         if (stale.isNotEmpty()) providerRepository.deleteProviders(stale)
 
-        val languageTag = Locale.getDefault().toLanguageTag()
+        val languageTag = context.appLanguageTag()
         providers
             .filter { PluginProviderIds.idOf(pluginId, it.localId) !in existing }
             .forEach { provider ->

@@ -17,6 +17,7 @@ class RemoteWorkspacePathNormalizationTest {
     fun legacy_hardcoded_default_is_normalized() {
         assertEquals(DEFAULT_REMOTE_WORKSPACE_ROOT, normalizeRemoteWorkspacePath("/home/root/workspace", "root"))
         assertEquals(DEFAULT_REMOTE_WORKSPACE_ROOT, normalizeRemoteWorkspacePath("/home/dev/workspace", "dev"))
+        assertEquals("~/.aicove/workspaces", normalizeRemoteWorkspacePath("~/.aicode/workspaces", "dev"))
     }
 
     @Test

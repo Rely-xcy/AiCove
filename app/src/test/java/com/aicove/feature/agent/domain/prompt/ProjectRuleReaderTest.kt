@@ -79,8 +79,8 @@ class ProjectRuleReaderTest {
     fun remoteWorkspace_readsRulesFromServerPaths() {
         val serverHome = tmp.newFolder("server-home")
         val serverWs = tmp.newFolder("server-ws")
-        File(serverHome, ".aicode").mkdirs()
-        File(serverHome, ".aicode/AGENTS.md").writeText("服务器全局规则")
+        File(serverHome, ".aicove").mkdirs()
+        File(serverHome, ".aicove/AGENTS.md").writeText("服务器全局规则")
         File(serverWs, "AGENTS.md").writeText("服务器项目规则")
         val access = ServerFileAccess(serverHome.absolutePath, serverWs.absolutePath)
 
@@ -98,8 +98,8 @@ class ProjectRuleReaderTest {
     fun remoteReadFailure_isNotCachedAsNoRules() {
         val serverHome = tmp.newFolder("server-home")
         val serverWs = tmp.newFolder("server-ws")
-        File(serverHome, ".aicode").mkdirs()
-        File(serverHome, ".aicode/AGENTS.md").writeText("服务器全局规则")
+        File(serverHome, ".aicove").mkdirs()
+        File(serverHome, ".aicove/AGENTS.md").writeText("服务器全局规则")
         File(serverWs, "AGENTS.md").writeText("服务器项目规则")
         val base = ServerFileAccess(serverHome.absolutePath, serverWs.absolutePath)
         var offline = true
@@ -125,8 +125,8 @@ class ProjectRuleReaderTest {
     fun unchangedRules_areNotReReadFromBackend() {
         val serverHome = tmp.newFolder("server-home")
         val serverWs = tmp.newFolder("server-ws")
-        File(serverHome, ".aicode").mkdirs()
-        File(serverHome, ".aicode/AGENTS.md").writeText("服务器全局规则")
+        File(serverHome, ".aicove").mkdirs()
+        File(serverHome, ".aicove/AGENTS.md").writeText("服务器全局规则")
         File(serverWs, "AGENTS.md").writeText("服务器项目规则")
         val access = ServerFileAccess(serverHome.absolutePath, serverWs.absolutePath)
         val reader = ProjectRuleReader(access)
@@ -144,7 +144,7 @@ class ProjectRuleReaderTest {
         val workspaceRepository = mockk<WorkspaceRepository>()
         every { workspaceRepository.currentPathOrNull() } returns ws.absolutePath
         val installer = mockk<ContainerInstaller>()
-        every { installer.aicodeDir } returns aicode
+        every { installer.aicoveDir } returns aicode
         every { installer.rootfsDirFor(any()) } returns File(aicode, "rootfs")
         val settings = mockk<ContainerSettingsRepository>()
         every { settings.activeProfileIdFlow } returns emptyFlow()
@@ -159,7 +159,7 @@ class ProjectRuleReaderTest {
     }
 
     /**
-     * 模拟远程后端：容器路径 `~/.aicode/…`、`~/workspace/…` 落到服务器上的两个目录。
+     * 模拟远程后端：容器路径 `~/.aicove/…`、`~/workspace/…` 落到服务器上的两个目录。
      * 未覆写的方法按容器路径直通本地实现——本用例涉及的读取只走 [isFile] / [lastModified] / [readFile]。
      */
     private class ServerFileAccess(
@@ -173,7 +173,7 @@ class ProjectRuleReaderTest {
             private set
 
         private fun map(path: String): String = when {
-            path == "~/.aicode" || path.startsWith("~/.aicode/") -> serverHome + path.removePrefix("~")
+            path == "~/.aicove" || path.startsWith("~/.aicove/") -> serverHome + path.removePrefix("~")
             path == "~/workspace" || path.startsWith("~/workspace/") -> serverWorkspace + path.removePrefix("~/workspace")
             else -> path
         }

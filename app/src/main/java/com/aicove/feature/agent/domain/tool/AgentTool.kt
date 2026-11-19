@@ -89,8 +89,14 @@ data class PendingToolPermission(
     val rememberablePatterns: List<String> = emptyList(),
     val rememberDisabledReason: String? = null,
     /** 发起该授权请求的会话 id。多会话并行时用于在 UI 上区分弹窗归属、点亮侧边栏等待授权指示。 */
-    val sessionId: String = ""
-)
+    val sessionId: String = "",
+    val origin: String = ORIGIN_CHAT
+) {
+    companion object {
+        const val ORIGIN_CHAT = "chat"
+        const val ORIGIN_PLUGIN = "plugin"
+    }
+}
 
 abstract class AgentTool {
     abstract val name: String

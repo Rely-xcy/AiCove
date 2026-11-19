@@ -40,13 +40,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicove.R
 import com.aicove.core.theme.Spacing
 import com.aicove.core.theme.semanticColors
-import com.aicove.core.ui.AdaptiveModalBottomSheet
-import com.aicove.core.ui.AppSwitch
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Settings
 import compose.icons.feathericons.Trash2
+import compose.icons.feathericons.Upload
 
 private val PluginPackageMimeTypes = arrayOf(
     "application/zip",
@@ -64,6 +63,11 @@ fun PluginManagementScreen(
     val loaded by viewModel.loaded.collectAsStateWithLifecycle()
     val shizukuGrantedIds by viewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
+    val overlayGrantedIds by viewModel.overlayGrantedPluginIds.collectAsStateWithLifecycle()
+    val backupGrantedIds by viewModel.backupGrantedPluginIds.collectAsStateWithLifecycle()
+    val indexSourceText by viewModel.indexSourceText.collectAsStateWithLifecycle()
+    val downloadMirror by viewModel.downloadMirror.collectAsStateWithLifecycle()
+    val publishViewModel: PluginPublishViewModel = hiltViewModel()
     val dependencyStates by viewModel.dependencyStates.collectAsStateWithLifecycle()
     val devMode by viewModel.devMode.collectAsStateWithLifecycle()
     val devProjects by viewModel.devProjects.collectAsStateWithLifecycle()
@@ -76,6 +80,8 @@ fun PluginManagementScreen(
     var selectedStoreItem by remember { mutableStateOf<PluginStoreItem?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var confirmUninstall by rememberSaveable { mutableStateOf(false) }
+    var devProjectToDelete by remember { mutableStateOf<PluginDevProject?>(null) }
+    var showPublish by rememberSaveable { mutableStateOf(false) }
     val pageStateHolder = rememberSaveableStateHolder()
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val selectedDevProject = devProjects.firstOrNull { it.dirName == selectedDevDir }
@@ -89,6 +95,16 @@ fun PluginManagementScreen(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.import(uri)
     }
+    val publishPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            showPublish = true
+            publishViewModel.readPackage(uri)
+        }
+    }
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) publishViewModel.export(uri)
+    }
+    LaunchedEffect(languageTag) { viewModel.setLanguageTag(languageTag) }
 
     LaunchedEffect(loaded, selectedPlugin, selectedPluginId) {
         if (loaded && selectedPluginId != null && selectedPlugin == null) selectedPluginId = null
@@ -129,6 +145,9 @@ fun PluginManagementScreen(
                 },
                 actions = {
                     if (!isDetail) {
+                        IconButton(onClick = { showPublish = true }) {
+                            Icon(FeatherIcons.Upload, contentDescription = stringResource(R.string.muse_plugin_publish_title))
+                        }
                         IconButton(onClick = { showSettings = true }) {
                             Icon(FeatherIcons.Settings, contentDescription = stringResource(R.string.plugin_layout_settings))
                         }
@@ -137,6 +156,16 @@ fun PluginManagementScreen(
                             enabled = loaded && (importState is PluginImportState.Idle || importState is PluginImportState.Failed)
                         ) {
                             Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.plugins_import))
+                        }
+                    } else if (selectedDevProject != null) {
+                        IconButton(onClick = {
+                            showPublish = true
+                            publishViewModel.prepareDevProject(selectedDevProject)
+                        }, enabled = selectedDevProject.error == null) {
+                            Icon(FeatherIcons.Upload, contentDescription = stringResource(R.string.muse_plugin_publish_title))
+                        }
+                        IconButton(onClick = { devProjectToDelete = selectedDevProject }) {
+                            Icon(FeatherIcons.Trash2, contentDescription = stringResource(R.string.common_delete), tint = MaterialTheme.colorScheme.error)
                         }
                     } else if (selectedPlugin != null) {
                         IconButton(
@@ -184,7 +213,11 @@ fun PluginManagementScreen(
                         onPrepareDependencies = { viewModel.prepareDependencies(plugin.id) },
                         shizukuGranted = plugin.content.shizuku != null && plugin.id in shizukuGrantedIds,
                         shizukuState = shizukuState,
-                        onSetShizukuGranted = { viewModel.setShizukuGranted(plugin, it) }
+                        onSetShizukuGranted = { viewModel.setShizukuGranted(plugin, it) },
+                        overlayGranted = plugin.id in overlayGrantedIds,
+                        onSetOverlayGranted = { viewModel.setOverlayGranted(plugin, it) },
+                        backupGranted = plugin.id in backupGrantedIds,
+                        onSetBackupGranted = { viewModel.setBackupGranted(plugin, it) }
                     )
                 }
                 devProject != null -> PluginDevDetailSection(
@@ -196,7 +229,8 @@ fun PluginManagementScreen(
                 )
                 storeItem != null -> PluginStoreDetailSection(
                     item = storeItem,
-                    onBack = { selectedStoreItem = null }
+                    onBack = { selectedStoreItem = null },
+                    onShowPreview = viewModel::showPreview
                 )
                 else -> pageStateHolder.SaveableStateProvider("plugin-tabs") {
                     PluginsSection(
@@ -205,7 +239,6 @@ fun PluginManagementScreen(
                         busyPluginIds = busyPluginIds,
                         onOpenDetail = { selectedPluginId = it.id },
                         onToggleEnabled = { item, enabled -> viewModel.setEnabled(item.id, enabled) },
-                        onUninstall = { viewModel.uninstall(it.id) },
                         devMode = devMode,
                         devRootPath = viewModel.devRootPath,
                         devProjects = devProjects,
@@ -215,6 +248,8 @@ fun PluginManagementScreen(
                         onRefreshDevProjects = viewModel::refreshDevProjects,
                         onOpenDevDetail = { selectedDevDir = it.dirName },
                         onSetDevEnabled = viewModel::setDevProjectEnabled,
+                        onDeleteDevProject = { devProjectToDelete = it },
+                        onShowStorePreview = viewModel::showPreview,
                         onOpenStoreDetail = { selectedStoreItem = it }
                     )
                 }
@@ -223,30 +258,45 @@ fun PluginManagementScreen(
     }
 
     if (showSettings) {
-        AdaptiveModalBottomSheet(onDismissRequest = { showSettings = false }) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg).padding(bottom = Spacing.xl),
-                verticalArrangement = Arrangement.spacedBy(Spacing.md)
-            ) {
-                Text(stringResource(R.string.plugin_layout_settings), style = MaterialTheme.typography.titleLarge)
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f).padding(end = Spacing.md)) {
-                        Text(stringResource(R.string.plugins_dev_mode), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.plugins_dev_mode_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    AppSwitch(checked = devMode, onCheckedChange = viewModel::setDevMode)
-                }
-                Text(
-                    stringResource(R.string.plugin_layout_developer_path, viewModel.devRootPath),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+        PluginSettingsSheet(
+            devMode = devMode,
+            devRootPath = viewModel.devRootPath,
+            indexSourceText = indexSourceText,
+            downloadMirror = downloadMirror,
+            onSetIndexSourceText = viewModel::setIndexSourceText,
+            onSetDownloadMirror = viewModel::setDownloadMirror,
+            onAddIndexSource = viewModel::addIndexSource,
+            onRemoveIndexSource = viewModel::removeIndexSource,
+            onSetDevMode = viewModel::setDevMode,
+            onDismiss = {
+                viewModel.savePluginSettings()
+                showSettings = false
             }
-        }
+        )
+    }
+    devProjectToDelete?.let { project ->
+        AlertDialog(
+            onDismissRequest = { devProjectToDelete = null },
+            title = { Text(stringResource(R.string.plugins_dev_delete_title)) },
+            text = { Text(stringResource(R.string.plugins_dev_delete_confirm, project.dirName)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    devProjectToDelete = null
+                    viewModel.deleteDevProject(project)
+                }) { Text(stringResource(R.string.common_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { devProjectToDelete = null }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
+    if (showPublish) {
+        PluginPublishHost(
+            viewModel = publishViewModel,
+            onPickPackage = { publishPicker.launch(PluginPackageMimeTypes) },
+            onExport = { name -> exportPicker.launch(name) }
+            onDismiss = { publishViewModel.dismiss(); showPublish = false }
+        )
     }
 
     if (confirmUninstall && selectedPlugin != null) {

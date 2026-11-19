@@ -144,7 +144,7 @@ class BackupMemoryAndBriefsTest {
         }
 
         assertEquals(
-            setOf("~/.aicode/memory/global-note.md", "~/.aicode/memory/.superseded/old.md"),
+            setOf("~/.aicove/memory/global-note.md", "~/.aicove/memory/.superseded/old.md"),
             memoryStore.keys
         )
         assertEquals(setOf("s1", "s2"), briefStore.keys)
@@ -221,18 +221,19 @@ class BackupMemoryAndBriefsTest {
         credentialRepository = mockk<CredentialRepository>(relaxed = true),
         backupTargetDao = mockk<BackupTargetDao>(relaxed = true),
         mcpOAuthFile = File(context.filesDir, "aicode/mcp-oauth.json"),
-        availableSpace = availableSpace
+        availableSpace = availableSpace,
+        backupExtensions = mockk(relaxed = true)
     )
 
     private fun memoryFileAccess(): FileAccessProvider {
         val access = mockk<FileAccessProvider>()
-        every { access.listFilesRecursive("~/.aicode/memory", any()) } returns listOf(
+        every { access.listFilesRecursive("~/.aicove/memory", any()) } returns listOf(
             "global-note.md",
             ".superseded/old.md"
         )
-        every { access.listFilesRecursive("~/workspace/.aicode/memory", any()) } returns emptyList()
-        every { access.readBytes("~/.aicode/memory/global-note.md") } returns globalNote.toByteArray()
-        every { access.readBytes("~/.aicode/memory/.superseded/old.md") } returns supersededNote.toByteArray()
+        every { access.listFilesRecursive("~/workspace/.aicove/memory", any()) } returns emptyList()
+        every { access.readBytes("~/.aicove/memory/global-note.md") } returns globalNote.toByteArray()
+        every { access.readBytes("~/.aicove/memory/.superseded/old.md") } returns supersededNote.toByteArray()
         every { access.fileSize(any()) } returns 8L
         every { access.writeBytes(any(), any(), any()) } answers {
             memoryStore[firstArg<String>()] = secondArg<ByteArray>().decodeToString()

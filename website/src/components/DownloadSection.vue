@@ -39,7 +39,7 @@
               <span>{{ copy.site.download.github }}</span>
             </a>
             <a
-              href="https://aicode.murk.top/download"
+              href="https://github.com/Rely-xcy/AiCove/releases/latest"
               target="_blank"
               rel="noopener noreferrer"
               class="quick-start__download-secondary"

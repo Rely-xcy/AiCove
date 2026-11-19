@@ -1,5 +1,6 @@
-AiCode
+AiCove
 Copyright (C) 2026 AiCode contributors
+Copyright (C) 2026 AiCove contributors
 
 This product is licensed under the GNU General Public License version 3.0
 (GPL-3.0). See the LICENSE file for the full license text.
@@ -111,7 +112,18 @@ accordance with the respective license terms.
    APK at assets/licenses/JetBrainsMono-OFL-1.1.txt.
 
 ========================================================================
-9. Test-only components
+9. Muse plugin subsystem
+------------------------------------------------------------------------
+   Project: https://github.com/xzyy03/Muse
+   Source revision: 35a862a7e86e831cc162fa524d4d028a78bd062e
+   Copyright (C) 2026 Muse contributors
+   License: GNU General Public License version 3.0 (GPL-3.0)
+
+   Plugin functionality and management pages are adapted for AiCove.
+   Existing upstream copyright and license notices remain applicable.
+
+========================================================================
+10. Test-only components
 ------------------------------------------------------------------------
    These are used solely for testing and are not distributed in the
    released APK:

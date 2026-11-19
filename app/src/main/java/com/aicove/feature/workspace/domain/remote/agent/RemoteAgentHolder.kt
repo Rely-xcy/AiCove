@@ -113,7 +113,7 @@ class RemoteAgentHolder @Inject constructor(
                     fileAccess = fileAccessProvider.get(),
                     runCommand = { command -> runRemote(command) },
                     loadBinary = { arch -> binaries.load(arch) },
-                    agentDir = "$home/.aicode/agent"
+                    agentDir = "${connection.configRoot()}/agent"
                 )
                 val launcher = RemoteAgentLauncher(
                     provisioner = provisioner,

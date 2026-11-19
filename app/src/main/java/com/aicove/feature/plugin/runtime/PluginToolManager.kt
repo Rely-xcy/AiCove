@@ -4,10 +4,10 @@ import android.content.Context
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.tool.ToolRegistry
 import com.aicove.feature.plugin.domain.InstalledPlugin
+import com.aicove.core.util.appLanguageTag
 import com.aicove.feature.plugin.domain.PluginManager
-import com.aicove.feature.plugin.domain.PluginTool
+import com.aicove.feature.plugin.overlay.PluginOverlayManager
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,7 +28,9 @@ class PluginToolManager @Inject constructor(
     private val pluginManager: PluginManager,
     private val toolRegistry: ToolRegistry,
     private val runtime: PluginRuntimeManager,
-    private val terminalRunner: PluginTerminalRunner
+    private val terminalRunner: PluginTerminalRunner,
+    private val modelService: PluginModelService,
+    private val overlayManager: PluginOverlayManager
 ) {
     private val started = AtomicBoolean(false)
     private val registeredLock = Any()
@@ -59,13 +61,12 @@ class PluginToolManager @Inject constructor(
             .flatMap { plugin ->
                 val manifest = plugin.manifest ?: return@flatMap emptyList()
                 plugin.content.runtime ?: return@flatMap emptyList()
-                val pluginName = manifest.name.resolve(Locale.getDefault().toLanguageTag())
                 plugin.content.tools
                     .map { tool ->
                         PluginToolAdapter(
                             context = context,
                             pluginId = plugin.id,
-                            pluginName = pluginName,
+                            pluginName = { manifest.name.resolve(context.appLanguageTag()) },
                             pluginVersion = plugin.record.version,
                             tool = tool,
                             runtime = runtime,
@@ -86,6 +87,8 @@ class PluginToolManager @Inject constructor(
         (activePluginRevisions.keys - currentRevisions.keys).forEach { pluginId ->
             runtime.closePlugin(pluginId)
             terminalRunner.closePlugin(pluginId)
+            modelService.closePlugin(pluginId)
+            overlayManager.closePlugin(pluginId)
         }
         currentRevisions.forEach { (pluginId, revision) ->
             val previous = activePluginRevisions[pluginId]
@@ -96,6 +99,9 @@ class PluginToolManager @Inject constructor(
                 } else {
                     runtime.closePlugin(pluginId)
                 }
+                terminalRunner.closePlugin(pluginId)
+                modelService.closePlugin(pluginId)
+                overlayManager.reloadPlugin(pluginId)
             }
         }
         activePluginRevisions = currentRevisions

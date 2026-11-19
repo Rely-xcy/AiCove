@@ -36,10 +36,10 @@ internal fun buildRemoteRemoveCredentialCommand(aicodeDir: String): String {
 internal fun buildRemoteGitConfig(workspaceRoot: String): String =
     "[include]\n    path = ~/.gitconfig\n" +
         "[includeIf ${gitConfigQuote("gitdir:${workspaceRoot.trimEnd('/')}/")}]\n" +
-        "    path = ~/.aicode/gitconfig.credential\n"
+        "    path = ~/.aicove/gitconfig.credential\n"
 
 internal fun buildRemoteCredentialConfig(aicodeDir: String): String =
-    "[credential]\n    helper = ${gitConfigQuote("!AICODE_CRED_NO_PROMPT=1 ${remoteShellQuote("$aicodeDir/git-credential-aicode")}")}\n"
+    "[credential]\n    helper = ${gitConfigQuote("!AICOVE_CRED_NO_PROMPT=1 AICODE_CRED_NO_PROMPT=1 AICOVE_DIR=${remoteShellQuote(aicodeDir)} ${remoteShellQuote("$aicodeDir/git-credential-aicode")}")}\n"
 
 internal fun remoteShellQuote(value: String): String =
     "'" + value.replace("'", "'\"'\"'") + "'"

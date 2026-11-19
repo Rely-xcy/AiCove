@@ -1,6 +1,7 @@
 package com.aicove.feature.backup.presentation
 
 import android.content.Context
+import com.aicove.core.plugin.BackupExtensionSource
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -79,7 +80,8 @@ private sealed interface ImportSource {
 class BackupViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val backupManager: BackupManager,
-    private val targetRepository: BackupTargetRepository
+    private val targetRepository: BackupTargetRepository,
+    private val backupExtensions: BackupExtensionSource
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<BackupState>(BackupState.Idle)
@@ -103,6 +105,8 @@ class BackupViewModel @Inject constructor(
     private val _exportOptions = MutableStateFlow(loadExportOptions())
     val exportOptions: StateFlow<BackupOptions> = _exportOptions.asStateFlow()
 
+    fun pluginBackupEntries(languageTag: String) = backupExtensions.entries(languageTag)
+
     /** 导出数据范围：勾选即持久化，下次进入页面沿用。 */
     fun updateExportOptions(options: BackupOptions) {
         _exportOptions.value = options
@@ -119,6 +123,7 @@ class BackupViewModel @Inject constructor(
             .putBoolean(KEY_MEMORY_FILES, options.memoryFiles)
             .putBoolean(KEY_SESSION_BRIEFS, options.sessionBriefs)
             .putBoolean(KEY_LOGIN_SECRETS, options.loginSecrets)
+            .putStringSet("plugin_data", options.pluginData)
             .apply()
     }
 
@@ -134,7 +139,8 @@ class BackupViewModel @Inject constructor(
         panelScripts = prefs.getBoolean(KEY_PANEL_SCRIPTS, true),
         memoryFiles = prefs.getBoolean(KEY_MEMORY_FILES, false),
         sessionBriefs = prefs.getBoolean(KEY_SESSION_BRIEFS, false),
-        loginSecrets = prefs.getBoolean(KEY_LOGIN_SECRETS, false)
+        loginSecrets = prefs.getBoolean(KEY_LOGIN_SECRETS, false),
+        pluginData = prefs.getStringSet("plugin_data", emptySet()).orEmpty().toSet()
     )
 
     /** 流式导出到 [output]（调用方打开，本方法负责关闭）。 */
@@ -210,7 +216,7 @@ class BackupViewModel @Inject constructor(
                             exportStats.skippedWorkspaces.joinToString { "${it.name}(${it.reason})" }
                     )
                 }
-                val name = "aicode-backup-${formatCompactTimestamp()}.tar.gz"
+                val name = "aicove-backup-${formatCompactTimestamp()}.tar.gz"
                 val result = withContext(Dispatchers.IO) {
                     runCatching { targetRepository.storageFor(target).upload(name, file).getOrThrow() }
                 }

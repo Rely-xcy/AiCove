@@ -32,7 +32,7 @@ class BrowserTool @Inject constructor(
         const val TAG = "BrowserTool"
         const val DEFAULT_WAIT_TIMEOUT_MS = 10_000L
         const val DEFAULT_BACKBONE_DEPTH = 15
-        const val DEFAULT_SCREENSHOT_DIR = "~/workspace/.aicode/browser-screenshots"
+        const val DEFAULT_SCREENSHOT_DIR = "~/workspace/.aicove/browser-screenshots"
         val READ_ONLY_ACTIONS = setOf("getText", "getHtml", "getBackbone", "screenshot", "console", "wait", "listTabs")
     }
 
@@ -57,7 +57,7 @@ class BrowserTool @Inject constructor(
     override val parameters = mapOf(
         "action" to ToolParameter("action", ParameterType.STRING, "操作类型，见枚举列表", true),
         "tabId" to ToolParameter("tabId", ParameterType.STRING, "目标标签页 ID（如 tab-1），缺省时作用于当前激活的标签页", false),
-        "path" to ToolParameter("path", ParameterType.STRING, "screenshot: 截图保存路径（可选，缺省默认保存在 ~/workspace/.aicode/browser-screenshots/）", false),
+        "path" to ToolParameter("path", ParameterType.STRING, "screenshot: 截图保存路径（可选，缺省默认保存在 ~/workspace/.aicove/browser-screenshots/）", false),
         "url" to ToolParameter("url", ParameterType.STRING, "navigate/newTab: URL。支持 http(s)；本地文件支持 file:// 或容器路径（~/workspace/…、/etc/…）；无协议头时优先 https，失败回退 http；不像网址的输入则用内置搜索引擎（Bing）搜索", false),
         "script" to ToolParameter("script", ParameterType.STRING, "evaluate: JS 代码（支持 Promise/async）", false),
         "selector" to ToolParameter("selector", ParameterType.STRING,

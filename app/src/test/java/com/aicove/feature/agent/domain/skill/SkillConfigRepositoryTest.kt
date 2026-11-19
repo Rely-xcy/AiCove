@@ -38,13 +38,13 @@ class SkillConfigRepositoryTest {
         every { hub.watchAicode(any(), any(), any(), any(), any()) } returns emptyFlow()
         every { hub.watchWorkspace(any(), any(), any(), any(), any(), any()) } returns emptyFlow()
         fileAccess = mockk()
-        every { fileAccess.isFile("~/.aicode/skills.json") } answers {
+        every { fileAccess.isFile("~/.aicove/skills.json") } answers {
             File(activeGlobalRoot, "skills.json").isFile
         }
-        every { fileAccess.readFile("~/.aicode/skills.json") } answers {
+        every { fileAccess.readFile("~/.aicove/skills.json") } answers {
             File(activeGlobalRoot, "skills.json").readText()
         }
-        every { fileAccess.writeFile("~/.aicode/skills.json", any(), any(), any()) } answers {
+        every { fileAccess.writeFile("~/.aicove/skills.json", any(), any(), any()) } answers {
             File(activeGlobalRoot, "skills.json").writeText(secondArg())
         }
         repository = SkillConfigRepository(projectAicodeRoot, hub, fileAccess)
@@ -74,7 +74,7 @@ class SkillConfigRepositoryTest {
         assertEquals(setOf("new", "project"), repository.disabledNames())
         assertEquals(setOf("local"), SkillConfigRepository.readDisabled(localFile))
         assertEquals(setOf("project"), SkillConfigRepository.readDisabled(File(projectRoot, "skills.json")))
-        verify(exactly = 2) { fileAccess.writeFile("~/.aicode/skills.json", any(), any(), any()) }
+        verify(exactly = 2) { fileAccess.writeFile("~/.aicove/skills.json", any(), any(), any()) }
     }
 
     @Test

@@ -12,6 +12,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -282,7 +284,7 @@ internal fun ChatHeader(
                                             thickness = 1.dp,
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                         )
-                                        pluginEntries.take(3).forEach { entry ->
+                                        pluginEntries.forEach { entry ->
                                             WorkbenchMenuItem(
                                                 icon = FeatherIcons.Zap,
                                                 label = entry.title
@@ -518,7 +520,12 @@ internal fun RemoteConnectingPlaceholder(
 }
 
 @Composable
-internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
+internal fun WelcomeState(
+    bottomReserve: Dp,
+    modifier: Modifier = Modifier,
+    pluginEntries: List<PluginSlotEntry> = emptyList(),
+    onOpenPluginEntry: (PluginSlotEntry) -> Unit = {}
+) {
     BoxWithConstraints(
         modifier = modifier.padding(Spacing.xl),
         contentAlignment = Alignment.Center
@@ -545,6 +552,18 @@ internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (pluginEntries.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    pluginEntries.forEach { entry ->
+                        TextButton(onClick = { onOpenPluginEntry(entry) }) {
+                            Text(text = entry.title)
+                        }
+                    }
+                }
+            }
         }
     }
 }

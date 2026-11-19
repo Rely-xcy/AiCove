@@ -55,7 +55,7 @@ internal fun preferredAbiToken(supportedAbis: List<String>): String? =
 /**
  * 从 Release 资产里挑出更新包。
  *
- * 资产命名由 CI 决定（`aicode-<架构>-<版本>.apk`，见 `.github/workflows/android-release.yml`）。
+ * 资产命名由 CI 决定（`aicove-<架构>-<版本>.apk`，见 `.github/workflows/android-release.yml`）。
  * 同一 Release 里还混着 `mapping.txt.gz`，所以只认 `.apk` 结尾；精确名没命中时依次退让为
  * 「含架构段」→ `universal`，都不命中返回 null（该版本没有可用安装包，只能去浏览器下载）。
  * 一律按 API 返回的资产名匹配，不自己拼下载 URL——CI 曾因段序拼错导致资产匹配不上。
@@ -63,8 +63,17 @@ internal fun preferredAbiToken(supportedAbis: List<String>): String? =
 internal fun selectUpdateAsset(assets: List<UpdateAsset>, rawTag: String, abiToken: String?): UpdateAsset? {
     val apks = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
     if (abiToken != null) {
-        apks.firstOrNull { it.name.equals("aicode-$abiToken-$rawTag.apk", ignoreCase = true) }?.let { return it }
-        apks.firstOrNull { it.name.startsWith("aicode-$abiToken-", ignoreCase = true) }?.let { return it }
+        apks.firstOrNull {
+            it.name.equals("aicove-$abiToken-$rawTag.apk", ignoreCase = true) ||
+                it.name.equals("aicode-$abiToken-$rawTag.apk", ignoreCase = true)
+        }?.let { return it }
+        apks.firstOrNull {
+            it.name.startsWith("aicove-$abiToken-", ignoreCase = true) ||
+                it.name.startsWith("aicode-$abiToken-", ignoreCase = true)
+        }?.let { return it }
     }
-    return apks.firstOrNull { it.name.startsWith("aicode-universal-", ignoreCase = true) }
+    return apks.firstOrNull {
+        it.name.startsWith("aicove-universal-", ignoreCase = true) ||
+            it.name.startsWith("aicode-universal-", ignoreCase = true)
+    }
 }

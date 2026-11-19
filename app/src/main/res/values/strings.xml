@@ -373,6 +373,7 @@
     <string name="settings_category_background">后台运行</string>
     <string name="settings_category_system_permissions">系统权限</string>
     <string name="settings_user_guide">使用手册</string>
+    <string name="settings_user_guide_url">https://rely-xcy.github.io/AiCove/</string>
 
     <!-- i18n: UI 文案 -->
     <!-- Common -->
@@ -586,8 +587,8 @@
     <string name="agreement_notice_suffix">，了解使用规则与数据处理方式。\n\n点击“同意并继续”表示你已阅读并同意上述两份文件。</string>
     <string name="agreement_accept">同意并继续</string>
     <string name="agreement_decline">不同意</string>
-    <string name="agreement_terms_url">https://aicode.murk.top/terms</string>
-    <string name="agreement_privacy_url">https://aicode.murk.top/privacy</string>
+    <string name="agreement_terms_url">https://rely-xcy.github.io/AiCove/terms</string>
+    <string name="agreement_privacy_url">https://rely-xcy.github.io/AiCove/privacy</string>
 
     <!-- Ask User Question -->
     <string name="ask_confirm_title">AI 需要你的确认</string>

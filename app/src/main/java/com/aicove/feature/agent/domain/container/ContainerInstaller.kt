@@ -2,6 +2,7 @@ package com.aicove.feature.agent.domain.container
 
 import android.content.Context
 import android.system.Os
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.InputStream
@@ -58,14 +59,14 @@ class ContainerInstaller @Inject constructor(
         @Volatile private var docsExtractedSession = false
 
         /**
-         * 从 assets 提取文档到 ~/.aicode/docs (内置使用指导)，支持 guide/ advanced/ 等分类子目录。
+         * 从 assets 提取文档到 ~/.aicove/docs (内置使用指导)，支持 guide/ advanced/ 等分类子目录。
          *
          * 提取前先整目录删除：文档按功能分类，版本间调整分类会改变文件路径，只覆盖不清理会让
          * 上个版本的同名旧文件残留在别的路径下，AI 可能读到过期内容。
          */
         fun extractDocs(context: Context) {
             if (docsExtractedSession) return
-            val destDir = File(File(context.filesDir, "aicode"), "docs")
+            val destDir = File(BrandPaths.hostDirectory(context.filesDir), "docs")
             runCatching {
                 destDir.deleteRecursively()
                 destDir.mkdirs()
@@ -77,13 +78,13 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取内置提示词到 ~/.aicode/prompts/，每次启动全量覆盖，使 App 升级后提示词随之更新。
+         * 从 assets 提取内置提示词到 ~/.aicove/prompts/，每次启动全量覆盖，使 App 升级后提示词随之更新。
          *
-         * 用户自定义覆盖放在 ~/.aicode/prompts.custom/（同名即覆盖），本方法不触碰该目录，
+         * 用户自定义覆盖放在 ~/.aicove/prompts.custom/（同名即覆盖），本方法不触碰该目录，
          * 故用户重写的片段不会被升级覆盖。参见 [com.aicove.feature.agent.domain.prompt.SystemPromptProvider]。
          */
         fun extractPrompts(context: Context) {
-            val destDir = File(File(context.filesDir, "aicode"), "prompts")
+            val destDir = File(BrandPaths.hostDirectory(context.filesDir), "prompts")
             destDir.mkdirs()
             runCatching {
                 extractAssetsRecursive(context, "prompts", destDir)
@@ -111,11 +112,11 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取内置子代理定义（如 Explore）到 ~/.aicode/agents/。
+         * 从 assets 提取内置子代理定义（如 Explore）到 ~/.aicove/agents/。
          * 若文件已存在则不覆盖，以保留用户的修改与删除后的重建选择。
          */
         fun extractAgents(context: Context) {
-            val destDir = File(File(context.filesDir, "aicode"), "agents")
+            val destDir = File(BrandPaths.hostDirectory(context.filesDir), "agents")
             destDir.mkdirs()
             runCatching {
                 val entries = context.assets.list("agents") ?: return@runCatching
@@ -133,11 +134,11 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取内置脚本（如面板 demo_balance.py）到 ~/.aicode/scripts/。
+         * 从 assets 提取内置脚本（如面板 demo_balance.py）到 ~/.aicove/scripts/。
          * 若文件已存在则不覆盖，以保留用户的修改。
          */
         fun extractScripts(context: Context) {
-            val destDir = File(File(context.filesDir, "aicode"), "scripts")
+            val destDir = File(BrandPaths.hostDirectory(context.filesDir), "scripts")
             destDir.mkdirs()
             runCatching {
                 val entries = context.assets.list("aicode/scripts") ?: return@runCatching
@@ -156,9 +157,9 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取自定义 git credential helper 到 ~/.aicode/git-credential-aicode 并赋可执行位。
+         * 从 assets 提取自定义 git credential helper 到 ~/.aicove/git-credential-aicode 并赋可执行位。
          *
-         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicode/git-credential-aicode，
+         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicove/git-credential-aicode，
          * 由容器初始化菜单（provision.sh）在 `.gitconfig` 里登记为第二个 credential.helper，
          * 排在 `store` 之后兜底未登录（双保险）。helper 详行为见 assets/aicode/git-credential-aicode。
          *
@@ -167,7 +168,7 @@ class ContainerInstaller @Inject constructor(
          * git 仍能裸跑报认证失败，不致命）。
          */
         fun extractCredentialHelper(context: Context) {
-            val dest = File(File(context.filesDir, "aicode"), "git-credential-aicode")
+            val dest = File(BrandPaths.hostDirectory(context.filesDir), "git-credential-aicode")
             runCatching {
                 dest.parentFile?.mkdirs()
                 context.assets.open("aicode/git-credential-aicode").use { input ->
@@ -183,16 +184,16 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取容器初始化依赖安装脚本到 ~/.aicode/provision.sh 并赋可执行位。
+         * 从 assets 提取容器初始化依赖安装脚本到 ~/.aicove/provision.sh 并赋可执行位。
          *
-         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicode/provision.sh，由
+         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicove/provision.sh，由
          * 首次进入终端的初始化菜单以 `sh` 执行——脚本按包管理器
          * （apk/apt-get/dnf/yum/pacman）安装基础包，包清单维护在脚本内而非代码里。
          * 启动即提取、每次覆盖写（脚本随 App 版本更新）。提取失败仅告警不抛：
          * 缺脚本时初始化菜单不会出现，用户可手动安装基础工具。
          */
         fun extractProvisionScript(context: Context) {
-            val dest = File(File(context.filesDir, "aicode"), "provision.sh")
+            val dest = File(BrandPaths.hostDirectory(context.filesDir), "provision.sh")
             runCatching {
                 dest.parentFile?.mkdirs()
                 context.assets.open("aicode/provision.sh").use { input ->
@@ -207,17 +208,17 @@ class ContainerInstaller @Inject constructor(
         }
 
         /**
-         * 从 assets 提取环境工具（`aicode` 命令 + 共享库 lib/）到 ~/.aicode/bin 与 ~/.aicode/lib 并赋可执行位。
+         * 从 assets 提取环境工具（`aicode` 命令 + 共享库 lib/）到 ~/.aicove/bin 与 ~/.aicove/lib 并赋可执行位。
          *
-         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicode/bin/aicode（在 PATH 中，见
-         * buildContainerEnv）与 /root/.aicode/lib/（env-common.sh、android-sdk.sh 与 scenarios/ 子目录），
+         * 经 [LinuxContainerEngine] 的 -b 绑定即容器内 /root/.aicove/bin/aicode（在 PATH 中，见
+         * buildContainerEnv）与 /root/.aicove/lib/（env-common.sh、android-sdk.sh 与 scenarios/ 子目录），
          * 供用户随时执行 `aicode` 安装开发环境（场景化）。每次覆盖写（随 App 版本更新）；提取失败仅告警
          * 不抛：缺工具时容器初始化菜单（provision.sh）会提示未就绪，用户重启 App 即可重新提取。
          */
         fun extractEnvTool(context: Context) {
             runCatching {
-                extractDirOverwrite(context, "aicode/bin", File(File(context.filesDir, "aicode"), "bin"), executable = true)
-                extractDirOverwrite(context, "aicode/lib", File(File(context.filesDir, "aicode"), "lib"), executable = false)
+                extractDirOverwrite(context, "aicode/bin", File(BrandPaths.hostDirectory(context.filesDir), "bin"), executable = true)
+                extractDirOverwrite(context, "aicode/lib", File(BrandPaths.hostDirectory(context.filesDir), "lib"), executable = false)
             }.onFailure {
                 FileLogger.w(TAG, "提取环境工具失败: ${it.message}", it)
             }
@@ -311,10 +312,10 @@ class ContainerInstaller @Inject constructor(
      *
      * 刻意**独立于 [rootfsDir]**：rootfs 在容器版本升级时会被整体删除重装（见 [installRootfsIfNeed]），
      * 而本目录承载用户数据，必须跨升级保留。它由 [com.aicove.feature.agent.domain.container.LinuxContainerEngine]
-     * 绑定到容器内 `/root/.aicode`，故 AI / 终端看到的 `/root/.aicode` 实际落在这里。
+     * 绑定到容器内 `/root/.aicove`，故 AI / 终端看到的 `/root/.aicove` 实际落在这里。
      */
     val aicodeDir: File
-        get() = File(context.filesDir, com.aicove.core.branding.BrandPaths.HOST_DIR_NAME)
+        get() = BrandPaths.hostDirectory(context.filesDir)
 
     fun containerPathFor(file: File): String {
         val root = aicodeDir.canonicalFile
@@ -746,16 +747,16 @@ class ContainerInstaller @Inject constructor(
         }
     }
 
-    /** 从 assets 提取文档到 ~/.aicode/docs (内置使用指导) */
+    /** 从 assets 提取文档到 ~/.aicove/docs (内置使用指导) */
     fun extractDocs() = extractDocs(context)
 
-    /** 从 assets 提取 git credential helper 到 ~/.aicode/git-credential-aicode 并赋可执行位。 */
+    /** 从 assets 提取 git credential helper 到 ~/.aicove/git-credential-aicode 并赋可执行位。 */
     fun extractCredentialHelper() = extractCredentialHelper(context)
 
-    /** 从 assets 提取容器初始化依赖安装脚本到 ~/.aicode/provision.sh 并赋可执行位。 */
+    /** 从 assets 提取容器初始化依赖安装脚本到 ~/.aicove/provision.sh 并赋可执行位。 */
     fun extractProvisionScript() = extractProvisionScript(context)
 
-    /** 从 assets 提取环境工具（aicode 命令 + 共享库）到 ~/.aicode/{bin,lib} 并赋可执行位。 */
+    /** 从 assets 提取环境工具（aicode 命令 + 共享库）到 ~/.aicove/{bin,lib} 并赋可执行位。 */
     fun extractEnvTool() = extractEnvTool(context)
 
     /** 解压 alpine-minirootfs.tar.gz，正确处理目录/文件/符号链接/硬链接与权限位；返回解压条目数。 */

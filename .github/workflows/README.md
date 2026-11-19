@@ -6,7 +6,7 @@ Beta 构建、Baseline Profile 自动更新和签名配置说明。
 
 每个分支单独计数。`Beta Build` 成功上传 APK 后，累计五个不同源码提交的成功版本会触发 `Baseline Profile`；失败、取消及同一提交的重跑不重复计数。首次启用从最近一次修改 `app/src/main/baseline-prof.txt` 的提交时间开始统计。模型元数据的每日同步任务不参与这个计数。
 
-采集流程绑定触发版本的完整 SHA；冷启动和聊天两份规则都必须有效且包含未混淆应用符号，才合并去重并生成 profile 更新提交。随后运行全量单测并构建签名 Beta，检查 APK 内确有编译后的 profile，成功后才普通快进推送回原分支，并在本次 **Baseline Profile** 运行的 Artifacts 上传 `aicode-beta-<更新提交完整SHA>`。该产物含 APK 与 R8 mapping，不创建 GitHub Release。profile 更新提交不触发下一个采集循环。
+采集流程绑定触发版本的完整 SHA；冷启动和聊天两份规则都必须有效且包含未混淆应用符号，才合并去重并生成 profile 更新提交。随后运行全量单测并构建签名 Beta，检查 APK 内确有编译后的 profile，成功后才普通快进推送回原分支，并在本次 **Baseline Profile** 运行的 Artifacts 上传 `aicove-beta-<更新提交完整SHA>`。该产物含 APK 与 R8 mapping，不创建 GitHub Release。profile 更新提交不触发下一个采集循环。
 
 `.github/baseline-cycle.json` 由自动流程维护，记录已计入的版本与触发 run；不要手工改计数。采集失败、规则损坏或新包构建失败不会覆盖远端旧 profile。采集期间若分支前进，旧结果丢弃；新版本成功构建后会排队采集当前源码。普通推送被分支保护拒绝时工作流会失败，不会强推绕过保护。
 

@@ -5,9 +5,9 @@ description: AiCove 用户协议：使用确认、AI 与操作风险、合法使
 
 # AiCove 用户协议
 
-**最后更新：2026 年 10 月 23 日**
+**最后更新：2026 年 11 月 18 日**
 
-AiCove（以下简称“本应用”）是一款运行在 Android 上的开源 AI 编程工具，由 jieapi（个人开发者，以下简称“开发者”）维护。本协议说明使用本应用时的权利、义务及重要风险，请结合[隐私政策](/privacy)阅读。
+AiCove（以下简称“本应用”）是一款运行在 Android 上的开源 AI 编程工具，由 Rely-xcy（以下简称“开发者”）维护。本协议说明使用本应用时的权利、义务及重要风险，请结合[隐私政策](/privacy)阅读。
 
 ## 一、阅读与确认
 
@@ -69,7 +69,7 @@ AI 模型、搜索、网站、MCP 服务、软件仓库、Git 托管、远程服
 
 如对本协议或本应用有疑问，可通过以下方式联系。GitHub Issues 是公开渠道，请勿提交 API Key、密码或含敏感内容的日志。
 
-- 开发者：jieapi（个人开发者）
-- 联系邮箱：xiaojieapi@qq.com
+- 维护者：Rely-xcy
+- 联系方式：GitHub Issues（公开渠道，请勿提交敏感信息）
 - GitHub Issues：<https://github.com/Rely-xcy/AiCove/issues>
 - 项目主页：<https://github.com/Rely-xcy/AiCove>

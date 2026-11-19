@@ -54,6 +54,24 @@ class RemoteSftpFileAccessMappingTest {
         assertEquals("$wsRoot/~/other", remotePathFor("~/other", wsRoot, null))
     }
 
+    @Test
+    fun newAndLegacyGlobalPathsUseTheSelectedRoot() {
+        for (name in listOf(".aicove", ".aicode")) {
+            assertEquals("$home/.aicove/skills/demo", remotePathFor("~/$name/skills/demo", wsRoot, home, "$home/.aicove"))
+            assertEquals("$home/.aicode/skills/demo", remotePathFor("~/$name/skills/demo", wsRoot, home, "$home/.aicode"))
+        }
+    }
+
+    @Test
+    fun projectPathsUseTheMigrationFallbackWithoutChangingOtherFiles() {
+        for (name in listOf(".aicove", ".aicode")) {
+            assertEquals("$wsRoot/.aicode/skills/demo", remotePathFor("~/workspace/$name/skills/demo", wsRoot, home,
+                "$home/.aicove", "$wsRoot/.aicode"))
+        }
+        assertEquals("$wsRoot/src/demo", remotePathFor("~/workspace/src/demo", wsRoot, home,
+            "$home/.aicove", "$wsRoot/.aicode"))
+    }
+
     // ---------- displayPathFor：远程真实路径 → AI 视角路径 ----------
 
     @Test

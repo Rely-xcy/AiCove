@@ -91,6 +91,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicove.R
+import com.aicove.core.plugin.PluginSlotEntry
 import com.aicove.core.theme.Spacing
 import com.aicove.core.ui.ImageViewerHost
 import com.aicove.core.ui.LocalImageViewer
@@ -877,7 +878,10 @@ fun AIChatPanel(
     onSelectModelInOnboarding: (() -> Unit)? = null,
     onDismissModelSheetInOnboarding: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    pluginTipContent: @Composable (Modifier) -> Unit = {}
+    pluginTipContent: @Composable (Modifier) -> Unit = {},
+    headerPluginEntries: List<PluginSlotEntry> = emptyList(),
+    welcomePluginEntries: List<PluginSlotEntry> = emptyList(),
+    onOpenPluginEntry: (PluginSlotEntry) -> Unit = {}
 ) {
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
     val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
@@ -1149,7 +1153,7 @@ fun AIChatPanel(
         ))
     }
     val useAsyncItems = messages.size > ASYNC_CHAT_ITEMS_THRESHOLD
-    var asyncItems by remember { mutableStateOf<AsyncChatItems?>(null) }
+    var asyncItems by remember(currentSessionId, useAsyncItems) { mutableStateOf<AsyncChatItems?>(null) }
     LaunchedEffect(chatItemsKey, useAsyncItems) {
         if (!useAsyncItems) return@LaunchedEffect
         val sessionId = currentSessionId
@@ -2081,7 +2085,9 @@ fun AIChatPanel(
                 showMenuButton = showMenuButton,
                 terminalActive = terminalActive,
                 gitActive = gitActive,
-                browserActive = browserActive
+                browserActive = browserActive,
+                pluginEntries = chatPluginEntries(headerPluginEntries, "chat.header"),
+                onOpenPluginEntry = onOpenPluginEntry
             )
         }
     ) { padding ->
@@ -2110,24 +2116,16 @@ fun AIChatPanel(
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
-                if (!messagesReady) {
-                    // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
-                    if (isRemote && connectionState != null && connectionState != com.aicove.feature.agent.domain.container.ConnectionState.CONNECTED) {
-                        RemoteConnectingPlaceholder(state = connectionState, onRetry = onRetryRemoteConnection)
-                    } else if (showMessagesLoading) {
-                        // 本地模式读库偏慢时的占位：以前这里什么都不画，切会话会先闪一下空白。
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else if (messages.isEmpty() && visiblePendingUserMessages.isEmpty()) {
-                    WelcomeState(
+                if (!messagesReady || (messages.isEmpty() && visiblePendingUserMessages.isEmpty())) {
+                    ChatEmptyState(
+                        messagesReady = messagesReady,
+                        isRemote = isRemote,
+                        connectionState = connectionState,
+                        showMessagesLoading = showMessagesLoading,
+                        onRetryConnection = onRetryRemoteConnection,
                         bottomReserve = with(LocalDensity.current) { inputBarReservePx.toDp() },
-                        modifier = Modifier.fillMaxSize()
+                        pluginEntries = welcomePluginEntries,
+                        onOpenPluginEntry = onOpenPluginEntry
                     )
                 } else {
                     LazyColumn(

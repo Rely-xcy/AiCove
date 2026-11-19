@@ -1,6 +1,7 @@
 package com.aicove.feature.credentials.data
 
 import android.content.Context
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.util.FileLogger
 import com.aicove.core.watch.FileChangeHub
 import com.aicove.feature.agent.domain.container.LinuxContainerEngine
@@ -83,7 +84,7 @@ class CredentialRequestBridge @Inject constructor(
      * 启动监听：订阅中心服务的 aicode 目录事件捕获请求，并起兜底轮询协程。幂等可重复调。
      */
     fun start() {
-        val dir = File(context.filesDir, "aicode").apply { mkdirs() }
+        val dir = BrandPaths.hostDirectory(context.filesDir).apply { mkdirs() }
         aicodeDir = dir
         if (!started) {
             started = true
@@ -147,7 +148,7 @@ class CredentialRequestBridge @Inject constructor(
      * [host] 取自 [CredentialRequest]（Git 进程在收到 resp 前不会删 req，但 host 已在请求里，直接传更稳）。
      */
     fun respond(requestId: String, host: String, username: String, token: String) {
-        val dir = aicodeDir ?: File(context.filesDir, "aicode")
+        val dir = aicodeDir ?: BrandPaths.hostDirectory(context.filesDir)
         scope.launch {
             writeRespAtomically(dir, requestId, "username=$username\npassword=$token\n")
             runCatching {
@@ -164,7 +165,7 @@ class CredentialRequestBridge @Inject constructor(
 
     /** 用户取消弹窗：写 cancel 响应（helper 退出非零让 git 报认证失败）+ dec 在途 + 清状态。 */
     fun cancel(requestId: String) {
-        val dir = aicodeDir ?: File(context.filesDir, "aicode")
+        val dir = aicodeDir ?: BrandPaths.hostDirectory(context.filesDir)
         scope.launch {
             writeRespAtomically(dir, requestId, "cancel=1\n")
             containerEngine.decPromptInFlight()

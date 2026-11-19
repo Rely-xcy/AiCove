@@ -3,6 +3,7 @@ package com.aicove.feature.agent.domain.mcp
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.LinuxContainerEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,24 +79,27 @@ class StdioTransport(
         val payload = JsonRpcRequest(id = id, method = method, params = params)
         val deferred = CompletableDeferred<JsonRpcResponse>()
         pending[id] = deferred
-        FileLogger.d(TAG, "→ [$serverName] $method id=$id")
-
         try {
-            writeLine(json.encodeToString(JsonRpcRequest.serializer(), payload))
-        } catch (e: Exception) {
-            pending.remove(id)
-            throw McpException(message = "[$serverName] 写入 stdin 失败: ${e.message}", cause = e)
-        }
+            FileLogger.d(TAG, "→ [$serverName] $method id=$id")
+            try {
+                writeLine(json.encodeToString(JsonRpcRequest.serializer(), payload))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw McpException(message = "[$serverName] 写入 stdin 失败: ${e.message}", cause = e)
+            }
 
-        val response = withTimeoutOrNull(REQUEST_TIMEOUT_MS) { deferred.await() }
-        if (response == null) {
+            val response = withTimeoutOrNull(REQUEST_TIMEOUT_MS) { deferred.await() }
+            if (response == null) {
+                throw McpException(message = "[$serverName] 请求 $method 超时（${REQUEST_TIMEOUT_MS}ms）")
+            }
+            response.error?.let {
+                throw McpException(rpcCode = it.code, message = "$method 返回错误 [${it.code}] ${it.message}")
+            }
+            return response
+        } finally {
             pending.remove(id)
-            throw McpException(message = "[$serverName] 请求 $method 超时（${REQUEST_TIMEOUT_MS}ms）")
         }
-        response.error?.let {
-            throw McpException(rpcCode = it.code, message = "$method 返回错误 [${it.code}] ${it.message}")
-        }
-        return response
     }
 
     override suspend fun notify(method: String, params: JsonObject?) {

@@ -10,7 +10,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** 容器内 AI 配置根目录（与 [CompactedHistoryArchive] 的归档目录拼接口径一致）。 */
-internal const val AICODE_CONTAINER_ROOT = "/root/.aicode"
+internal const val AICODE_CONTAINER_ROOT = com.aicove.core.branding.BrandPaths.CONFIG_ROOT
 
 internal const val COMPACTED_HISTORY_DIR_NAME = "compacted-history"
 
@@ -19,7 +19,9 @@ internal const val COMPACTED_HISTORY_CONTAINER_DIR =
     "$AICODE_CONTAINER_ROOT/$COMPACTED_HISTORY_DIR_NAME"
 
 internal val COMPACTED_HISTORY_PATH_REGEX =
-    Regex(Regex.escape(COMPACTED_HISTORY_CONTAINER_DIR) + """/([A-Za-z0-9._-]+\.md)""")
+    Regex("(?:" + Regex.escape(COMPACTED_HISTORY_CONTAINER_DIR) + "|" +
+        Regex.escape(com.aicove.core.branding.BrandPaths.Legacy.CONFIG_ROOT + "/" + COMPACTED_HISTORY_DIR_NAME) +
+        ")" + """/([A-Za-z0-9._-]+\.md)""")
 
 /**
  * 从若干份活跃摘要正文里解析归档文件名。

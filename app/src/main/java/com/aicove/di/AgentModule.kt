@@ -20,6 +20,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicove.feature.agent.data.remote.gemini.GeminiApi
 import com.aicove.feature.agent.data.remote.openai.OpenAIApi
+import com.aicove.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicove.feature.agent.domain.container.CommandEngine
 import com.aicove.feature.agent.domain.container.DelegatingCommandEngine
 import com.aicove.feature.agent.domain.container.LinuxContainerEngine
@@ -89,6 +90,7 @@ import javax.inject.Singleton
 
 import com.aicove.core.db.MigrationLoader
 import com.aicove.core.util.FileLogger
+import com.aicove.feature.plugin.tool.PluginTool
 import com.aicove.feature.agent.domain.checkpoint.CheckpointManager
 import com.aicove.feature.agent.domain.notification.AgentEventInjector
 import com.aicove.feature.agent.domain.notification.AgentNotificationCenter
@@ -110,9 +112,7 @@ import com.aicove.feature.agent.domain.subagent.InterruptedWorkRecorder
 import com.aicove.feature.agent.domain.workflow.StatefulAgentWorkflow
 import com.aicove.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicove.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicove.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicove.feature.settings.data.repository.MemorySettingsRepository
-import com.aicove.feature.settings.data.repository.ProviderKeyRotator
 import com.aicove.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aicove.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aicove.feature.workspace.data.repository.WorkspaceRepository
@@ -398,6 +398,7 @@ object AgentModule {
         todoTool: TodoTool,
         memoryTool: MemoryTool,
         configTool: ConfigTool,
+        pluginTool: PluginTool,
         taskTool: TaskTool,
         messageParentTool: MessageParentTool,
         browserTool: BrowserTool,
@@ -431,6 +432,7 @@ object AgentModule {
             register("todo", todoTool)
             register("memory", memoryTool)
             register("config", configTool)
+            register("plugin", pluginTool)
             register("task", taskTool)
             register("messageParent", messageParentTool)
             register("browser", browserTool)
@@ -450,9 +452,7 @@ object AgentModule {
     @Singleton
     fun provideAgentWorkflow(
         aiProviderRepository: AIProviderRepository,
-        openAIApi: OpenAIApi,
-        anthropicApi: AnthropicApi,
-        geminiApi: GeminiApi,
+        providerFactory: ProviderInstanceFactory,
         promptProvider: SystemPromptProvider,
         permissionManager: ToolPermissionManager,
         policyEngine: ToolPermissionPolicyEngine,
@@ -463,13 +463,11 @@ object AgentModule {
         compactionModelSettingsRepository: CompactionModelSettingsRepository,
         titleModelSettingsRepository: TitleModelSettingsRepository,
         defaultModelSettingsRepository: DefaultModelSettingsRepository,
-        generalSettingsRepository: GeneralSettingsRepository,
         memorySettingsRepository: MemorySettingsRepository,
         sessionUseCase: SessionUseCase,
         messagePersistenceUseCase: MessagePersistenceUseCase,
         checkpointManager: CheckpointManager,
         llmCallRecordDao: LlmCallRecordDao,
-        keyRotator: ProviderKeyRotator,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
         fileAccess: FileAccessProvider,
@@ -480,9 +478,7 @@ object AgentModule {
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
             aiProviderRepository,
-            openAIApi,
-            anthropicApi,
-            geminiApi,
+            providerFactory,
             promptProvider,
             permissionManager,
             policyEngine,
@@ -493,13 +489,11 @@ object AgentModule {
             compactionModelSettingsRepository,
             titleModelSettingsRepository,
             defaultModelSettingsRepository,
-            generalSettingsRepository,
             memorySettingsRepository,
             sessionUseCase,
             messagePersistenceUseCase,
             checkpointManager,
             llmCallRecordDao,
-            keyRotator,
             agentNotificationCenter,
             eventInjector,
             fileAccess,

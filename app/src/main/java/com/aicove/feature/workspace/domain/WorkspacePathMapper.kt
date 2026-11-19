@@ -1,5 +1,6 @@
 package com.aicove.feature.workspace.domain
 
+import com.aicove.core.branding.BrandPaths
 import com.aicove.feature.agent.domain.container.ContainerInstaller
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.settings.data.repository.ContainerSettingsRepository
@@ -85,21 +86,21 @@ class WorkspacePathMapper @Inject constructor(
     /** 容器 rootfs 在宿主上的根目录（容器内 `/` 即此目录，随当前 profile 变化）。 */
     private fun rootfsRoot(): File = containerInstaller.rootfsDirFor(currentProfile)
 
-    /** AI 配置目录在宿主上的根（容器内 `/root/.aicode` 即此目录，独立于 rootfs）。 */
+    /** AI 配置目录在宿主上的根（容器内 `/root/.aicove` 即此目录，独立于 rootfs）。 */
     private fun aicodeRoot(): File = containerInstaller.aicodeDir
 
     /**
      * 把 AI 提供的路径解析为宿主真实文件。兼容以下写法：
      * - 容器绝对路径 `~/workspace[/…]`（或展开后的 `$HOME/workspace[/…]`）→ 映射到宿主工作区；
-     * - 容器绝对路径 `/root/.aicode[/…]` → 映射到宿主 AI 配置目录（skill / mcp.json，独立于 rootfs）；
+     * - 容器绝对路径 `/root/.aicove[/…]` → 映射到宿主 AI 配置目录（skill / mcp.json，独立于 rootfs）；
      * - 其它容器绝对路径 `/etc/…`、`/root/…` → 映射到 rootfs 内对应文件（容器系统文件）；
      * - 相对路径 `src/Main.kt` → 挂到宿主工作区根下；
      *
-     * `/root/.aicode` 必须先于通用 `/`→rootfs 规则匹配，否则会落到 rootfs 内的临时副本（升级即丢）。
+     * `/root/.aicove` 必须先于通用 `/`→rootfs 规则匹配，否则会落到 rootfs 内的临时副本（升级即丢）。
      */
     fun toHostFile(path: String): File {
         // 工作区未落定时不猜测根目录（否则 ~/workspace/... 会落到工作区父目录，即所有工作区的公共父级）。
-        // 仅对确实要挂在工作区根下的路径报错；`~/.aicode` 与容器 rootfs 路径不依赖工作区，照常解析。
+        // 仅对确实要挂在工作区根下的路径报错；`~/.aicove` 与容器 rootfs 路径不依赖工作区，照常解析。
         val root = hostRootOrNull()
         val wsRoot = resolvedContainerRoot()
         val p = pathHomeResolver.expandHome(path.trim())
@@ -108,6 +109,11 @@ class WorkspacePathMapper @Inject constructor(
             p.startsWith("$wsRoot/") -> workspaceFile(requireWorkspaceRoot(root), p.removePrefix("$wsRoot/"))
             p == AICODE_ROOT || p == "$AICODE_ROOT/" -> aicodeRoot()
             p.startsWith("$AICODE_ROOT/") -> containedFile(aicodeRoot(), p.removePrefix("$AICODE_ROOT/"), "AI 配置目录")
+            p == com.aicove.core.branding.BrandPaths.Legacy.CONFIG_ROOT ||
+                p == "${com.aicove.core.branding.BrandPaths.Legacy.CONFIG_ROOT}/" -> aicodeRoot()
+            p.startsWith("${com.aicove.core.branding.BrandPaths.Legacy.CONFIG_ROOT}/") -> containedFile(
+                aicodeRoot(), p.removePrefix("${com.aicove.core.branding.BrandPaths.Legacy.CONFIG_ROOT}/"), "AI 配置目录"
+            )
             else -> mountedHostFile(p)
                 ?: if (p.startsWith("/")) containedFile(rootfsRoot(), p.removePrefix("/"), "容器镜像目录")
                 else workspaceFile(requireWorkspaceRoot(root), p)
@@ -119,13 +125,23 @@ class WorkspacePathMapper @Inject constructor(
      * 相对路径挂到工作区下之前做 canonical 包含校验：`../../data/...` 这类逃逸必须拒绝，
      * 否则 readFile/listFiles 可以读出工作区之外的文件（备份导入侧已有同款校验）。
      */
-    private fun workspaceFile(root: File, relative: String): File = containedFile(root, relative, "工作区")
+    private fun workspaceFile(root: File, relative: String): File {
+        val normalized = Paths.get(relative).normalize().toString()
+        for (directory in listOf(BrandPaths.CONFIG_DIR_NAME, BrandPaths.Legacy.CONFIG_DIR_NAME)) {
+            if (normalized == directory || normalized.startsWith("$directory/")) {
+                containedFile(root, relative, "工作区")
+                val configRoot = BrandPaths.projectDirectory(root.absolutePath)
+                return containedFile(configRoot, normalized.removePrefix(directory).trimStart('/'), "项目配置目录")
+            }
+        }
+        return containedFile(root, relative, "工作区")
+    }
 
     /**
      * 把相对路径拼到 [root] 下，并做 canonical 包含校验：`../../data/...` 这类逃逸必须拒绝。
      *
      * 三条根（工作区 / AI 配置目录 / 容器镜像目录）共用同一套校验：只做 «拼上根» 不够，
-     * 绝对路径分支同样能把 `..` 带进来（`/root/.aicode/../../data/data/...`）。
+     * 绝对路径分支同样能把 `..` 带进来（`/root/.aicove/../../data/data/...`）。
      */
     private fun containedFile(root: File, relative: String, label: String): File {
         // 用纯字符串路径归一化（Path.normalize 不访问文件系统）：容器里目录可能尚未创建，
@@ -207,11 +223,11 @@ class WorkspacePathMapper @Inject constructor(
     /**
      * 把宿主路径还原为容器路径：
      * - 位于工作区内 → `~/workspace/…`；
-     * - 位于 AI 配置目录内 → `/root/.aicode/…`；
+     * - 位于 AI 配置目录内 → `/root/.aicove/…`；
      * - 位于 rootfs 内 → 去掉 rootfs 前缀的容器绝对路径（如 `/etc/apk/repositories`）；
      * - 其余原样返回（极少出现）。
      *
-     * 工作区在 `filesDir/projects`、AI 配置在 `filesDir/aicode`、rootfs 在 `filesDir/rootfs`，三者互不重叠，
+     * 工作区在 `filesDir/projects`、AI 配置在 `filesDir/aicove`、rootfs 在 `filesDir/rootfs`，三者互不重叠，
      * 判断顺序无歧义。
      *
      * 工作区未落定时不做「在工作区内」的判定，但也不报错：本函数用于把宿主路径回显成容器路径，
@@ -226,9 +242,15 @@ class WorkspacePathMapper @Inject constructor(
         val raw = hostPath.trim().replace('\\', '/')
         val resolvedWs = resolvedContainerRoot().replace('\\', '/')
         val resolvedWsPrefix = "$resolvedWs/"
+        val projectRelative = wsPrefix?.takeIf { abs.startsWith(it) }?.let { abs.removePrefix(it) }
+        val displayRelative = projectRelative?.let {
+            if (it == BrandPaths.Legacy.CONFIG_DIR_NAME || it.startsWith("${BrandPaths.Legacy.CONFIG_DIR_NAME}/")) {
+                BrandPaths.CONFIG_DIR_NAME + it.removePrefix(BrandPaths.Legacy.CONFIG_DIR_NAME)
+            } else it
+        }
         return when {
             rootPath != null && abs == rootPath -> CONTAINER_ROOT
-            wsPrefix != null && abs.startsWith(wsPrefix) -> CONTAINER_ROOT + "/" + abs.removePrefix(wsPrefix)
+            displayRelative != null -> CONTAINER_ROOT + "/" + displayRelative
             // 展开后的 $HOME/workspace 形式也还原为 ~/workspace（bind mount 路径可能以绝对形式出现）
             raw == resolvedWs || abs == resolvedWs -> CONTAINER_ROOT
             raw.startsWith(resolvedWsPrefix) -> CONTAINER_ROOT + "/" + raw.removePrefix(resolvedWsPrefix)
