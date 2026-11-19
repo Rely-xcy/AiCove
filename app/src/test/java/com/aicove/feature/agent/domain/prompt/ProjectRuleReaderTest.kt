@@ -144,7 +144,7 @@ class ProjectRuleReaderTest {
         val workspaceRepository = mockk<WorkspaceRepository>()
         every { workspaceRepository.currentPathOrNull() } returns ws.absolutePath
         val installer = mockk<ContainerInstaller>()
-        every { installer.aicoveDir } returns aicode
+        every { installer.aicodeDir } returns aicode
         every { installer.rootfsDirFor(any()) } returns File(aicode, "rootfs")
         val settings = mockk<ContainerSettingsRepository>()
         every { settings.activeProfileIdFlow } returns emptyFlow()
