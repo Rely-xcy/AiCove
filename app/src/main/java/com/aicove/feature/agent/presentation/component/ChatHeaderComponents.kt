@@ -246,7 +246,7 @@ internal fun ChatHeader(
                                     }
                                     .drawWithContent {
                                         clipRect(bottom = size.height * shelfProgress.value.coerceIn(0f, 1f)) {
-                                            drawContent()
+                                            this@drawWithContent.drawContent()
                                         }
                                     }
                             ) {
