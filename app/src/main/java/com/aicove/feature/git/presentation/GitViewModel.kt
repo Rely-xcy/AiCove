@@ -25,6 +25,7 @@ import com.aicove.feature.git.presentation.component.DiffRow
 import com.aicove.feature.git.presentation.component.highlightCode
 import com.aicove.feature.git.presentation.component.inferSyntaxLanguage
 import com.aicove.feature.settings.data.repository.AppThemeMode
+import com.aicove.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicove.feature.settings.data.repository.ThemeSettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -56,6 +57,7 @@ class GitViewModel @Inject constructor(
     private val repository: GitRepository,
     @param:ApplicationContext private val context: Context,
     private val themeSettings: ThemeSettingsRepository,
+    private val languageSettings: LanguageSettingsRepository,
     private val agentWorkflow: AgentWorkflow
 ) : ViewModel() {
 
@@ -344,7 +346,8 @@ class GitViewModel @Inject constructor(
                     _state.update { it.copy(generatingCommitMessage = false, toast = context.getString(R.string.git_toast_no_diff_for_commit)) }
                     return@launch
                 }
-                val message = agentWorkflow.generateCommitMessage(diff)
+                val language = languageSettings.snapshot() ?: context.resources.configuration.locales[0].toLanguageTag()
+                val message = agentWorkflow.generateCommitMessage(diff, language)
                 _state.update { it.copy(generatingCommitMessage = false) }
                 if (!message.isNullOrBlank()) {
                     onResult(message)

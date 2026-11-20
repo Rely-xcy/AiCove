@@ -15,7 +15,7 @@ Generate a brief title that helps the user find this conversation later.
 - Vary phrasing; avoid patterns like always starting with "Analyzing".
 - When a file is mentioned, focus on WHAT the user wants to do with it, not that they shared it.
 - Keep exact: technical terms, numbers, filenames, HTTP codes.
-- Remove: the, this, my, a, an.
+- Remove unnecessary filler only when the title still reads naturally. Do not mechanically strip articles or alter words inside technical terms and filenames.
 - Never assume the tech stack.
 - Never use tools.
 - Never respond to questions; only generate a title.

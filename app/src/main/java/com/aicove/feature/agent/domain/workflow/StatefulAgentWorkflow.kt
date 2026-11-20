@@ -1838,7 +1838,7 @@ class StatefulAgentWorkflow @Inject constructor(
         FileLogger.w(TAG, "生成会话标题失败", e)
     }.getOrNull()
 
-    override suspend fun generateCommitMessage(diff: String): String? = runCatching {
+    override suspend fun generateCommitMessage(diff: String, languageTag: String): String? = runCatching {
         if (diff.isBlank()) return@runCatching null
         val provider = getEffectiveProvider(sessionId = null)
         val prompt = promptProvider.resolvePrompt(COMMIT_GENERATOR_FILE)
@@ -1846,7 +1846,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val truncatedDiff = diff.take(12000)
         val resp = provider.complete(
             systemPrompt = prompt,
-            messages = listOf(AgentMessage.UserMessage(content = "git diff:\n```diff\n$truncatedDiff\n```")),
+            messages = listOf(AgentMessage.UserMessage(content = "Output language: $languageTag\n\ngit diff:\n```diff\n$truncatedDiff\n```")),
             tools = emptyList(),
             // 稳定前缀 = commit-generator.md（约 222 token）< 1024 → 尾部断点纯浪费。
             cacheTail = false

@@ -184,7 +184,7 @@ interface AgentWorkflow {
      * @param diff 变更内容差异文本（`git diff --cached` 或工作区差异）
      * @return 建议的提交说明，失败返回 null。
      */
-    suspend fun generateCommitMessage(diff: String): String?
+    suspend fun generateCommitMessage(diff: String, languageTag: String): String?
 
     /**
      * 用指定提示词资产文件做一次独立模型调用（不占主对话 provider、不写入会话消息），
