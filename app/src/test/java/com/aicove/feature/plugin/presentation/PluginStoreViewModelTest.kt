@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.plugin.data.PluginRecord
 import com.aicove.feature.plugin.data.index.PluginIndexClient
+import com.aicove.feature.plugin.data.index.PluginIndexDefaults
 import com.aicove.feature.plugin.data.index.PluginIndexDocument
 import com.aicove.feature.plugin.data.index.PluginIndexPlugin
 import com.aicove.feature.plugin.data.index.PluginIndexSelection
@@ -83,6 +84,19 @@ class PluginStoreViewModelTest {
             Dispatchers.resetMain()
             unmockkObject(FileLogger)
         }
+    }
+
+    @Test
+    fun allSources_mergesItemsAndKeepsTheirSourceIdentity() {
+        selection.value = selection.value.copy(selectedSourceId = PluginIndexDefaults.ALL_SOURCES_ID)
+        coEvery { client.fetchIndex(first, false) } returns snapshot("shared.plugin", version = "1.0.0")
+        coEvery { client.fetchIndex(second, false) } returns snapshot("shared.plugin", version = "2.0.0")
+
+        start()
+
+        val items = viewModel.state.value.items
+        assertEquals(listOf(first.id, second.id), items.map { it.source.id })
+        assertEquals(listOf("1.0.0", "2.0.0"), items.map { it.plugin.version })
     }
 
     @Test
