@@ -87,16 +87,21 @@ class PluginStoreViewModelTest {
     }
 
     @Test
-    fun allSources_mergesItemsAndKeepsTheirSourceIdentity() {
-        selection.value = selection.value.copy(selectedSourceId = PluginIndexDefaults.ALL_SOURCES_ID)
+    fun allSources_mergesBuiltInAndCustomItemsAndKeepsTheirSourceIdentity() {
+        val custom = PluginIndexSource("custom", "Custom", "https://example.com/custom/index.json", false)
+        selection.value = PluginIndexSelection(
+            listOf(first, second, custom),
+            PluginIndexDefaults.ALL_SOURCES_ID
+        )
         coEvery { client.fetchIndex(first, false) } returns snapshot("shared.plugin", version = "1.0.0")
         coEvery { client.fetchIndex(second, false) } returns snapshot("shared.plugin", version = "2.0.0")
+        coEvery { client.fetchIndex(custom, false) } returns snapshot("shared.plugin", version = "3.0.0")
 
         start()
 
         val items = viewModel.state.value.items
-        assertEquals(listOf(first.id, second.id), items.map { it.source.id })
-        assertEquals(listOf("1.0.0", "2.0.0"), items.map { it.plugin.version })
+        assertEquals(listOf(first.id, second.id, custom.id), items.map { it.source.id })
+        assertEquals(listOf("1.0.0", "2.0.0", "3.0.0"), items.map { it.plugin.version })
     }
 
     @Test
