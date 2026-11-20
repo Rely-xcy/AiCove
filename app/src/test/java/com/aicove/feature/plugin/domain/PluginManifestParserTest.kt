@@ -152,7 +152,11 @@ class PluginManifestParserTest {
 
     @Test
     fun identity_isValidated() {
-        assertRejected(base.replace("\"community.demo-kit\"", "\"Community.Demo\""), PluginErrorCode.FIELD_INVALID, "id")
+        val mixedCase = base.replace("\"id\": \"community.demo-kit\"", "\"id\": \"Community.Demo\"")
+        assertRejected(mixedCase, PluginErrorCode.FIELD_INVALID, "publisher")
+        val matchingPublisher = success(mixedCase.replace("\"publisher\": \"community\"", "\"publisher\": \"Community\""))
+        assertEquals("Community.Demo", matchingPublisher.id)
+        assertEquals("Community", matchingPublisher.publisher)
         assertRejected(base.replace("\"community.demo-kit\"", "\"demo\""), PluginErrorCode.FIELD_INVALID, "id")
         assertRejected(base.replace("\"community.demo-kit\"", "\"community/../demo\""), PluginErrorCode.FIELD_INVALID, "id")
         assertRejected(base.replace("\"publisher\": \"community\"", "\"publisher\": \"other\""), PluginErrorCode.FIELD_INVALID, "publisher")

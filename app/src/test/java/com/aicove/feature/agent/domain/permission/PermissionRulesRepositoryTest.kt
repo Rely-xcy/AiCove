@@ -1,6 +1,7 @@
 package com.aicove.feature.agent.domain.permission
 
 import android.content.Context
+import com.aicove.core.branding.BrandPaths
 import com.aicove.core.watch.ChangeDomain
 import com.aicove.core.watch.ChangeKind
 import com.aicove.core.watch.ChangeRoot
@@ -17,6 +18,7 @@ import com.aicove.feature.workspace.domain.model.Workspace
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -27,6 +29,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -45,6 +48,7 @@ class PermissionRulesRepositoryTest {
 
     private lateinit var repository: PermissionRulesRepository
     private lateinit var fileChangeHub: FileChangeHub
+    private lateinit var projectAicodeRoot: ProjectAicodeRoot
     private lateinit var globalDir: File
 
     /** 测试里手动投递给仓库的变更批次（收集发生在仓库自己的 IO 协程里）。 */
@@ -69,7 +73,7 @@ class PermissionRulesRepositoryTest {
         // 构造期求值的两个 val（currentProjectNameFlow / projectRulesFlow）都读 current，
         // 不桩就会在构造函数那一行抛 MockKException。
         every { workspaceRepository.current } returns MutableStateFlow<Workspace?>(null)
-        val projectAicodeRoot = mockk<ProjectAicodeRoot>()
+        projectAicodeRoot = mockk<ProjectAicodeRoot>()
         every { projectAicodeRoot.forPath(any()) } answers { projectConfigDir }
         // 严格 mock：本类只把 hub 交给仓库构造，只有「按域重读」那条用例会调 startWatching()。
         fileChangeHub = mockk<FileChangeHub>()
@@ -245,6 +249,53 @@ class PermissionRulesRepositoryTest {
 
         assertEquals(listOf(PermissionRule("writeFile", "*", PermissionDecision.DENY)), effective.rules)
         assertTrue(effective.projectRulesConfirmed)
+    }
+
+    @Test
+    fun currentProjectConfigRootLink_rulesLoadedThroughRealRootSelection() = runTest {
+        val ws = tempFolder.newFolder("ws-current")
+        val target = File(ws, "shared/config").apply { mkdirs() }
+        File(target.parentFile, "permissions.json").writeText("""{"permissions":{"deny":["writeFile"]}}""")
+        Files.createSymbolicLink(File(ws, ".aicove").toPath(), File("/root/workspace/shared/config").toPath())
+        Files.createSymbolicLink(File(target, "permissions.json").toPath(), File("../permissions.json").toPath())
+        useRealWorkspace(ws)
+        every { projectAicodeRoot.forPath(ws.path) } answers { BrandPaths.projectDirectory(ws.path) }
+
+        val effective = repository.loadEffectiveForCurrentProject()
+
+        assertEquals(listOf(PermissionRule("writeFile", "*", PermissionDecision.DENY)), effective.rules)
+        assertTrue(effective.projectRulesConfirmed)
+    }
+
+    @Test
+    fun legacyProjectConfigRootLink_rulesLoadedThroughRealRootSelection() = runTest {
+        val ws = tempFolder.newFolder("ws-legacy")
+        val target = File(ws, "shared/config").apply { mkdirs() }
+        File(target, "permissions.json").writeText("""{"permissions":{"deny":["writeFile"]}}""")
+        Files.createSymbolicLink(File(ws, ".aicode").toPath(), File("shared/config").toPath())
+        useRealWorkspace(ws)
+        every { projectAicodeRoot.forPath(ws.path) } answers { BrandPaths.projectDirectory(ws.path) }
+
+        val effective = repository.loadEffectiveForCurrentProject()
+
+        assertEquals(listOf(PermissionRule("writeFile", "*", PermissionDecision.DENY)), effective.rules)
+        assertTrue(effective.projectRulesConfirmed)
+    }
+
+    @Test
+    fun externalProjectConfigRoot_realRootSelectionFailsInsteadOfReturningEmptyRules() {
+        val ws = tempFolder.newFolder("ws-external")
+        val outside = tempFolder.newFolder("external-config")
+        File(outside, "permissions.json").writeText("""{"permissions":{"allow":["writeFile"]}}""")
+        Files.createSymbolicLink(File(ws, ".aicove").toPath(), outside.toPath())
+        useRealWorkspace(ws)
+        every { projectAicodeRoot.forPath(ws.path) } answers { BrandPaths.projectDirectory(ws.path) }
+
+        assertThrows(IOException::class.java) {
+            runBlocking { repository.loadEffectiveForCurrentProject() }
+        }
+        assertEquals(listOf("permissions.json"), outside.list()!!.toList())
+        assertFalse(File(ws, ".aicode").exists())
     }
 
     @Test

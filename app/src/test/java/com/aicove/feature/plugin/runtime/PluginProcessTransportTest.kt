@@ -32,7 +32,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -100,7 +99,7 @@ class PluginProcessTransportTest {
             assertEquals(baseline + 1, pendingCount())
             request.cancel(cancellation)
             runUntil { request.isCompleted }
-            assertSame(cancellation, observed)
+            assertCancellation(cancellation, observed)
             assertEquals(baseline, pendingCount())
             assertFalse(process.destroyed)
         }
@@ -128,7 +127,7 @@ class PluginProcessTransportTest {
             assertTrue(process.written.isEmpty())
             request.cancel(cancellation)
             runUntil { request.isCompleted }
-            assertSame(cancellation, observed)
+            assertCancellation(cancellation, observed)
             assertEquals(0, pendingCount())
             assertTrue(process.written.isEmpty())
             assertFalse(process.destroyed)
@@ -143,7 +142,7 @@ class PluginProcessTransportTest {
         process.writeFailure = cancellation
         val request = requestAsync()
         runUntil { request.isCompleted }
-        assertSame(cancellation, request.await().exceptionOrNull())
+        assertCancellation(cancellation, request.await().exceptionOrNull())
         assertEquals(0, pendingCount())
         assertFalse(process.destroyed)
     }
@@ -214,6 +213,12 @@ class PluginProcessTransportTest {
         val next = requestAsync()
         runUntil { next.isCompleted }
         assertEquals("PLUGIN_CLOSED", (next.await().exceptionOrNull() as PluginProcessException).code)
+    }
+
+    private fun assertCancellation(expected: CancellationException, actual: Throwable?) {
+        // Stack trace recovery can copy the exception, but must not wrap it in a transport error.
+        assertEquals(expected.javaClass, actual?.javaClass)
+        assertEquals(expected.message, actual?.message)
     }
 
     private fun requestAsync(timeoutMs: Long = 120_000) = requests.async {

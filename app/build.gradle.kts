@@ -85,6 +85,31 @@ val syncAiDocs = tasks.register<Sync>("syncAiDocs") {
     into(layout.buildDirectory.dir("generated/aiDocs/docs"))
 }
 
+// 本机调试包同样可被反编译；仅用可撤销的专用 Inbox 测试凭据。
+fun pluginInboxBuildConfigValue(name: String): String {
+    val value = providers.environmentVariable(name)
+        .orElse(providers.gradleProperty(name))
+        .getOrElse("")
+        .trim()
+    return buildString {
+        append('"')
+        for (char in value) {
+            when (char) {
+                '\\', '"' -> append('\\').append(char)
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (char.isISOControl()) {
+                    append("\\u").append(char.code.toString(16).padStart(4, '0'))
+                } else {
+                    append(char)
+                }
+            }
+        }
+        append('"')
+    }
+}
+
 android {
     namespace = "com.aicove"
     compileSdk = 36
@@ -116,6 +141,8 @@ android {
         targetSdk = 28
         versionCode = gitCommitCount()
         versionName = gitVersionName()
+        buildConfigField("String", "PLUGIN_INBOX_REPO", "\"\"")
+        buildConfigField("String", "PLUGIN_INBOX_TOKEN", "\"\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -176,6 +203,11 @@ android {
         // release 已解压的容器 rootfs 与工作区项目在 debug 下不可见（需重新解压/clone），属预期隔离行为。
         debug {
             applicationIdSuffix = ".debug"
+            // CI、Beta 与正式包不携带写入凭据；只给维护者的本机调试开放。
+            if (!providers.environmentVariable("CI").isPresent) {
+                buildConfigField("String", "PLUGIN_INBOX_REPO", pluginInboxBuildConfigValue("PLUGIN_INBOX_REPO"))
+                buildConfigField("String", "PLUGIN_INBOX_TOKEN", pluginInboxBuildConfigValue("PLUGIN_INBOX_TOKEN"))
+            }
         }
         release {
             isMinifyEnabled = true
@@ -234,6 +266,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
         // UserService 走 AIDL 跨进程接口（app/src/main/aidl），显式开启以免依赖 AGP 默认值。
         aidl = true

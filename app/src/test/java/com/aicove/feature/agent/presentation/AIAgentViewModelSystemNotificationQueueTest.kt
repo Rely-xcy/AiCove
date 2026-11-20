@@ -1,6 +1,7 @@
 package com.aicove.feature.agent.presentation
 
 import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.viewModelScope
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.RootfsSource
@@ -9,6 +10,7 @@ import com.aicove.feature.agent.domain.notification.AgentNotificationFormatter
 import com.aicove.feature.agent.domain.notification.AgentNotificationKind
 import com.aicove.feature.agent.domain.notification.NotificationOutcome
 import com.aicove.feature.agent.domain.notification.PendingNotification
+import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aicove.feature.terminal.domain.TabFinishedEvent
 import com.aicove.feature.terminal.domain.TerminalSessionManager
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
@@ -21,6 +23,7 @@ import io.mockk.runs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,6 +35,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -59,6 +63,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
 
     private lateinit var viewModel: AIAgentViewModel
     private lateinit var notificationCenter: AgentNotificationCenter
+    private val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
     private val mainDispatcher = UnconfinedTestDispatcher()
     /** 后台命令完成事件流：真实的 [TabFinishedEvent] 从这里进 [AIAgentViewModel.handleBackgroundCommandFinished]。 */
     private val tabFinishedEvents = MutableSharedFlow<TabFinishedEvent>(extraBufferCapacity = 1)
@@ -143,6 +148,35 @@ class AIAgentViewModelSystemNotificationQueueTest {
         assertEquals("term-9", notificationCenter.peek(SID).single().sourceId)
     }
 
+    @Test
+    fun stopEchoesTheEditedQueuedRequestWhileHistoryIsStillLoading() = runBlocking {
+        val historyStarted = CompletableDeferred<Unit>()
+        coEvery { persistence.buildHistory(any(), any()) } coAnswers {
+            historyStarted.complete(Unit)
+            awaitCancellation()
+        }
+        markSessionBusy()
+        val attachment = AgentAttachment("note.txt", "/workspace/note.txt", "/local/note.txt", "text/plain", 2L, false)
+        viewModel.enqueueAgentRequest(
+            request = "original",
+            projectRoot = WORKSPACE,
+            targetSessionId = SID,
+            clientMessageId = "queued-user",
+            inputAttachments = listOf(attachment)
+        )
+        val queued = viewModel.queuedRequests.value.single()
+        viewModel.updateQueuedRequest(queued.id, "edited")
+        assertTrue(viewModel.pendingUserMessages[SID].isEmpty())
+
+        viewModel.stopAgent()
+        withTimeout(3_000) { historyStarted.await() }
+        assertTrue(viewModel.queuedRequests.value.isEmpty())
+        assertEquals(PendingUserMessage("queued-user", "edited", listOf(attachment)), viewModel.pendingUserMessages[SID].single())
+        viewModel.selectSession("other-session")
+        assertTrue(viewModel.pendingUserMessages["other-session"].isEmpty())
+        assertFalse(viewModel.pendingUserMessages[SID].isEmpty())
+    }
+
     private fun backgroundTaskNotification(tabId: String) = PendingNotification(
         kind = AgentNotificationKind.BACKGROUND_TASK,
         sourceId = tabId,
@@ -178,8 +212,10 @@ class AIAgentViewModelSystemNotificationQueueTest {
         toolPermissionManager = mockk(relaxed = true),
         askUserQuestionManager = mockk(relaxed = true),
         containerEngine = mockk(relaxed = true),
-        sessionUseCase = mockk(relaxed = true),
-        messagePersistenceUseCase = mockk(relaxed = true),
+        sessionUseCase = mockk(relaxed = true) {
+            coEvery { getSessionById(any()) } returns null
+        },
+        messagePersistenceUseCase = persistence,
         agentChatRequestBus = mockk(relaxed = true) {
             coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }
         },
@@ -195,6 +231,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
         slashCommandRegistry = mockk(relaxed = true) {
             // init 里 _currentWorkspace.collect 会立刻触发 refresh()：真实实现会扫技能目录。
             coEvery { refresh() } just runs
+            every { resolve(any()) } returns null
         },
         fileMentionRepository = mockk(relaxed = true),
         checkpointManager = mockk(relaxed = true),
@@ -228,6 +265,8 @@ class AIAgentViewModelSystemNotificationQueueTest {
         agentLiveNotificationManager = mockk(relaxed = true),
         approvalNotificationSettings = mockk(relaxed = true) { every { enabledFlow } returns MutableStateFlow(false) },
         agentApprovalNotificationManager = mockk(relaxed = true),
-        context = mockk<Context>(relaxed = true)
+        context = mockk<Context>(relaxed = true) {
+            every { getSystemService(Context.POWER_SERVICE) } returns mockk<PowerManager>(relaxed = true)
+        }
     )
 }

@@ -9,6 +9,7 @@ import com.aicove.feature.terminal.domain.TerminalTabStatus
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.resetMain
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -61,18 +63,14 @@ class PluginTerminalRunnerTest {
         val provider = mockk<TerminalSessionProvider>(relaxed = true)
         coEvery { provider.startPluginCommand(any(), any(), any()) } returns "term-1"
         every { provider.tabOutput("term-1") } returns null
-        every { provider.tabStatus("term-1") } returns TerminalTabStatus(running = true, exitCode = null)
-        val runner = runner(provider, activePlugin("demo.test"))
+        val runner = runner(provider, activePlugin("demo.test"), activePlugin("other.plugin"))
+        val tabId = runner.start("demo.test", "echo hi", null)
 
-        runner.start("demo.test", "echo hi", null)
+        val error = runCatching { runner.poll("other.plugin", tabId, 0) }.exceptionOrNull()
 
-        var rejected = false
-        try {
-            runner.poll("other.plugin", "term-1", 0)
-        } catch (e: PluginTerminalException) {
-            rejected = e.code == "TAB_NOT_OWNED"
-        }
-        assertTrue(rejected)
+        assertTrue("Expected PluginTerminalException, got $error", error is PluginTerminalException)
+        assertEquals("TAB_FORBIDDEN", (error as PluginTerminalException).code)
+        verify(exactly = 0) { provider.tabStatus(tabId) }
     }
 
     @Test

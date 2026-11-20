@@ -77,17 +77,22 @@ class RemoteConfigMigrationFileSystemTest {
     @Test
     fun remoteOldOnlyMigrationUsesRenameAndOldAliasWithoutReadingPluginBytes() {
         val remote = Fixture()
-        remote.directory("/home/test/.aicode")
-        remote.file("/home/test/.aicode/plugin", "original".toByteArray())
-        val result = ConfigMigration(RemoteConfigMigrationFileSystem(remote.client))
-            .migrate("/home/test/.aicode", "/home/test/.aicove")
+        val fs = RemoteConfigMigrationFileSystem(remote.client)
+        val old = "/home/test/.aicode"
+        val new = "/home/test/.aicove"
+        val original = "original".toByteArray()
+        remote.directory(old)
+        remote.file("$old/plugin", original)
+
+        val result = ConfigMigration(fs).migrate(old, new)
+
         assertEquals(ConfigMigrationStatus.MIGRATED, result.status)
-        assertArrayEquals("original".toByteArray(), remote.entries.getValue("/home/test/.aicove/plugin").bytes)
-        assertEquals("/home/test/.aicove", remote.entries.getValue("/home/test/.aicode").link)
+        verify(exactly = 1) { remote.client.rename(old, new) }
+        assertArrayEquals(original, remote.entries.getValue("$new/plugin").bytes)
+        assertEquals(".aicove", remote.entries.getValue(old).link)
+        assertEquals(new, fs.realPath(old))
         assertTrue(remote.readPaths.none { it.endsWith("/plugin") })
-        assertEquals(ConfigMigrationStatus.ALREADY_MIGRATED,
-            ConfigMigration(RemoteConfigMigrationFileSystem(remote.client))
-                .migrate("/home/test/.aicode", "/home/test/.aicove").status)
+        assertEquals(ConfigMigrationStatus.ALREADY_MIGRATED, ConfigMigration(fs).migrate(old, new).status)
     }
 
     @Test

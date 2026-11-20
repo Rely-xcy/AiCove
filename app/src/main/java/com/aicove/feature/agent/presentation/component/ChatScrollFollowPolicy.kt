@@ -25,15 +25,18 @@ internal fun shouldCalibrateToAnchor(
 
 /**
  * 悬浮输入层实测高度能否提交给 LazyColumn 的底部安全区。
- * 用户浏览历史或任何滚动仍在进行时必须冻结；否则 contentPadding 重测会修正锚点并造成跳动。
+ * 滚动期间冻结以免重测抢锚点；停稳后收回多余留白，否则收起面板后会一直保留旧高度。
  */
 internal fun shouldCommitInputBarReserve(
     followBottom: Boolean,
     userScrollGesture: Boolean,
     pointerDown: Boolean,
     nestedFling: Boolean,
-    scrollInProgress: Boolean
-): Boolean = followBottom && !userScrollGesture && !pointerDown && !nestedFling && !scrollInProgress
+    scrollInProgress: Boolean,
+    currentReservePx: Int,
+    measuredReservePx: Int
+): Boolean = (followBottom || measuredReservePx < currentReservePx) &&
+    !userScrollGesture && !pointerDown && !nestedFling && !scrollInProgress
 
 /**
  * 刚跑完的那一轮要不要强行保持展开。

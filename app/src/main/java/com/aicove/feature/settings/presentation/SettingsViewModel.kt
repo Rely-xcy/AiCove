@@ -61,7 +61,7 @@ import com.aicove.feature.settings.data.remote.ApkDownloadResult
 import com.aicove.feature.settings.data.remote.ApkDownloader
 import com.aicove.feature.settings.data.remote.ApkVerifier
 import com.aicove.feature.settings.data.remote.ApkVerifyResult
-import com.aicove.feature.settings.data.remote.ForkUpdateCheckService
+import com.aicove.feature.settings.data.remote.UpdateCheckService
 import com.aicove.feature.settings.data.remote.UpdateAsset
 import com.aicove.feature.settings.data.remote.UpdateCheckResult
 import com.aicove.feature.settings.data.repository.UpdateCheckSettingsRepository
@@ -439,8 +439,7 @@ class SettingsViewModel @Inject constructor(
     private val llmCallRecordDao: LlmCallRecordDao,
     private val modelCostCalculator: ModelCostCalculator,
     private val updateCheckSettingsRepository: UpdateCheckSettingsRepository,
-    // fork 专属：检查更新的数据源改成本 fork 站点的接口，客户端不再自己判新旧
-    private val forkUpdateCheckService: ForkUpdateCheckService,
+    private val updateCheckService: UpdateCheckService,
     private val apkDownloader: ApkDownloader,
     private val apkVerifier: ApkVerifier,
     private val providerDashboardRunner: ProviderDashboardRunner,
@@ -451,15 +450,7 @@ class SettingsViewModel @Inject constructor(
     private companion object {
         const val MAX_LOG_LINES = 1200
 
-        /**
-         * 本站点会发的包的 applicationId：只有它们能应用内覆盖安装自己那份包。
-         * 之前这里写的是上游的 `com.aicove`，而本 fork 的实际 applicationId 是 `Rely.aicove`，
-         * 导致 `inAppInstallSupported` 对所有变体恒 false —— 更新弹窗的下载按钮永远走不通。
-         * debug 包仍然不给入口：它覆盖安装会与正式包冲突。
-         *
-         * 只列改名后的 applicationId：旧 applicationId 的包是另一个应用，
-         * 与新包不能互相覆盖，列进来也不会让更新流程走通。
-         */
+        /** 仅发行包提供应用内更新入口；实际覆盖安装仍须通过包名、签名与版本校验。 */
         val RELEASE_APPLICATION_IDS = setOf("Rely.aicove", "Rely.aicove.beta")
         const val CALLS_PAGE_SIZE = 10
         const val STATS_PAGE_SIZE = 5
@@ -2047,7 +2038,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * 检查更新。手动模式（关于页点击）不受开关与每日限制；自动模式（主页启动）
      * 需开关开启且当天未检测过，失败时静默（不弹错误窗）。检测失败不记「当天已检」，
-     * 留到下次启动再试（fork 专属，见下方注释）。
+     * 留到下次启动再试。
      */
     fun checkUpdate(manual: Boolean) {
         val current = _updateCheckState.value
@@ -2071,9 +2062,8 @@ class SettingsViewModel @Inject constructor(
                 _updateCheckVisible.value = true
                 _updateCheckState.value = UpdateCheckUiState.Checking
             }
-            // fork 专属：数据源换成自建接口，按当前通道 + 本机 versionCode 问服务端；
-            // 新旧由服务端判（见 ForkUpdateCheckService）
-            val result = forkUpdateCheckService.checkForUpdate(
+            val result = updateCheckService.checkForUpdate(
+                currentVersion = currentVersionName(),
                 localVersionCode = currentVersionCode(),
                 channel = updateCheckSettingsRepository.channel
             )
@@ -2100,19 +2090,14 @@ class SettingsViewModel @Inject constructor(
                 channel = updateCheckSettingsRepository.channel,
                 result = result
             )
-            // fork 专属：失败不算「今天已检」——发布服务时通时不通，失败当天不再试等于白等一天，
-            // 下次启动重试一次。代价是失败当天每次冷启动多发一次请求（单次请求，非循环重试，10s 超时兜底）。
+            // 两个来源都失败时保留当天检查额度，允许下次启动再试。
             if (!manual && result !is UpdateCheckResult.Error) {
                 updateCheckSettingsRepository.markChecked()
             }
         }
     }
 
-    /**
-     * 应用内安装是否可用：只对正式包开放。beta/debug 变体的 applicationId 带后缀
-     * （`com.aicove.beta` / `com.aicove.debug`），装 GitHub 上的正式包等于「装上第二个 App」，
-     * 包名自检也会把它拦下——索性不给下载入口，省掉一次十几 MB 的白下载。
-     */
+    /** 正式与 Beta 发行包可应用内更新；安装前仍由校验器拦截不匹配的包。 */
     val inAppInstallSupported: Boolean
         get() = context.packageName in RELEASE_APPLICATION_IDS
 

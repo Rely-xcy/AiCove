@@ -884,7 +884,7 @@ fun AIChatPanel(
     onOpenPluginEntry: (PluginSlotEntry) -> Unit = {}
 ) {
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
-    val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
+    val messagesState = viewModel.messagesState.collectAsStateWithLifecycle().value
     val messages = messagesState.messages
     val pendingScroll by viewModel.pendingScrollMessage.collectAsStateWithLifecycle()
     // 子代理卡片：状态与动作经 CompositionLocal 下发给 task 工具行，避免逐层透传。
@@ -1000,35 +1000,9 @@ fun AIChatPanel(
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
-    // 已发出、还没在消息列表里就位的用户消息（乐观上屏）。发送时当场生成 id，尾巴 item 据此画气泡；
-    // 「什么时候退场」只认 id 相等（落库行 id / 队列条目的 clientMessageId），见 [resolvePendingUserMessages]。
-    // 按会话 remember：切会话即清空，不会把上一个会话的待落库气泡带过来。
-    var pendingUserMessages by remember(currentSessionId) {
-        mutableStateOf<List<PendingUserMessage>>(emptyList())
-    }
-    val persistedMessageIds = remember(messages) { messages.mapTo(HashSet<String>()) { it.id } }
+    val pendingUserMessages = viewModel.pendingUserMessages[currentSessionId]
     val queuedClientMessageIds = remember(queuedRequests) {
         queuedRequests.mapNotNullTo(HashSet<String>()) { it.clientMessageId }
-    }
-    // 已被 VM 丢弃（删除 / 插话 / 回退 / 全部停止）的 id：这些既不会落库也不会留在队列里，
-    // 不把 VM 记下的这一笔当判据，气泡就再也等不到退场信号。
-    val discardedClientMessageIds by viewModel.discardedClientMessageIds.collectAsStateWithLifecycle()
-    val visiblePendingUserMessages = resolvePendingUserMessages(
-        pending = pendingUserMessages,
-        persistedIds = persistedMessageIds,
-        queuedClientMessageIds = queuedClientMessageIds,
-        discardedClientMessageIds = discardedClientMessageIds
-    )
-    // 退场后同时把状态收拾干净：只靠 filter 的话，每次发送都会在列表里堆一条永不释放的条目。
-    LaunchedEffect(pendingUserMessages, persistedMessageIds, queuedClientMessageIds, discardedClientMessageIds) {
-        if (pendingUserMessages.isEmpty()) return@LaunchedEffect
-        val kept = resolvePendingUserMessages(
-            pending = pendingUserMessages,
-            persistedIds = persistedMessageIds,
-            queuedClientMessageIds = queuedClientMessageIds,
-            discardedClientMessageIds = discardedClientMessageIds
-        )
-        if (kept.size != pendingUserMessages.size) pendingUserMessages = kept
     }
     val listState = rememberLazyListState()
     // 贴底跟随开关。声明在这里（而不是滚动逻辑旁边）是因为列表结构构建也要读它：
@@ -1047,8 +1021,7 @@ fun AIChatPanel(
     // 贴底滚动留白：首帧测量前用兜底值（约输入框 + 间距），实测悬浮层高度后改为动态值，
     // 横幅/面板/输入框任何形态下最后一条消息都停在悬浮层上方不被遮挡。
     //
-    // 不采用「只增不减」：那会让面板收起后永久留下大块空白。实测值仍可增减，但只在列表贴底、
-    // 没有用户滚动时提交；浏览历史期间冻结安全区，避免 contentPadding 重测抢走滚动锚点。
+    // 预留增长只在贴底时提交；面板收起后，只要滚动停稳就可收回多余空间。
     val inputBarBottomReserveDp = 156.dp
     var floatingLayerHeightPx by remember { mutableStateOf(0) }
     // 输入框自身高度：授权面板的定位锚点（面板要紧贴输入框上沿，而不是屏幕底边）。
@@ -1057,8 +1030,7 @@ fun AIChatPanel(
         (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
         else inputBarBottomReserveDp.toPx()).toInt()
     }
-    // 列表安全区不能在用户滑动时跟着悬浮面板逐帧变化：contentPadding 一变，LazyColumn 会重测并
-    // 修正滚动锚点，表现就是「滑着滑着跳一下」。浏览历史时冻结旧值，回到底部后再提交最新实测值。
+    // 滚动期间冻结 contentPadding；重测会修正 LazyColumn 锚点，造成滑动跳位。
     var inputBarReservePx by remember { mutableStateOf(measuredInputBarReservePx) }
     val markdownCache = remember { MarkdownRenderCache() }
     // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
@@ -1148,20 +1120,32 @@ fun AIChatPanel(
             groupOverrides = toolGroupOverrideSnapshot,
             turnOverrides = turnOverridesForBuild,
             activeTurnKey = activeTurnKey,
-            sessionId = currentSessionId,
+            sessionId = messagesState.sessionId,
             turnKeys = stableTurnKeys,
         ))
     }
     val useAsyncItems = messages.size > ASYNC_CHAT_ITEMS_THRESHOLD
     var asyncItems by remember(currentSessionId, useAsyncItems) { mutableStateOf<AsyncChatItems?>(null) }
-    LaunchedEffect(chatItemsKey, useAsyncItems) {
-        if (!useAsyncItems) return@LaunchedEffect
-        val sessionId = currentSessionId
+    LaunchedEffect(chatItemsKey, useAsyncItems, messagesReady) {
+        if (!useAsyncItems || !messagesReady) return@LaunchedEffect
         val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { buildItems() }
-        asyncItems = AsyncChatItems(sessionId, built)
+        asyncItems = AsyncChatItems(messagesState.sessionId, built)
     }
-    val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && it.sessionId == currentSessionId }
-    val chatItems = readyAsyncItems?.items ?: remember(chatItemsKey) { buildItems() }
+    val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && messagesReady && it.sessionId == currentSessionId }
+    val chatItems = readyAsyncItems?.items ?: remember(chatItemsKey, messagesReady) {
+        if (messagesReady) buildItems() else emptyList()
+    }
+    val pendingIds = remember(pendingUserMessages) { pendingUserMessages.mapTo(HashSet()) { it.id } }
+    val settledUserIds = remember(chatItems, messages, messagesReady, pendingUserMessages) {
+        if (!messagesReady || pendingIds.isEmpty()) emptySet() else settledUserMessageIds(pendingUserMessages, chatItems) +
+            messages.asSequence().filter { it.isInterjection && it.id in pendingIds }.map { it.id }
+    }
+    val visiblePendingUserMessages = resolvePendingUserMessages(
+        pendingUserMessages, settledUserIds, queuedClientMessageIds
+    )
+    LaunchedEffect(currentSessionId, settledUserIds) {
+        currentSessionId?.let { viewModel.pendingUserMessages.acknowledge(it, settledUserIds) }
+    }
 
     // 预热队列：最近窗口里会走 Markdown 渲染的定稿正文。长文渲染的是分块切片（见 messageRenderItems），
     // 所以取 item.slice 而不是整条正文，否则预热写进去的缓存键与渲染时查的键对不上。
@@ -1643,10 +1627,10 @@ fun AIChatPanel(
         }
     }
 
-    // 只在列表正在贴底、且没有手指/惯性滚动时提交最新悬浮层高度。面板在浏览历史期间展开或
-    // 收起只更新 measuredInputBarReservePx，不触碰 LazyColumn 的 contentPadding；用户回底后一次对齐。
+    // 滚动期间冻结预留；停稳后允许收回面板或键盘收起留下的多余高度，避免历史页留下大片空白。
     LaunchedEffect(
         measuredInputBarReservePx,
+        inputBarReservePx,
         followBottom,
         userScrollGesture,
         pointerDown,
@@ -1659,7 +1643,9 @@ fun AIChatPanel(
                 userScrollGesture = userScrollGesture,
                 pointerDown = pointerDown,
                 nestedFling = nestedFling,
-                scrollInProgress = listState.isScrollInProgress
+                scrollInProgress = listState.isScrollInProgress,
+                currentReservePx = inputBarReservePx,
+                measuredReservePx = measuredInputBarReservePx
             )
         ) {
             inputBarReservePx = measuredInputBarReservePx
@@ -1842,17 +1828,16 @@ fun AIChatPanel(
     // 内容变化信号旁路：文本/思考/消息条数变化时立即校准一次，不等下一帧——
     // 与常驻校准循环互为补充，覆盖「无动画帧」的间隙，杜绝跟丢窗口。
     val latestMessageCount = rememberUpdatedState(messages.size)
+    val latestPendingUsers = rememberUpdatedState(visiblePendingUserMessages)
     LaunchedEffect(listState, messagesReady) {
         if (!messagesReady) return@LaunchedEffect
         snapshotFlow {
-            // 第 4 项是待落库用户气泡的字数：它长在尾巴 item 内，出现那一帧同样要把底部校准一次——
-            // 用户空闲时发出消息，isBusy 仍为 false（逐帧校准循环没在跑）、messages.size 也没变，
-            // 没有这一项就没有任何信号去把气泡从输入框后面拉出来。
+            // 乐观气泡先于 busy 和数据库消息变化；纯附件也必须触发贴底，不能只观察文字长度。
             listOf(
                 streamingText?.length ?: -1,
                 streamingReasoning?.length ?: -1,
-                messages.size,
-                pendingUserMessages.sumOf { it.text.length },
+                latestMessageCount.value,
+                latestPendingUsers.value,
             )
         }.collect { calibrateToAnchor() }
     }
@@ -1869,11 +1854,6 @@ fun AIChatPanel(
             // 先给这条消息定 id：它就是落库行的主键，乐观气泡与队列条目都拿它认领。
             // 同一段文本连发两次时两个 id 不同，先落库的那条不会把后发的那条顶掉。
             val clientMessageId = UUID.randomUUID().toString()
-            pendingUserMessages = pendingUserMessages + PendingUserMessage(
-                id = clientMessageId,
-                text = text,
-                attachments = agentAttachments
-            )
             // 统一走队列：AI 忙时入队（等本轮结束后自动发送下一条），空闲时直接发送。
             // 斜杠命令在 ViewModel 内（agent workflow 之前）分流执行，无需在此区分。
             viewModel.enqueueAgentRequest(
@@ -2190,6 +2170,9 @@ fun AIChatPanel(
                         // tailKind 为 NONE 时尾巴为空 Box（0 高度）。流结束落库后跟随 effect 会把新消息贴底。
                         item(key = "__active__", contentType = "tail") {
                             Column {
+                                visiblePendingUserMessages.forEach { pending ->
+                                    PendingUserMessageBubble(pending)
+                                }
                                 if (showReasoning) {
                                     // 流式实时：默认收起，折叠行跟着正在写的那一行滚动；点开看全文
                                     val reasoningLive = reasoningTiming != null && reasoningTiming?.second == null &&
@@ -2231,12 +2214,6 @@ fun AIChatPanel(
                                 // 工具参数仍在生成时，保留的思考或正文不能遮掉进度反馈。
                                 if (showToolPreparation && (tailKind == TailKind.NONE || tailKind == TailKind.STREAMING)) {
                                     ThinkingBubble(label = thinkingLabel)
-                                }
-                                // 待落库用户气泡：挂在尾巴 item 内而非 chatItems。
-                                // item 数不变 → 不会牵动 firstVisibleItemIndex 的 clamp（本 item 的注释说的就是那个坑），
-                                // 也天然拿不到「复制 / 更多 / 回退」操作行（那些按钮按消息 id 反查库，pending 的 id 库里还没有）。
-                                visiblePendingUserMessages.forEach { pending ->
-                                    PendingUserMessageBubble(pending)
                                 }
                             }
                         }

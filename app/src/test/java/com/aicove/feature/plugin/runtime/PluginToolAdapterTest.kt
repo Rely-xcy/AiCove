@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.runtime
 
+import com.aicove.R
 import com.aicove.feature.plugin.domain.LocalizedText
 import com.aicove.feature.plugin.domain.PluginRuntime
 import com.aicove.feature.plugin.domain.PluginTool
@@ -27,13 +28,12 @@ class PluginToolAdapterTest {
     fun toolDescriptionAndPermissionSummaryUseAppChineseLocale() = runTest {
         val runtime = mockk<PluginRuntimeManager>()
         val context = pluginTestContext("zh-Hans-CN")
-        every { context.getString(com.aicove.R.string.plugin_tool_permission_title) } returns "插件工具授权"
-        every { context.getString(com.aicove.R.string.plugin_tool_permission_summary, any(), any()) } answers {
-            "${firstArg<String>()} 请求：${secondArg<String>()}"
-        }
-        every { context.getString(com.aicove.R.string.plugin_tool_permission_details, any(), any(), any()) } answers {
-            "${firstArg<String>()}/${secondArg<String>()}/${thirdArg<String>()}"
-        }
+        every { context.getString(R.string.plugin_tool_permission_title) } returns "插件工具授权"
+        every { context.getString(R.string.plugin_tool_permission_summary, "网关插件", "连接网关") } returns
+            "网关插件 请求：连接网关"
+        every {
+            context.getString(R.string.plugin_tool_permission_details, "community.gateway", "连接网关", "参数预览")
+        } returns "community.gateway/连接网关/参数预览"
         val pluginTool = tool()
         val adapter = PluginToolAdapter(
             context,
@@ -57,6 +57,7 @@ class PluginToolAdapterTest {
         assertEquals(adapter.name, englishAdapter.name)
         assertEquals("Connect to the service", englishAdapter.description)
         val permission = adapter.buildPermissionRequest("call-1", emptyMap(), "参数预览")
+        assertEquals("插件工具授权", permission.title)
         assertEquals("网关插件 请求：连接网关", permission.summary)
         assertEquals("community.gateway/连接网关/参数预览", permission.details)
     }

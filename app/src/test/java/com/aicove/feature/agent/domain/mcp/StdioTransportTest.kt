@@ -8,6 +8,7 @@ import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.LinkedBlockingQueue
@@ -30,7 +31,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -85,7 +85,7 @@ class StdioTransportTest {
             assertEquals(baseline + 1, pendingCount())
             request.cancel(cancellation)
             runUntil { request.isCompleted }
-            assertSame(cancellation, observed)
+            assertCancellation(cancellation, observed)
             assertEquals(baseline, pendingCount())
             assertFalse(process.destroyed)
         }
@@ -111,7 +111,7 @@ class StdioTransportTest {
             assertTrue(process.written.isEmpty())
             request.cancel(cancellation)
             runUntil { request.isCompleted }
-            assertSame(cancellation, observed)
+            assertCancellation(cancellation, observed)
             assertEquals(0, pendingCount())
             assertTrue(process.written.isEmpty())
             assertFalse(process.destroyed)
@@ -126,7 +126,7 @@ class StdioTransportTest {
         process.writeFailure = cancellation
         val request = requestAsync()
         runUntil { request.isCompleted }
-        assertSame(cancellation, request.await().exceptionOrNull())
+        assertCancellation(cancellation, request.await().exceptionOrNull())
         assertEquals(0, pendingCount())
         assertFalse(process.destroyed)
     }
@@ -159,13 +159,21 @@ class StdioTransportTest {
 
     @Test
     fun writeFailurePreservesWrapperAndCause() = runBlocking {
-        val failure = IOException("broken pipe")
+        val rootCause = EOFException("peer closed stdin")
+        val failure = IOException("broken pipe", rootCause)
         process.writeFailure = failure
         val request = requestAsync()
         runUntil { request.isCompleted }
         val error = request.await().exceptionOrNull() as McpException
-        assertSame(failure, error.cause)
         assertEquals("[test] 写入 stdin 失败: broken pipe", error.message)
+        val writeCause = error.cause
+        assertEquals(failure.javaClass, writeCause?.javaClass)
+        assertEquals(failure.message, writeCause?.message)
+        // Stack trace recovery can insert an equivalent IOException before the underlying cause.
+        val observedRoot = generateSequence(writeCause) { it.cause }
+            .firstOrNull { it.javaClass != failure.javaClass || it.message != failure.message }
+        assertEquals(rootCause.javaClass, observedRoot?.javaClass)
+        assertEquals(rootCause.message, observedRoot?.message)
         assertEquals(0, pendingCount())
     }
 
@@ -201,6 +209,12 @@ class StdioTransportTest {
         val next = requestAsync()
         runUntil { next.isCompleted }
         assertEquals("[test] transport 已关闭", next.await().exceptionOrNull()?.message)
+    }
+
+    private fun assertCancellation(expected: CancellationException, actual: Throwable?) {
+        // Stack trace recovery can copy the exception, but must not wrap it in a transport error.
+        assertEquals(expected.javaClass, actual?.javaClass)
+        assertEquals(expected.message, actual?.message)
     }
 
     private fun requestAsync() = requests.async {

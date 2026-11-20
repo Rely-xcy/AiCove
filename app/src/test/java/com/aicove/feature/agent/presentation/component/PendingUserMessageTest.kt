@@ -1,16 +1,14 @@
 package com.aicove.feature.agent.presentation.component
 
+import com.aicove.feature.agent.presentation.AgentAttachment
+import com.aicove.feature.agent.presentation.AgentUIMessage
+import com.aicove.feature.agent.presentation.MessageRole
+import com.aicove.feature.agent.presentation.PendingUserMessage
+import com.aicove.feature.agent.presentation.PendingUserMessageStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 乐观上屏（待落库用户气泡）的退场判据：id 相等，共三条——落库行同 id、VM 入了队、VM 把这条标为作废。
- *
- * 发送时预生成的 id 就是这条消息落库行的主键，所以「气泡退场」= 「库里出现了同 id 的行」/「这条被 VM 入了队
- * （队列面板接手）」/「VM 明说这条已经丢掉了」。这条性质只由 [resolvePendingUserMessages] 负责，
- * 用例直接锁它——回退成「文本 + 时间戳」的相似匹配（见 sameTextSentTwice_isMatchedByIdNotText）会红。
- */
 class PendingUserMessageTest {
 
     private fun pending(id: String, text: String = "hi") = PendingUserMessage(id = id, text = text)
@@ -50,7 +48,7 @@ class PendingUserMessageTest {
 
     @Test
     fun interject_bubbleRetiresOnDiscardedSignal() {
-        // 丢弃路径二（插话转通知，interjectQueuedRequest）：落库的是通知消息（另一个随机 id），原 id 作废
+        // 插话以原 id 落库，但不作为独立用户气泡渲染。
         val resolving = listOf(pending("m1"))
         assertTrue(
             resolvePendingUserMessages(resolving, emptySet(), emptySet(), setOf("m1")).isEmpty()
@@ -97,6 +95,94 @@ class PendingUserMessageTest {
         val resolving = listOf(pending("m1", "再跑一次"), pending("m2", "再跑一次"))
         val kept = resolvePendingUserMessages(resolving, emptySet(), setOf("m2"), emptySet())
         assertEquals(listOf("m1"), kept.map { it.id })
+    }
+
+    @Test
+    fun databaseRowDoesNotRetireBubbleBeforeTheAsyncFrameDisplaysIt() {
+        val store = PendingUserMessageStore()
+        val message = AgentUIMessage(id = "m1", role = MessageRole.USER, content = "hi")
+        store.sending("session", pending("m1"))
+        val previousFrame = flattenChatProcesses(buildChatItems(emptyList(), emptyMap()))
+        val databaseMessages = listOf(message)
+
+        assertEquals("m1", databaseMessages.single().id)
+        store.acknowledge("session", renderedUserMessageIds(previousFrame))
+        assertEquals(listOf("m1"), store["session"].map { it.id })
+
+        val nextFrame = flattenChatProcesses(buildChatItems(databaseMessages, emptyMap()))
+        store.acknowledge("session", renderedUserMessageIds(nextFrame))
+        assertTrue(store["session"].isEmpty())
+    }
+
+    @Test
+    fun turnHeaderCannotClaimTheUserBubble() {
+        val messages = listOf(
+            AgentUIMessage(id = "m1", role = MessageRole.USER, content = "hi"),
+            AgentUIMessage(id = "t1", role = MessageRole.TOOL, content = "done")
+        )
+        val headers = buildChatItems(messages, emptyMap()).filter { it.turnHeader != null }
+        assertTrue(headers.isNotEmpty())
+        assertTrue(renderedUserMessageIds(headers).isEmpty())
+    }
+
+    @Test
+    fun consumedRequestKeepsItsEditedTextAndAttachmentsAcrossSessionChanges() {
+        val store = PendingUserMessageStore()
+        val attachment = AgentAttachment("note.txt", "/workspace/note.txt", "/local/note.txt", "text/plain", 2L, false)
+        val edited = PendingUserMessage("m1", "edited", listOf(attachment))
+        store.sending("session", edited)
+
+        assertTrue(store["other-session"].isEmpty())
+        assertEquals(listOf(edited), store["session"])
+        assertEquals(listOf(edited), resolvePendingUserMessages(store["session"], emptySet(), emptySet(), emptySet()))
+        store.acknowledge("other-session", setOf("m1"))
+        assertEquals(listOf(edited), store["session"])
+        store.acknowledge("session", setOf("m1"))
+        assertTrue(store["session"].isEmpty())
+    }
+
+    @Test
+    fun queuePanelHidesTheBubbleWithoutDestroyingItsHandoffState() {
+        val store = PendingUserMessageStore()
+        store.sending("session", pending("m1"))
+        assertTrue(resolvePendingUserMessages(store["session"], emptySet(), setOf("m1"), emptySet()).isEmpty())
+        assertEquals(listOf("m1"), store["session"].map { it.id })
+        assertEquals(listOf("m1"), resolvePendingUserMessages(store["session"], emptySet(), emptySet(), emptySet()).map { it.id })
+    }
+
+    @Test
+    fun returningToTheLatestPageDoesNotReplayOlderPersistedUsersAtTheTail() {
+        val store = PendingUserMessageStore()
+        store.sending("session", pending("older"))
+        store.persisted("session", "older", 100L)
+        store.sending("session", pending("still-sending"))
+        val latestPage = flattenChatProcesses(buildChatItems(listOf(
+            AgentUIMessage(id = "newer", role = MessageRole.USER, content = "next", timestamp = 200L)
+        ), emptyMap()))
+        store.acknowledge("session", settledUserMessageIds(store["session"], latestPage))
+        assertEquals(listOf("still-sending"), store["session"].map { it.id })
+    }
+
+    @Test
+    fun anOldAsyncFrameCannotRetireTheNewlyPersistedUser() {
+        val store = PendingUserMessageStore()
+        store.sending("session", pending("new-user"))
+        store.persisted("session", "new-user", 200L)
+        val previousFrame = flattenChatProcesses(buildChatItems(listOf(
+            AgentUIMessage(id = "older", role = MessageRole.USER, content = "previous", timestamp = 100L)
+        ), emptyMap()))
+        store.acknowledge("session", settledUserMessageIds(store["session"], previousFrame))
+        assertEquals(listOf("new-user"), store["session"].map { it.id })
+    }
+
+    @Test
+    fun rewindingOneSessionClearsOnlyItsPendingUsers() {
+        val store = PendingUserMessageStore()
+        store.sending("session", pending("rewound"))
+        store.sending("other", pending("keep"))
+        store.clear("session")
+        assertTrue(store["session"].isEmpty())
+        assertEquals(listOf("keep"), store["other"].map { it.id })
     }
 
     @Test

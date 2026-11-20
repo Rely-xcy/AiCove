@@ -1,5 +1,8 @@
 package com.aicove.feature.workspace.domain
 
+import com.aicove.core.branding.BrandPaths
+import com.aicove.core.branding.ConfigRootSelection
+import com.aicove.core.branding.LocalConfigMigrationFileSystem
 import com.aicove.feature.agent.domain.container.ContainerInstaller
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.RootfsSource
@@ -20,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.nio.file.FileSystemLoopException
 import java.nio.file.Files
 
@@ -152,9 +156,9 @@ class WorkspacePathMapperTest {
     }
 
     @Test
-    fun toContainerPath_aicode_mapsToAicodeRootForm() {
-        assertEquals("/root/.aicode", newMapper().toContainerPath(aicodeDir))
-        assertEquals("/root/.aicode/skills/x/SKILL.md", newMapper().toContainerPath("$aicodeDir/skills/x/SKILL.md"))
+    fun toContainerPath_configDir_mapsToCurrentConfigRoot() {
+        assertEquals("/root/.aicove", newMapper().toContainerPath(aicodeDir))
+        assertEquals("/root/.aicove/skills/x/SKILL.md", newMapper().toContainerPath("$aicodeDir/skills/x/SKILL.md"))
     }
 
     @Test
@@ -219,13 +223,133 @@ class WorkspacePathMapperTest {
     @Test
     fun resolveHostFile_projectConfigLink_mapsToTargetInsideWorkspace() {
         val mapper = filesystemMapper()
-        val projectRoot = mapper.toHostFile("project/.aicode").apply { mkdirs() }
-        Files.createSymbolicLink(mapper.toHostFile(".aicode").toPath(), File("/root/workspace/project/.aicode").toPath())
+        val workspace = mapper.toHostFile("~/workspace")
+        val projectRoot = File(workspace, "project/.aicode").apply { mkdirs() }
+        File(projectRoot, "permissions.json").writeText("legacy rules")
+        // Mapping the config root during setup would create the migrated directory before the link.
+        val legacyConfig = File(workspace, ".aicode")
+        Files.createSymbolicLink(legacyConfig.toPath(), File("/root/workspace/project/.aicode").toPath())
 
         assertEquals(
             File(projectRoot, "permissions.json"),
-            mapper.resolveHostFile(mapper.toHostFile(".aicode/permissions.json"))
+            mapper.resolveHostFile(File(legacyConfig, "permissions.json"))
         )
+        assertEquals(projectRoot, BrandPaths.projectDirectory(workspace.path))
+        assertEquals("legacy rules", mapper.resolveFile(".aicove/permissions.json").readText())
+    }
+
+    @Test
+    fun resolveFile_currentProjectRootLink_keepsChildLinksRelativeToPhysicalTarget() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val target = File(workspace, "shared/config").apply { mkdirs() }
+        File(target.parentFile, "permissions.json").writeText("shared rules")
+        Files.createSymbolicLink(File(workspace, ".aicove").toPath(), File("/root/workspace/shared/config").toPath())
+        Files.createSymbolicLink(File(target, "permissions.json").toPath(), File("../permissions.json").toPath())
+
+        assertEquals(target, BrandPaths.projectDirectory(workspace.path))
+        assertEquals(File(target.parentFile, "permissions.json"), mapper.resolveFile(".aicove/permissions.json"))
+        assertEquals("shared rules", mapper.resolveFile(".aicode/permissions.json").readText())
+    }
+
+    @Test
+    fun resolveFile_relativeProjectRootChain_resolvesParentSegmentsAfterLinks() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val target = File(workspace, "shared/config").apply { mkdirs() }
+        File(target, "permissions.json").writeText("relative rules")
+        File(workspace, "shared/sub").mkdirs()
+        Files.createSymbolicLink(File(workspace, "alias").toPath(), File("shared/sub").toPath())
+        Files.createSymbolicLink(File(workspace, ".aicode").toPath(), File("alias/../config").toPath())
+
+        assertEquals(target, BrandPaths.projectDirectory(workspace.path))
+        assertEquals("relative rules", mapper.resolveFile(".aicode/permissions.json").readText())
+    }
+
+    @Test
+    fun resolveFile_migratedProjectRoot_readsInternalContainerLinkThroughBothNames() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val old = File(workspace, ".aicode").apply { mkdir() }
+        val shared = File(workspace, "shared").apply { mkdir() }
+        File(shared, "permissions.json").writeText("migrated rules")
+        Files.createSymbolicLink(File(old, "permissions.json").toPath(), File("/root/workspace/shared/permissions.json").toPath())
+
+        assertEquals(File(workspace, ".aicove"), BrandPaths.projectDirectory(workspace.path))
+        assertTrue(Files.isSymbolicLink(old.toPath()))
+        assertEquals("migrated rules", mapper.resolveFile(".aicode/permissions.json").readText())
+        assertEquals("migrated rules", mapper.resolveFile(".aicove/permissions.json").readText())
+    }
+
+    @Test
+    fun projectConfigMigration_keepsMigratedRootWhenNewLinkIsDisplaced() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val old = File(workspace, ".aicode").apply { mkdir() }
+        File(old, "permissions.json").writeText("old rules")
+        val target = File(workspace, "shared/config").apply { mkdirs() }
+        File(target, "permissions.json").writeText("other rules")
+        Files.createSymbolicLink(File(workspace, ".aicove").toPath(), File("shared/config").toPath())
+
+        assertEquals(File(workspace, ".aicove"), BrandPaths.projectDirectory(workspace.path))
+        assertEquals("old rules", mapper.resolveFile(".aicove/permissions.json").readText())
+        assertEquals("other rules", File(target, "permissions.json").readText())
+    }
+
+    @Test
+    fun projectConfigRootLinks_rejectExternalTargetsBeforeMigration() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val outside = tmp.newFolder("workspace-other")
+        val externalFile = File(outside, "permissions.json").apply { writeText("external rules") }
+        val targets = listOf(
+            outside.path,
+            "../${outside.name}",
+            "/root/workspace-other",
+            "/root/workspace/../workspace-other",
+            "/root/.aicove",
+            "/etc"
+        )
+        for ((index, target) in targets.withIndex()) {
+            for (directory in listOf(".aicode", ".aicove")) {
+                val project = File(workspace, "project-$index-$directory").apply { mkdir() }
+                val link = File(project, directory)
+                Files.createSymbolicLink(link.toPath(), File(target).toPath())
+
+                assertThrows(IOException::class.java) { BrandPaths.projectDirectory(project.path) }
+                assertTrue(Files.isSymbolicLink(link.toPath()))
+                assertEquals(listOf(directory), project.list()!!.toList())
+            }
+        }
+        assertEquals("external rules", externalFile.readText())
+    }
+
+    @Test
+    fun projectConfigRootLink_rejectsEscapingParentLinkAndCycles() {
+        val mapper = filesystemMapper()
+        val workspace = mapper.toHostFile("~/workspace")
+        val outside = tmp.newFolder("outside-config")
+        File(outside, "config").mkdir()
+        Files.createSymbolicLink(File(workspace, "parent").toPath(), outside.toPath())
+        Files.createSymbolicLink(File(workspace, ".aicode").toPath(), File("parent/config").toPath())
+
+        assertThrows(IOException::class.java) { mapper.resolveFile(".aicode/permissions.json") }
+
+        val cyclic = File(workspace, "cyclic").apply { mkdir() }
+        Files.createSymbolicLink(File(cyclic, ".aicode").toPath(), File(".aicove").toPath())
+        Files.createSymbolicLink(File(cyclic, ".aicove").toPath(), File(".aicode").toPath())
+        assertThrows(FileSystemLoopException::class.java) { BrandPaths.projectDirectory(cyclic.path) }
+    }
+
+    @Test
+    fun nonProjectRootLink_stillRejectsUnvalidatedDirectory() {
+        val outside = tmp.newFolder("outside")
+        val old = File(tmp.root, "old")
+        Files.createSymbolicLink(old.toPath(), outside.toPath())
+
+        assertThrows(IOException::class.java) {
+            ConfigRootSelection(LocalConfigMigrationFileSystem()).select(old.path, File(tmp.root, "new").path)
+        }
     }
 
     @Test

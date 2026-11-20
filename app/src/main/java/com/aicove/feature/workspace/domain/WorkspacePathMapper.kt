@@ -187,14 +187,20 @@ class WorkspacePathMapper @Inject constructor(
                     continue
                 }
             }
-            val candidate = current.trimEnd('/') + "/" + part
-            val linkTarget = if (followFinalLink || pending.isNotEmpty()) linkTargetOf(toHostFile(candidate)) else null
+            var candidate = current.trimEnd('/') + "/" + part
+            val hostFile = toHostFile(candidate)
+            if (current == resolvedContainerRoot() &&
+                (part == BrandPaths.CONFIG_DIR_NAME || part == BrandPaths.Legacy.CONFIG_DIR_NAME)) {
+                // Root selection can consume a link; child links must remain relative to its physical target.
+                candidate = pathHomeResolver.expandHome(toContainerPath(hostFile.absolutePath))
+            }
+            val linkTarget = if (followFinalLink || pending.isNotEmpty()) linkTargetOf(hostFile) else null
             if (linkTarget == null) {
                 current = candidate
                 continue
             }
             if (++links > MAX_LINK_HOPS) throw FileSystemLoopException(path)
-            if (linkTarget.startsWith("/")) current = "/"
+            current = if (linkTarget.startsWith("/")) "/" else candidate.substringBeforeLast('/').ifEmpty { "/" }
             // 目标的各段先展开、再处理后面的段：提前归一化 `..` 会改变链接语义。
             linkTarget.split('/').filter { it.isNotEmpty() }.asReversed().forEach(pending::addFirst)
         }

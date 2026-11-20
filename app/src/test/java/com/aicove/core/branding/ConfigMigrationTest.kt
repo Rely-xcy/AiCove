@@ -297,12 +297,20 @@ class ConfigMigrationTest {
                 }
             }
         })
+        assertTrue("The failed attempt must preserve interruption", Thread.interrupted())
         assertFalse(first.completed)
-        assertTrue(Files.isDirectory(File(first.legacyArchive!!).toPath()))
+        val archive = File(first.legacyArchive!!)
+        assertTrue(Files.isDirectory(archive.toPath()))
+        assertEquals("old", File(archive, "settings").readText())
+        write(new, "settings", "edited after archive rename")
+
         val recovered = migrate(old, new)
+
         assertTrue(recovered.completed)
+        assertEquals(first.transactionDirectory, recovered.transactionDirectory)
         assertTrue(Files.isSymbolicLink(old.toPath()))
-        assertEquals("old", File(old, "settings").readText())
+        assertEquals("edited after archive rename", File(old, "settings").readText())
+        assertEquals("old", File(archive, "settings").readText())
     }
 
     @Test
@@ -550,7 +558,7 @@ class ConfigMigrationTest {
     }
 
     @Test
-    fun fastRenameAliasFailureRestoresOldAndNextAttemptUsesTheSameJournal() {
+    fun fastRenameAliasFailureKeepsNewRootAndNextAttemptUsesTheSameJournal() {
         val old = temp.newFolder("old")
         val new = File(temp.root, "new")
         write(old, "settings", "old")
@@ -566,12 +574,20 @@ class ConfigMigrationTest {
         }
         val first = migrate(old, new, fs)
         assertFalse(first.completed)
-        assertEquals(old.absolutePath, first.physicalRoot)
-        assertEquals("old", File(old, "settings").readText())
-        assertFalse(new.exists())
+        assertEquals("IO_FAILURE", first.failureCode)
+        assertEquals(new.absolutePath, first.physicalRoot)
+        assertFalse(Files.exists(old.toPath(), NOFOLLOW_LINKS))
+        assertEquals("old", File(new, "settings").readText())
+        assertNotNull(first.transactionDirectory)
+        write(new, "settings", "edited after fast rename")
+
         val second = migrate(old, new)
-        assertTrue(second.completed)
+
+        assertEquals(ConfigMigrationStatus.MIGRATED, second.status)
         assertEquals(first.transactionDirectory, second.transactionDirectory)
+        assertTrue(Files.isSymbolicLink(old.toPath()))
+        assertEquals(new.canonicalPath, old.canonicalPath)
+        assertEquals("edited after fast rename", File(old, "settings").readText())
     }
 
     @Test

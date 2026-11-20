@@ -290,6 +290,15 @@ fun CharSequence.hasVisibleContent(): Boolean {
 @Immutable
 data class RunningToolOutput(val messageId: String, val text: String, val toolName: String = "", val toolArgs: String = "")
 
+@Immutable
+internal data class PendingUserMessage(
+    val id: String,
+    val text: String,
+    val attachments: List<AgentAttachment> = emptyList(),
+    // 已落库行的时间上界，只用于识别掉出分页窗口的回显。
+    val persistedBefore: Long? = null
+)
+
 data class QueuedRequest(
     val id: String,
     val request: String,

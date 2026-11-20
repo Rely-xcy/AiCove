@@ -107,7 +107,7 @@ class PluginStoreViewModelTest {
     }
 
     @Test
-    fun switchingSource_clearsOldItemsErrorsAndRejectedCountBeforeNewLoad() = runBlocking {
+    fun switchingSource_clearsOldItemsErrorsAndRejectedCountBeforeNewLoad() = runBlocking<Unit> {
         val newResult = pendingResult()
         coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 3)
         coEvery { client.fetchIndex(first, true) } throws IOException("offline")
@@ -125,7 +125,7 @@ class PluginStoreViewModelTest {
         assertTrue(state.updatesByPluginId.isEmpty())
         assertNull(state.error)
         assertEquals(0, state.rejectedPluginCount)
-        newResult.complete(snapshot("second"))
+        assertTrue(newResult.complete(snapshot("second")))
     }
 
     @Test
@@ -164,16 +164,82 @@ class PluginStoreViewModelTest {
 
     @Test
     fun sameSourceOfflineRefresh_preservesVisibleItemsAndRejectedCount() {
-        coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 2)
+        val record = PluginRecord(
+            id = "first", version = "1.0.0", enabled = true, installedAt = 0,
+            origin = "index", archiveSha256 = "", manifestSha256 = "",
+            sourceId = first.id, indexUrl = first.indexUrl
+        )
+        val plugin = mockk<InstalledPlugin>()
+        every { plugin.id } returns record.id
+        every { plugin.record } returns record
+        installed.value = listOf(plugin)
+        coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 2, version = "2.0.0")
         coEvery { client.fetchIndex(first, true) } throws IOException("offline")
+        start()
+        val previous = viewModel.state.value
+        assertTrue(previous.updatesByPluginId.containsKey("first"))
+
+        viewModel.refresh()
+
+        assertEquals(previous.items, viewModel.state.value.items)
+        assertEquals(previous.updatesByPluginId, viewModel.state.value.updatesByPluginId)
+        assertEquals(2, viewModel.state.value.rejectedPluginCount)
+        assertEquals(PluginStoreErrorCode.NETWORK, viewModel.state.value.error?.code)
+        assertEquals("offline", viewModel.state.value.error?.detail)
+        assertFalse(viewModel.state.value.loading)
+        assertFalse(viewModel.state.value.refreshing)
+        coVerify(exactly = 1) { repository.markFetched(first.id, any()) }
+    }
+
+    @Test
+    fun sameSourceSuccessfulEmptyRefresh_clearsPreviousItemsAndRejectedCount() {
+        val empty = snapshot("unused").let {
+            it.copy(index = it.index.copy(plugins = emptyList()))
+        }
+        coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 2)
+        coEvery { client.fetchIndex(first, true) } returns empty
         start()
 
         viewModel.refresh()
 
-        assertEquals(listOf("first"), viewModel.state.value.items.map { it.plugin.id })
-        assertEquals(2, viewModel.state.value.rejectedPluginCount)
-        assertEquals(PluginStoreErrorCode.NETWORK, viewModel.state.value.error?.code)
+        assertTrue(viewModel.state.value.items.isEmpty())
+        assertTrue(viewModel.state.value.updatesByPluginId.isEmpty())
+        assertEquals(0, viewModel.state.value.rejectedPluginCount)
+        assertNull(viewModel.state.value.error)
         assertFalse(viewModel.state.value.loading)
+    }
+
+    @Test
+    fun changedAddressSameSource_failedLoadDoesNotReusePreviousCache() {
+        val changed = first.copy(indexUrl = second.indexUrl)
+        coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 2)
+        coEvery { client.fetchIndex(changed, false) } throws IOException("new address offline")
+        start()
+
+        selection.value = selection.value.copy(sources = listOf(changed, second))
+
+        assertEquals(first.id, viewModel.state.value.selectedSourceId)
+        assertTrue(viewModel.state.value.items.isEmpty())
+        assertTrue(viewModel.state.value.updatesByPluginId.isEmpty())
+        assertEquals(0, viewModel.state.value.rejectedPluginCount)
+        assertEquals("new address offline", viewModel.state.value.error?.detail)
+    }
+
+    @Test
+    fun sameAddressDifferentSource_failedLoadDoesNotReusePreviousCache() = runBlocking {
+        val sameAddress = second.copy(indexUrl = first.indexUrl)
+        selection.value = selection.value.copy(sources = listOf(first, sameAddress))
+        coEvery { client.fetchIndex(first, false) } returns snapshot("first", rejected = 2)
+        coEvery { client.fetchIndex(sameAddress, false) } throws IOException("second source offline")
+        start()
+
+        viewModel.selectSource(second.id)
+
+        assertEquals(second.id, viewModel.state.value.selectedSourceId)
+        assertTrue(viewModel.state.value.items.isEmpty())
+        assertTrue(viewModel.state.value.updatesByPluginId.isEmpty())
+        assertEquals(0, viewModel.state.value.rejectedPluginCount)
+        assertEquals("second source offline", viewModel.state.value.error?.detail)
     }
 
     @Test

@@ -1,86 +1,74 @@
 package com.aicove.feature.settings.data.remote
 
+import com.aicove.feature.settings.data.repository.UpdateChannel
+import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 检查更新的纯逻辑：判新只有 [shouldReportUpdate] 一条规则（以服务端结论为准，
- * 客户端不再自己算），以及弹窗文案怎么截断。
- */
 class ForkUpdateCheckServiceTest {
-
-    private companion object {
-        const val HINT = "（已截断）"
-    }
-
-    // ---- shouldReportUpdate ----
-
-    /** 该通道还没发布版（或发布版指向的文件已删）→ 静默。 */
     @Test
-    fun notReleased_staysSilent() {
-        assertFalse(shouldReportUpdate(released = false, hasUpdate = false, direction = "same"))
+    fun serverDecisionRemainsAuthoritative() {
         assertFalse(shouldReportUpdate(released = false, hasUpdate = true, direction = "up"))
-    }
-
-    /** 发布版在、服务端判了有更新、方向正常 → 提示。 */
-    @Test
-    fun releasedAndUp_reportsUpdate() {
+        assertFalse(shouldReportUpdate(released = true, hasUpdate = false, direction = "same"))
+        assertFalse(shouldReportUpdate(released = true, hasUpdate = true, direction = "down"))
+        assertFalse(shouldReportUpdate(released = true, hasUpdate = false, direction = ""))
         assertTrue(shouldReportUpdate(released = true, hasUpdate = true, direction = "up"))
     }
 
-    /** 方向是降级（站上那份比本机旧，用户装的是测试包）→ 静默，不能提示用户降级。 */
     @Test
-    fun directionDown_staysSilent() {
-        assertFalse(shouldReportUpdate(released = true, hasUpdate = true, direction = "down"))
-    }
-
-    /** 服务端说没有更新 / 同版本 → 静默。 */
-    @Test
-    fun sameVersion_staysSilent() {
-        assertFalse(shouldReportUpdate(released = true, hasUpdate = false, direction = "same"))
-    }
-
-    /** hasUpdate 缺失（老服务端或字段没给）→ 当没有更新，客户端不再自己算。 */
-    @Test
-    fun missingHasUpdate_treatedAsNoUpdate() {
-        assertFalse(shouldReportUpdate(released = true, hasUpdate = false, direction = ""))
-    }
-
-    // ---- previewChangelog ----
-
-    @Test
-    fun shortChangelog_isUntouched() {
-        val note = "第一行\n第二行"
-        assertEquals(note, previewChangelog(note, 16, HINT))
+    fun legacyResponseKeepsFullNoteAndLatestAsset() {
+        val obj = JsonParser.parseString(
+            """{"versionName":"1.3.0","versionCode":30,"note":"full log","noteShort":"preview",
+                "name":"latest.apk","path":"/dl/file/latest","sha256":"${"a".repeat(64)}","size":99}"""
+        ).asJsonObject
+        val note = (1..40).joinToString("\n") { "line$it" }
+        obj.addProperty("note", note)
+        val result = parseForkUpdateInfo(obj, 10, UpdateChannel.BETA, "empty")
+        assertEquals(1, result.updates.size)
+        assertEquals(note, result.updates.single().changelog)
+        assertTrue(result.changelog.contains("line40"))
+        assertEquals("https://rely-xfer.de5.net/dl/file/latest?dl=1", result.latestAsset?.url)
+        assertEquals("a".repeat(64), result.latestAsset?.sha256)
+        assertEquals(99L, result.latestAsset?.size)
     }
 
     @Test
-    fun longChangelog_keepsFirstLinesAndAppendsHint() {
-        val note = (1..30).joinToString("\n") { "line$it" }
-        val out = previewChangelog(note, 16, HINT)
-        assertEquals((1..16).joinToString("\n") { "line$it" } + "\n" + HINT, out)
-        assertFalse(out.contains("line17"))
+    fun historyIsFilteredSortedDeduplicatedAndNeverSuppliesDownloadTarget() {
+        val obj = JsonParser.parseString(
+            """{
+                "versionName":"1.4.0","versionCode":40,"note":"latest","url":"https://example.test/latest.apk",
+                "releases":[
+                    {"versionCode":20,"versionName":"1.2.0","channel":"beta","note":"second"},
+                    {"versionCode":30,"versionName":"1.3.0","channel":"beta","note":"third","url":"https://example.test/wrong.apk"},
+                    {"versionCode":30,"versionName":"duplicate","channel":"beta"},
+                    {"versionCode":40,"versionName":"duplicate latest","channel":"beta"},
+                    {"versionCode":50,"versionName":"future","channel":"beta"},
+                    {"versionCode":25,"versionName":"other channel","channel":"stable"},
+                    {"versionCode":10,"versionName":"installed","channel":"beta"},
+                    {"versionName":"unknown","channel":"beta"}
+                ]
+            }"""
+        ).asJsonObject
+        val result = parseForkUpdateInfo(obj, 10, UpdateChannel.BETA, "empty")
+        assertEquals(listOf("1.4.0", "1.3.0", "1.2.0"), result.updates.map { it.tag })
+        assertEquals("https://example.test/latest.apk", result.latestAsset?.url)
+        assertEquals(result.latestAsset?.url, result.downloadUrl)
+        assertTrue(result.updates.drop(1).all { it.asset == null })
+        assertFalse(result.changelog.contains("future"))
     }
 
     @Test
-    fun exactLineCount_isNotTruncated() {
-        val note = (1..16).joinToString("\n") { "line$it" }
-        assertEquals(note, previewChangelog(note, 16, HINT))
-    }
-
-    /** 站点 note 以一个换行收尾：末尾空行不该被算成一行，否则会白白多截一行。 */
-    @Test
-    fun trailingNewline_doesNotCountAsALine() {
-        val note = (1..16).joinToString("\n") { "line$it" } + "\n"
-        assertEquals((1..16).joinToString("\n") { "line$it" }, previewChangelog(note, 16, HINT))
-    }
-
-    /** 站点 note 里大量 ──── 分隔线照原样保留，不做二次加工。 */
-    @Test
-    fun separatorLines_arePreserved() {
-        val note = "标题\n────────\n正文"
-        assertEquals(note, previewChangelog(note, 16, HINT))
+    fun missingLatestUrlNeverUsesAnOlderDownload() {
+        val obj = JsonParser.parseString(
+            """{"versionCode":30,"title":"latest","releases":[
+                {"versionCode":20,"channel":"beta","url":"https://example.test/old.apk"}
+            ]}"""
+        ).asJsonObject
+        val result = parseForkUpdateInfo(obj, 10, UpdateChannel.BETA, "empty")
+        assertNull(result.latestAsset)
+        assertNull(result.downloadUrl)
     }
 }

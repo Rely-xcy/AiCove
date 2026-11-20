@@ -57,7 +57,7 @@ class RemoteAgentProvisionerTest {
 
     @Test
     fun `aarch64 选 arm64，默认目录用 HOME 展开`() = runBlocking {
-        val path = "~/.aicode/agent/aicode-agent-v1-linux-arm64"
+        val path = "~/.aicove/agent/aicode-agent-v1-linux-arm64"
         val fileAccess = mockk<FileAccessProvider>()
         every { fileAccess.fileSize(path) } returns binary.size.toLong()
 
@@ -74,11 +74,12 @@ class RemoteAgentProvisionerTest {
         val installation = provisioner.ensureInstalled()
 
         assertEquals(RemoteAgentArch.ARM64, installation.arch)
+        assertEquals(path, installation.binaryPath)
         assertFalse("大小一致应跳过上传", installation.uploaded)
         assertEquals(
             listOf(
                 "uname -m",
-                "chmod +x \"\$HOME/.aicode/agent/aicode-agent-v1-linux-arm64\""
+                "chmod +x \"\$HOME/.aicove/agent/aicode-agent-v1-linux-arm64\""
             ),
             commands
         )

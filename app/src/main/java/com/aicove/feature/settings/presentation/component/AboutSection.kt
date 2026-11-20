@@ -85,7 +85,6 @@ internal fun AboutSection(
     val termsUrl = stringResource(R.string.agreement_terms_url)
     val privacyUrl = stringResource(R.string.agreement_privacy_url)
 
-    // 通过 PackageManager 读取 versionName/versionCode（项目未开启 BuildConfig）
     val appInfo = remember {
         runCatching {
             val pm = context.packageManager
@@ -114,6 +113,7 @@ internal fun AboutSection(
     ) {
         AboutHeaderCard(appName = stringResource(R.string.app_name), appIcon = appIcon)
 
+        SettingsGroupHeader(stringResource(R.string.muse_update_settings))
         SettingsGroup {
             // 版本：点击手动检查更新
             SettingsRow(
@@ -177,7 +177,10 @@ internal fun AboutSection(
                     )
                 }
             )
-            SettingsDivider()
+        }
+
+        SettingsGroupHeader(stringResource(R.string.muse_update_project_links))
+        SettingsGroup {
             // GitHub 仓库
             SettingsRow(
                 icon = FeatherIcons.Github,

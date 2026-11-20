@@ -1,7 +1,15 @@
 package com.aicove.feature.agent.presentation.component
 
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -43,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,8 +174,17 @@ internal fun ChatHeader(
                         )
                     }
                 }
-                // 顶栏只留一个入口：新建、切换工作区、终端、Git 都在这个下拉里。
+                IconButton(onClick = onNewChat, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        FeatherIcons.Plus,
+                        contentDescription = stringResource(R.string.chat_new_session),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 var workbenchExpanded by remember { mutableStateOf(false) }
+                val shelfVisibility = remember { MutableTransitionState(false) }
+                shelfVisibility.targetState = workbenchExpanded
                 val density = LocalDensity.current
                 Box {
                     val moreBtnInteraction = remember { MutableInteractionSource() }
@@ -183,7 +199,7 @@ internal fun ChatHeader(
                         label = "more-btn-scale"
                     )
                     IconButton(
-                        onClick = { workbenchExpanded = true },
+                        onClick = { workbenchExpanded = !workbenchExpanded },
                         modifier = Modifier
                             .size(36.dp)
                             .graphicsLayer { scaleX = moreBtnScale; scaleY = moreBtnScale },
@@ -196,9 +212,7 @@ internal fun ChatHeader(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    // 自绘弹出菜单：DropdownMenu 会强制带 MenuDefaults 的柔和阴影，
-                    // 这里要的是无阴影的平面卡片，与 muse 顶栏一致。
-                    if (workbenchExpanded) {
+                    if (shelfVisibility.currentState || shelfVisibility.targetState) {
                         Popup(
                             alignment = Alignment.TopEnd,
                             offset = IntOffset(
@@ -208,89 +222,79 @@ internal fun ChatHeader(
                             onDismissRequest = { workbenchExpanded = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            var isEntering by remember { mutableStateOf(true) }
-                            LaunchedEffect(Unit) { isEntering = false }
-                            val shelfScale by animateFloatAsState(
-                                targetValue = if (isEntering) 0.92f else 1f,
-                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
-                                label = "shelf-scale"
-                            )
-                            val shelfAlpha by animateFloatAsState(
-                                targetValue = if (isEntering) 0f else 1f,
-                                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
-                                label = "shelf-alpha"
-                            )
-                            val shelfOffsetX by animateDpAsState(
-                                targetValue = if (isEntering) (-4).dp else 0.dp,
-                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
-                                label = "shelf-offset-x"
-                            )
-                            val shelfOffsetY by animateDpAsState(
-                                targetValue = if (isEntering) 6.dp else 0.dp,
-                                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
-                                label = "shelf-offset-y"
-                            )
-                            Surface(
-                                modifier = Modifier
-                                    .graphicsLayer {
-                                        scaleX = shelfScale
-                                        scaleY = shelfScale
-                                        this.alpha = shelfAlpha
-                                        translationX = shelfOffsetX.toPx()
-                                        translationY = shelfOffsetY.toPx()
-                                        transformOrigin = TransformOrigin(1f, 0f)
-                                    },
-                                // 用应用语义色而不是 colorScheme.surface：主题预设（暖纸等）
-                                // 推导出的 surface 不一定等于卡片色，直接用会和页面里的卡片脱节。
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.semanticColors.cardSurface,
-                                border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder),
-                                shadowElevation = 0.dp,
-                                tonalElevation = 0.dp
+                            AnimatedVisibility(
+                                visibleState = shelfVisibility,
+                                enter = fadeIn(tween(180)) + expandVertically(
+                                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                                    expandFrom = Alignment.Top
+                                ) + scaleIn(
+                                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                                    initialScale = 0.92f,
+                                    transformOrigin = TransformOrigin(1f, 0f)
+                                ),
+                                exit = fadeOut(tween(140)) + shrinkVertically(
+                                    animationSpec = tween(190),
+                                    shrinkTowards = Alignment.Top
+                                ) + scaleOut(
+                                    animationSpec = tween(190),
+                                    targetScale = 0.92f,
+                                    transformOrigin = TransformOrigin(1f, 0f)
+                                )
                             ) {
-                                Column(modifier = Modifier.width(168.dp).padding(vertical = 4.dp)) {
-                                    WorkbenchMenuItem(FeatherIcons.Plus, stringResource(R.string.chat_new_session)) {
-                                        workbenchExpanded = false
-                                        onNewChat()
-                                    }
-                                    WorkbenchMenuItem(FeatherIcons.Folder, stringResource(R.string.chat_switch_workspace)) {
-                                        workbenchExpanded = false
-                                        onSwitchWorkspace()
-                                    }
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(start = 40.dp, end = 12.dp),
-                                        thickness = 1.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                    )
-                                    WorkbenchMenuItem(
-                                        icon = FeatherIcons.Terminal,
-                                        label = stringResource(R.string.chat_open_terminal),
-                                        active = terminalActive
-                                    ) {
-                                        workbenchExpanded = false
-                                        onNavigateToTerminal()
-                                    }
-                                    WorkbenchMenuItem(
-                                        icon = FeatherIcons.GitBranch,
-                                        label = stringResource(R.string.chat_open_git),
-                                        active = gitActive
-                                    ) {
-                                        workbenchExpanded = false
-                                        onNavigateToGit()
-                                    }
-                                    if (pluginEntries.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.semanticColors.cardSurface,
+                                    border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder),
+                                    shadowElevation = 0.dp,
+                                    tonalElevation = 0.dp
+                                ) {
+                                    Column(modifier = Modifier.width(168.dp).padding(vertical = 4.dp)) {
+                                        WorkbenchMenuItem(
+                                            icon = FeatherIcons.Folder,
+                                            label = stringResource(R.string.chat_switch_workspace),
+                                            enabled = workbenchExpanded
+                                        ) {
+                                            workbenchExpanded = false
+                                            onSwitchWorkspace()
+                                        }
                                         HorizontalDivider(
                                             modifier = Modifier.padding(start = 40.dp, end = 12.dp),
                                             thickness = 1.dp,
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                         )
-                                        pluginEntries.forEach { entry ->
-                                            WorkbenchMenuItem(
-                                                icon = FeatherIcons.Zap,
-                                                label = entry.title
-                                            ) {
-                                                workbenchExpanded = false
-                                                onOpenPluginEntry(entry)
+                                        WorkbenchMenuItem(
+                                            icon = FeatherIcons.Terminal,
+                                            label = stringResource(R.string.chat_open_terminal),
+                                            active = terminalActive,
+                                            enabled = workbenchExpanded
+                                        ) {
+                                            workbenchExpanded = false
+                                            onNavigateToTerminal()
+                                        }
+                                        WorkbenchMenuItem(
+                                            icon = FeatherIcons.GitBranch,
+                                            label = stringResource(R.string.chat_open_git),
+                                            active = gitActive,
+                                            enabled = workbenchExpanded
+                                        ) {
+                                            workbenchExpanded = false
+                                            onNavigateToGit()
+                                        }
+                                        if (pluginEntries.isNotEmpty()) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 40.dp, end = 12.dp),
+                                                thickness = 1.dp,
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                            )
+                                            pluginEntries.forEach { entry ->
+                                                WorkbenchMenuItem(
+                                                    icon = FeatherIcons.Zap,
+                                                    label = entry.title,
+                                                    enabled = workbenchExpanded
+                                                ) {
+                                                    workbenchExpanded = false
+                                                    onOpenPluginEntry(entry)
+                                                }
                                             }
                                         }
                                     }
@@ -326,6 +330,7 @@ private fun WorkbenchMenuItem(
     icon: ImageVector,
     label: String,
     active: Boolean = false,
+    enabled: Boolean,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -356,6 +361,7 @@ private fun WorkbenchMenuItem(
             .clickable(
                 interactionSource = interaction,
                 indication = null,
+                enabled = enabled,
                 onClick = onClick
             )
             .graphicsLayer { scaleX = pressScale; scaleY = pressScale }

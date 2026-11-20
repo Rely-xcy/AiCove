@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="muse_update_settings">Version and updates</string>
+    <string name="muse_update_project_links">Project and licenses</string>
+    <string name="muse_update_changelog_heading">Current version %1$s · Changes in newer versions</string>
+</resources>

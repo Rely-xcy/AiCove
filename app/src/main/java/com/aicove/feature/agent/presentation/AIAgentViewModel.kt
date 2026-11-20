@@ -1142,26 +1142,7 @@ class AIAgentViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /**
-     * 已被丢弃、确认不会再落库的用户消息 id 集合（队列删除 / 回退清空队列 /
-     * 切换工作区停止全部 / 会话被删）。
-     *
-     * 乐观气泡（见 AIChatPanel 的 pendingUserMessages）只有两个退场判据：这条落库了、这条还在队列里。
-     * 被丢弃的那条两条都不满足，UI 会把「既没落库也不在队列」当成「还在路上」而一直画着它
-     * （只有切会话才清）。四条丢弃路径在这里各记一笔，UI 据此显式让气泡退场，而不是靠集合差去猜。
-     *
-     * 只增不减：每条一个 UUID（几十字节），不随发送次数增长；刻意不做「UI 消费后回收」，
-     * 那会在「回收先于气泡退场生效」时让气泡复活。id 由发送方预生成，只会被认领一次。
-     */
-    private val _discardedClientMessageIds = MutableStateFlow<Set<String>>(emptySet())
-    val discardedClientMessageIds: StateFlow<Set<String>> = _discardedClientMessageIds.asStateFlow()
-
-    /** 把一批即将从队列里消失的条目计入 [discardedClientMessageIds]（必须在真正移除队列条目之前调用）。 */
-    private fun markClientMessagesDiscarded(requests: Collection<QueuedRequest>) {
-        val ids = requests.mapNotNull { it.clientMessageId?.takeIf(String::isNotBlank) }.toSet()
-        if (ids.isEmpty()) return
-        _discardedClientMessageIds.value = _discardedClientMessageIds.value + ids
-    }
+    internal val pendingUserMessages = PendingUserMessageStore()
 
     val pendingPlanApproval: StateFlow<PlanApprovalRequest?> = planApprovalManager.pendingApproval
 
@@ -1912,7 +1893,7 @@ class AIAgentViewModel @Inject constructor(
     fun removeQueuedRequest(id: String) {
         val sid = _currentSessionId.value ?: return
         val queue = _queuedRequests.value[sid] ?: return
-        markClientMessagesDiscarded(queue.filter { it.id == id })
+        pendingUserMessages.discard(queue.filter { it.id == id })
         _queuedRequests.value = _queuedRequests.value + (sid to queue.filterNot { it.id == id })
     }
 
@@ -1960,9 +1941,6 @@ class AIAgentViewModel @Inject constructor(
         val sid = _currentSessionId.value ?: return
         val queue = _queuedRequests.value[sid] ?: return
         val req = queue.firstOrNull { it.id == id } ?: return
-        // 不把这条计入 [discardedClientMessageIds]：它按原 clientMessageId 落库，乐观气泡由「库里出现
-        // 同 id 的行」这条既有判据退场（该行 isInterjection=true，UI 不再渲染它，气泡退场后不会
-        // 在时间线上同显两遍）。标作废虽然也能让气泡消失，但会留下「既没落库也不在队列」的空窗。
         _queuedRequests.value = _queuedRequests.value + (sid to queue.filterNot { it.id == id })
         FileLogger.d(TAG, "interjectQueuedRequest: sid=$sid clientMsgId=${req.clientMessageId} jobActive=${sessionJobs[sid]?.isActive == true}")
         deliverSystemEvent(
@@ -2017,6 +1995,7 @@ class AIAgentViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             _runningCommandSessions.value = _runningCommandSessions.value + sessionId
+            var persisted = false
             try {
                 // 斜杠命令的文本也是用户消息，行 id 用调用方预生成的那个：命令虽然不进 agent workflow，
                 // UI 的乐观气泡对它与普通消息一视同仁地按 id 认领（不回退成文本比对）。
@@ -2026,12 +2005,15 @@ class AIAgentViewModel @Inject constructor(
                     input,
                     id = userMessageId ?: UUID.randomUUID().toString()
                 )
+                persisted = true
+                pendingUserMessages.persisted(sessionId, userMessageId, messagePersistenceUseCase.nextTimestamp())
                 sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
                 when (resolved) {
                     is ResolvedCommand.Action -> resolved.handler.execute(this@AIAgentViewModel, resolved.args)
                     is ResolvedCommand.SkillCommand -> runSkill(resolved.skill, resolved.args)
                 }
             } finally {
+                if (!persisted) pendingUserMessages.acknowledge(sessionId, setOfNotNull(userMessageId))
                 _runningCommandSessions.value = _runningCommandSessions.value - sessionId
                 flushPendingNotifications(sessionId)
                 processNextInQueue(sessionId)
@@ -2100,6 +2082,13 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.w(TAG, "工作区未就绪，跳过请求")
             return@launch
         }
+        var userMessagePersisted = false
+        if (!isAutoTrigger && persistUserMessage && clientMessageId != null) {
+            pendingUserMessages.sending(sessionId, PendingUserMessage(clientMessageId, request, inputAttachments))
+            coroutineContext[Job]?.invokeOnCompletion { cause ->
+                if (cause != null && !userMessagePersisted) pendingUserMessages.acknowledge(sessionId, setOf(clientMessageId))
+            }
+        }
         // 执行前只拦两种真错误：没有可用工作区、会话绑定的目录已被删除。
         // 路径不一致不再拒绝——全局列表里点开别的工作区的历史本就是要接着聊，
         // 选中会话时已自动切到它所属的工作区（见 openSessionInWorkspace）。
@@ -2123,6 +2112,7 @@ class AIAgentViewModel @Inject constructor(
                         "执行被拒绝: sessionId=$sessionId boundWorkspace=$boundWs reason=${if (dirMissing) "dir_missing" else "no_workspace"}"
                     )
                     _agentStates.value = _agentStates.value + (sessionId to AgentUIState.Error(reason))
+                    pendingUserMessages.acknowledge(sessionId, setOfNotNull(clientMessageId))
                     return@launch
                 }
             }
@@ -2228,10 +2218,14 @@ class AIAgentViewModel @Inject constructor(
             } else if (userMsgId != null) {
                 if (notificationSeqs.isEmpty()) {
                     messagePersistenceUseCase.persist(sessionId, MessageRole.USER, request, id = userMsgId, attachments = inputAttachments)
+                    userMessagePersisted = true
+                    pendingUserMessages.persisted(sessionId, userMsgId, messagePersistenceUseCase.nextTimestamp())
                 } else {
                     // 通知驱动的轮次：落库与 ack 同生共死，否则通知丢了或会被下一轮重复投递。
                     withContext(kotlinx.coroutines.NonCancellable) {
                         messagePersistenceUseCase.persist(sessionId, MessageRole.USER, request, id = userMsgId, attachments = inputAttachments)
+                        userMessagePersisted = true
+                        pendingUserMessages.persisted(sessionId, userMsgId, messagePersistenceUseCase.nextTimestamp())
                         agentNotificationCenter.ack(sessionId, notificationSeqs)
                     }
                 }
@@ -2663,6 +2657,7 @@ class AIAgentViewModel @Inject constructor(
             runStatus = "cancelled"
             throw e
         } catch (e: Exception) {
+             if (!userMessagePersisted) pendingUserMessages.acknowledge(sessionId, setOfNotNull(clientMessageId))
              runStatus = "error"
              runError = e.toUserMessage(context)
              FileLogger.e(TAG, "executeAgentRequestStream 失败: request=$request", e)
@@ -2782,7 +2777,7 @@ class AIAgentViewModel @Inject constructor(
         _runningTurnAnchorIds.value = emptyMap()
         _pendingAssistantRowIds.value = emptyMap()
         agentNotificationCenter.clearAll()
-        markClientMessagesDiscarded(_queuedRequests.value.values.flatten())
+        pendingUserMessages.discard(_queuedRequests.value.values.flatten())
         _queuedRequests.value = emptyMap()
         goalEmptyTurnCounts.clear()
         // 先释放全部子代理并发名额再取消：job 取消走 CancellationException 路径，
@@ -2981,7 +2976,7 @@ class AIAgentViewModel @Inject constructor(
         // 先清队列再取消 job：cancel 可能在调用栈内同步跑 finally → flushPendingNotifications，
         // 队列已空则直接返回，不会为已删除会话再起一轮。
         agentNotificationCenter.clear(sessionId)
-        markClientMessagesDiscarded(_queuedRequests.value[sessionId].orEmpty())
+        pendingUserMessages.clear(sessionId)
         _queuedRequests.value = _queuedRequests.value - sessionId
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
@@ -3591,7 +3586,7 @@ class AIAgentViewModel @Inject constructor(
         try {
 
             // 1. 停止当前正在运行的 Agent 任务及后续排队
-            markClientMessagesDiscarded(_queuedRequests.value[sessionId].orEmpty())
+            pendingUserMessages.discard(_queuedRequests.value[sessionId].orEmpty())
             _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
             agentNotificationCenter.clear(sessionId)
             val runningJob = sessionJobs[sessionId]
@@ -3623,6 +3618,7 @@ class AIAgentViewModel @Inject constructor(
                         agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
                     }
                     if (rewound == null) return@launch
+                    pendingUserMessages.clear(sessionId)
                     resetSessionInputTokens(sessionId)
                     withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
                 }
@@ -3631,6 +3627,7 @@ class AIAgentViewModel @Inject constructor(
                         agentMessageDao.deleteMessagesFromTimestamp(sessionId, targetMsgEntity.timestamp)
                     }
                     if (rewound == null) return@launch
+                    pendingUserMessages.clear(sessionId)
                     resetSessionInputTokens(sessionId)
                     withContext(Dispatchers.Main) { onFillPrompt(targetMsgEntity.content, attachments) }
                 }
@@ -3777,6 +3774,7 @@ class AIAgentViewModel @Inject constructor(
                     agentMessageDao.deleteMessageById(messageId)
                 }
                 if (rewound == null) return@launch
+                pendingUserMessages.clear(msg.sessionId)
                 // 与回退同一回事：历史被删掉后，会话行上那一轮的真实用量已经不代表现状
                 resetSessionInputTokens(msg.sessionId)
             } else {

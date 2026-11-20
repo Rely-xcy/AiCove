@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="muse_update_settings">版本与更新</string>
+    <string name="muse_update_project_links">项目与许可</string>
+    <string name="muse_update_changelog_heading">当前版本 %1$s · 以下为新版本更新记录</string>
+</resources>

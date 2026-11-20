@@ -26,9 +26,8 @@ import com.aicove.feature.settings.presentation.UpdateCheckUiState
 
 /**
  * 检查更新结果弹窗（全局宿主渲染，自动/手动共用）。
- * 新版本弹窗直接列出从当前版本到最新版本的更新日志，可滚动；主按钮在应用内下载安装
- * （fork 自建更新源有直链时改走系统下载器），[canInstallInApp] 为 false（beta/debug 变体）时
- * 不显示应用内安装入口，只留浏览器下载。
+ * 新版本弹窗滚动展示跨版本完整日志；下载沿用镜像、直连与安装校验流程，失败可重试或打开浏览器。
+ * [canInstallInApp] 为 false 时只显示浏览器入口。
  */
 @Composable
 internal fun UpdateCheckDialog(
@@ -55,20 +54,24 @@ internal fun UpdateCheckDialog(
         is UpdateCheckUiState.NewVersion -> AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.about_new_version_found)) },
-            text = { ChangelogText(state.changelog) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        text = stringResource(R.string.muse_update_changelog_heading, currentVersion),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ChangelogText(state.changelog)
+                }
+            },
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     TextButton(
                         onClick = { onOpenDownload(state.downloadUrl ?: githubReleaseUrl(state.latestTag)) }
                     ) {
-                        Text(
-                            stringResource(
-                                if (state.downloadUrl != null) R.string.fork_update_install_now else R.string.about_download
-                            )
-                        )
+                        Text(stringResource(R.string.about_update_browser))
                     }
-                    // 只有正式包才给应用内安装：beta/debug 变体的包名带后缀，装正式包会变成第二个 App
-                    if (canInstallInApp) {
+                    if (canInstallInApp && state.asset != null) {
                         TextButton(onClick = onDownload) {
                             Text(stringResource(R.string.about_update_download_install))
                         }
@@ -139,7 +142,9 @@ internal fun UpdateCheckDialog(
                 TextButton(onClick = onDownload) { Text(stringResource(R.string.about_update_retry)) }
             },
             dismissButton = {
-                TextButton(onClick = { onOpenDownload(githubReleaseUrl(state.previous.latestTag)) }) {
+                TextButton(onClick = {
+                    onOpenDownload(state.previous.downloadUrl ?: githubReleaseUrl(state.previous.latestTag))
+                }) {
                     Text(stringResource(R.string.about_update_browser))
                 }
             }

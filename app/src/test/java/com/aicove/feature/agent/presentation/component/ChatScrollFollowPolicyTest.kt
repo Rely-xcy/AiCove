@@ -65,12 +65,20 @@ class ChatScrollFollowPolicyTest {
 
     @Test
     fun `滚动或浏览历史时冻结输入层安全区`() {
-        assertFalse(shouldCommitInputBarReserve(false, false, false, false, false))
-        assertFalse(shouldCommitInputBarReserve(true, true, false, false, false))
-        assertFalse(shouldCommitInputBarReserve(true, false, true, false, false))
-        assertFalse(shouldCommitInputBarReserve(true, false, false, true, false))
-        assertFalse(shouldCommitInputBarReserve(true, false, false, false, true))
-        assertTrue(shouldCommitInputBarReserve(true, false, false, false, false))
+        assertFalse(shouldCommitInputBarReserve(false, false, false, false, false, 150, 150))
+        assertFalse(shouldCommitInputBarReserve(true, true, false, false, false, 150, 150))
+        assertFalse(shouldCommitInputBarReserve(true, false, true, false, false, 150, 150))
+        assertFalse(shouldCommitInputBarReserve(true, false, false, true, false, 150, 150))
+        assertFalse(shouldCommitInputBarReserve(true, false, false, false, true, 150, 150))
+        assertTrue(shouldCommitInputBarReserve(true, false, false, false, false, 150, 150))
+    }
+
+    @Test
+    fun `面板收起后停稳即回收旧留白而不要求先回底`() {
+        assertFalse(shouldCommitInputBarReserve(false, true, true, false, true, 620, 150))
+        assertFalse(shouldCommitInputBarReserve(false, false, false, true, true, 620, 150))
+        assertTrue(shouldCommitInputBarReserve(false, false, false, false, false, 620, 150))
+        assertFalse(shouldCommitInputBarReserve(false, false, false, false, false, 150, 620))
     }
 
     @Test

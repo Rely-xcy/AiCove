@@ -1,5 +1,6 @@
 package com.aicove.feature.plugin.presentation
 
+import com.aicove.feature.agent.domain.container.ConnectionState
 import com.aicove.feature.agent.domain.container.RemoteConnectionConfig
 import com.aicove.feature.agent.domain.container.RemoteSshConnection
 import com.aicove.feature.plugin.domain.PluginFileWatchSource
@@ -20,14 +21,16 @@ class PluginPageEnvironmentTest {
     private val workspace = mockk<WorkspaceRepository>()
     private val mode = ExecutionModeHolder().apply { setMode(ExecutionMode.LOCAL_PROOT) }
     private val connection = mockk<RemoteSshConnection>()
-    private val environment = PluginPageEnvironment(
-        workspace, mode, connection, mockk<WorkspacePathMapper>(), mockk<PathHomeResolver>(), mockk<PluginFileWatchSource>()
-    )
+    private val environment: PluginPageEnvironment
 
     init {
         every { workspace.current } returns MutableStateFlow(null)
         every { workspace.currentPathOrNull() } returns null
+        every { connection.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
         every { connection.config } returns null
+        environment = PluginPageEnvironment(
+            workspace, mode, connection, mockk<WorkspacePathMapper>(), mockk<PathHomeResolver>(), mockk<PluginFileWatchSource>()
+        )
     }
 
     @Test

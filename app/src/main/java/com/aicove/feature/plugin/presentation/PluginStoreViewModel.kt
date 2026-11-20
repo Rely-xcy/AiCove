@@ -177,6 +177,7 @@ class PluginStoreViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             try {
                 var failedSources = 0
+                var loaded = false
                 var rejected = 0
                 var lastError: Exception? = null
                 val items = mutableListOf<PluginStoreItem>()
@@ -198,6 +199,7 @@ class PluginStoreViewModel @Inject constructor(
                                 official = source.official && PluginOfficialRepositories.isOfficial(plugin.repository)
                             )
                         }
+                        loaded = true
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -211,9 +213,9 @@ class PluginStoreViewModel @Inject constructor(
                     it.copy(
                         loading = false,
                         refreshing = false,
-                        items = items,
-                        updatesByPluginId = updatesOf(items),
-                        rejectedPluginCount = rejected,
+                        items = if (loaded) items else it.items,
+                        updatesByPluginId = if (loaded) updatesOf(items) else it.updatesByPluginId,
+                        rejectedPluginCount = if (loaded) rejected else it.rejectedPluginCount,
                         error = lastError?.takeIf { items.isEmpty() }?.let { error ->
                             PluginStoreError(
                                 if (error is PluginIndexException) PluginStoreErrorCode.INVALID_INDEX else PluginStoreErrorCode.NETWORK,
