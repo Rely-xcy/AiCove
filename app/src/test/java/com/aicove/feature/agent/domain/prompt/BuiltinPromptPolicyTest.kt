@@ -1,6 +1,5 @@
 package com.aicove.feature.agent.domain.prompt
 
-import com.aicove.feature.agent.domain.engine.modules.MemoryModule
 import com.aicove.feature.agent.domain.memory.MemoryExtractor
 import io.mockk.mockk
 import java.io.File
@@ -38,13 +37,16 @@ class BuiltinPromptPolicyTest {
         val policies = listOf(
             prompt("70-skills-and-mcp.md"),
             prompt("agent/memory-distiller.md"),
-            MemoryModule.ACTIVE_MEMORY_RULE
+            prompt("agent/memory-curator.md"),
+            prompt("agent/memory-verify.md")
         )
         val rejectedRules = listOf(
             "宁多勿少",
             "拿不准要不要记时，倾向调用",
             "Prefer recording over skipping",
-            "most of what matters has to be INFERRED"
+            "most of what matters has to be INFERRED",
+            "a missing memory is worse than a redundant one",
+            "宁可留一条可能过时的记忆"
         )
         policies.forEach { policy ->
             rejectedRules.forEach { rule -> assertFalse("Contradictory memory policy: $rule", policy.contains(rule)) }
@@ -76,13 +78,10 @@ class BuiltinPromptPolicyTest {
     }
 
     @Test
-    fun activeMemoryIsANoticeRatherThanADuplicatePolicy() {
+    fun activeMemoryPromptUsesTheSingleMemoryPolicy() {
         val policy = prompt("70-skills-and-mcp.md")
-        val notice = MemoryModule.ACTIVE_MEMORY_RULE
         assertTrue(policy.contains("项目约定与架构决策写 project"))
         assertTrue(policy.contains("只有写入成功才说明已记住"))
-        assertTrue(notice.contains("主动记忆已开启"))
-        assertFalse(notice.contains("scope=global"))
-        assertFalse(notice.contains("拿不准要不要记时，倾向调用"))
+        assertFalse(policy.contains("宁多勿少"))
     }
 }
