@@ -1,7 +1,6 @@
 package com.aicove.feature.agent.presentation.component
 
 import android.os.Build
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -222,7 +221,7 @@ internal fun ChatHeader(
                             onDismissRequest = { workbenchExpanded = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            AnimatedVisibility(
+                            androidx.compose.animation.AnimatedVisibility(
                                 visibleState = shelfVisibility,
                                 enter = fadeIn(tween(180)) + expandVertically(
                                     animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
