@@ -929,8 +929,7 @@ fun AIChatPanel(
     //    直接说清在做什么（「正在读取文件」、「正在编辑文件」等，见 toolRunningLabelRes）；
     // 2. 否则（如等待模型首字吐出、纯思考间隙）兜底显示「正在思考」。
     val activeToolName = runningTool.lastOrNull()?.toolName?.takeIf { it.isNotBlank() } ?: preparingTool
-    val thinkingLabel = activeToolName?.let { stringResource(toolRunningLabelRes(it)) }
-        ?: stringResource(R.string.chat_status_thinking)
+    val thinkingLabel = stringResource(busyLabelRes(activeToolName, agentState is AgentUIState.Preparing))
     val pendingPermission by viewModel.pendingToolPermission.collectAsStateWithLifecycle()
     val pendingPermissionSessionTitle by viewModel.pendingToolPermissionSessionTitle.collectAsStateWithLifecycle()
     val pendingQuestion by viewModel.pendingUserQuestion.collectAsStateWithLifecycle()
@@ -1054,7 +1053,7 @@ fun AIChatPanel(
     val context = LocalContext.current
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
-    val isBusy = agentState is AgentUIState.Streaming
+    val isBusy = agentState.isBusy
     // 拆块 + 工具分组：超长助手消息展开成多条有界 item（单条滚动轴、外观连续），
     // 连续的工具调用折成一个「N 次工具调用」分组；chatItems 的顺序即 LazyColumn item 顺序。
     // 提到这里（而不是 LazyColumn 分支内）是因为 isFarFromBottom 的「布局是否对应当前消息」判定
@@ -1072,7 +1071,7 @@ fun AIChatPanel(
         }
     }
     SideEffect { turnKeyHistory.putAll(stableTurnKeys) }
-    val activeTurnKey = if (!isBusy) {
+    val activeTurnKey = if (agentState !is AgentUIState.Streaming) {
         null
     } else {
         // 定位用运行时真值：本轮轮首用户行 id（VM 在本轮用户行落库时登记，见 AIAgentViewModel 的
@@ -1257,7 +1256,7 @@ fun AIChatPanel(
         val curSessionId = currentSessionId.orEmpty()
         val agentStateStr = when (agentState) {
             is AgentUIState.Idle -> "idle"
-            is AgentUIState.Streaming -> "streaming"
+            is AgentUIState.Preparing, is AgentUIState.Streaming -> "streaming"
             is AgentUIState.Result -> "result"
             is AgentUIState.Error -> "error"
         }
@@ -1339,8 +1338,8 @@ fun AIChatPanel(
     LaunchedEffect(agentState) {
         val prev = lastAgentStateForPanel
         lastAgentStateForPanel = agentState
-        val wasBusy = prev is AgentUIState.Streaming
-        val nowDone = agentState !is AgentUIState.Streaming
+        val wasBusy = prev?.isBusy == true
+        val nowDone = !agentState.isBusy
         if (wasBusy && nowDone) {
             val provider = latestActiveProvider ?: return@LaunchedEffect
             if (provider.dashboardScriptPath.isBlank()) return@LaunchedEffect

@@ -629,6 +629,13 @@ private fun toolIcon(toolName: String?): ImageVector = when (toolName?.lowercase
  * MCP 动态注册工具、自定义工具等未归类的，一律回落 [R.string.chat_status_calling_tool]。
  */
 @StringRes
+internal fun busyLabelRes(toolName: String?, preparingRequest: Boolean): Int = when {
+    preparingRequest -> R.string.chat_status_preparing_request
+    toolName == null -> R.string.chat_status_thinking
+    else -> toolRunningLabelRes(toolName)
+}
+
+@StringRes
 internal fun toolRunningLabelRes(toolName: String?): Int = when (toolName?.lowercase()) {
     "editfile", "writefile" -> R.string.chat_status_editing_file
     "readfile", "list", "sendfile" -> R.string.chat_status_reading_file

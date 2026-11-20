@@ -11,6 +11,7 @@ import com.aicove.feature.agent.domain.notification.AgentNotificationKind
 import com.aicove.feature.agent.domain.notification.NotificationOutcome
 import com.aicove.feature.agent.domain.notification.PendingNotification
 import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
+import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.terminal.domain.TabFinishedEvent
 import com.aicove.feature.terminal.domain.TerminalSessionManager
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
@@ -28,6 +29,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -64,6 +66,9 @@ class AIAgentViewModelSystemNotificationQueueTest {
     private lateinit var viewModel: AIAgentViewModel
     private lateinit var notificationCenter: AgentNotificationCenter
     private val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
+    private val sessions = mockk<SessionUseCase>(relaxed = true) {
+        coEvery { getSessionById(any()) } returns null
+    }
     private val mainDispatcher = UnconfinedTestDispatcher()
     /** 后台命令完成事件流：真实的 [TabFinishedEvent] 从这里进 [AIAgentViewModel.handleBackgroundCommandFinished]。 */
     private val tabFinishedEvents = MutableSharedFlow<TabFinishedEvent>(extraBufferCapacity = 1)
@@ -149,6 +154,35 @@ class AIAgentViewModelSystemNotificationQueueTest {
     }
 
     @Test
+    fun preparingIsVisibleBeforeSessionValidationFinishes() = runBlocking {
+        val validationStarted = CompletableDeferred<Unit>()
+        coEvery { sessions.getSessionById(SID) } coAnswers {
+            validationStarted.complete(Unit)
+            awaitCancellation()
+        }
+        viewModel.enqueueAgentRequest("hello", projectRoot = WORKSPACE, targetSessionId = SID, clientMessageId = "new-user")
+        withTimeout(3_000) { validationStarted.await() }
+
+        assertTrue(viewModel.agentState.value is AgentUIState.Preparing)
+        assertEquals("new-user", viewModel.pendingUserMessages[SID].single().id)
+        viewModel.selectSession("other-session")
+        assertEquals(AgentUIState.Idle, viewModel.agentState.value)
+        assertTrue(viewModel.agentStates.value[SID] is AgentUIState.Preparing)
+        viewModel.stopAgentSession(SID)
+        assertEquals(AgentUIState.Idle, viewModel.agentStates.value[SID])
+        assertTrue(viewModel.pendingUserMessages[SID].isEmpty())
+    }
+
+    @Test
+    fun historyFailureReplacesPreparingWithError() = runBlocking {
+        coEvery { persistence.buildHistory(any(), any()) } throws IllegalStateException("history failed")
+        viewModel.enqueueAgentRequest("hello", projectRoot = WORKSPACE, targetSessionId = SID, clientMessageId = "failed-user")
+
+        withTimeout(3_000) { viewModel.agentStates.first { it[SID] is AgentUIState.Error } }
+        assertTrue(viewModel.pendingUserMessages[SID].isEmpty())
+    }
+
+    @Test
     fun stopEchoesTheEditedQueuedRequestWhileHistoryIsStillLoading() = runBlocking {
         val historyStarted = CompletableDeferred<Unit>()
         coEvery { persistence.buildHistory(any(), any()) } coAnswers {
@@ -170,6 +204,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
 
         viewModel.stopAgent()
         withTimeout(3_000) { historyStarted.await() }
+        assertTrue(viewModel.agentStates.value[SID] is AgentUIState.Preparing)
         assertTrue(viewModel.queuedRequests.value.isEmpty())
         assertEquals(PendingUserMessage("queued-user", "edited", listOf(attachment)), viewModel.pendingUserMessages[SID].single())
         viewModel.selectSession("other-session")
@@ -212,9 +247,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
         toolPermissionManager = mockk(relaxed = true),
         askUserQuestionManager = mockk(relaxed = true),
         containerEngine = mockk(relaxed = true),
-        sessionUseCase = mockk(relaxed = true) {
-            coEvery { getSessionById(any()) } returns null
-        },
+        sessionUseCase = sessions,
         messagePersistenceUseCase = persistence,
         agentChatRequestBus = mockk(relaxed = true) {
             coEvery { receiveOrNull(any()) } coAnswers { awaitCancellation() }

@@ -65,13 +65,13 @@ data class BrowseClipboard(
     val isCut: Boolean
 )
 
-/**
- * AI Agent 的顶层状态机。一轮任务从 [Streaming] 开始，正常结束落 [Result]，失败落 [Error]，
- * 被用户取消回到 [Idle]——没有独立的「非流式忙态」：[AIAgentViewModel] 在主线程准备工作做完、
- * 用户消息已落库时才点灯，此前一律是 [Idle]。
- */
+/** AI Agent 从 [Preparing] 进入 [Streaming]，完成落 [Result]，失败落 [Error]，取消回 [Idle]。 */
 sealed class AgentUIState {
+    val isBusy: Boolean get() = this is Preparing || this is Streaming
+
     object Idle : AgentUIState()
+    // 每轮使用独立实例，完成回调才能确认自己仍持有准备态，避免清掉接替轮次。
+    class Preparing : AgentUIState()
     object Streaming : AgentUIState()
     /** 一轮任务正常跑完（工具报错但本轮继续时也算跑完；失败与取消不在此态）。 */
     object Result : AgentUIState()

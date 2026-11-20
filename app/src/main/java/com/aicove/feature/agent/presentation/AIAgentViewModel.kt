@@ -254,8 +254,8 @@ class AIAgentViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _agentStates = MutableStateFlow<Map<String, AgentUIState>>(emptyMap())
-    val agentStates: StateFlow<Map<String, AgentUIState>> = _agentStates.asStateFlow()
+    private val agentStateStore = SessionAgentStateStore()
+    val agentStates: StateFlow<Map<String, AgentUIState>> = agentStateStore.states
 
     /**
      * 子代理卡片状态（按子会话 id 索引），仅存内存。
@@ -269,13 +269,11 @@ class AIAgentViewModel @Inject constructor(
     val agentState: StateFlow<AgentUIState> = _currentSessionId
         .flatMapLatest { id ->
             if (id == null) flowOf(AgentUIState.Idle)
-            else _agentStates.map { it[id] ?: AgentUIState.Idle }
+            else agentStates.map { it[id] ?: AgentUIState.Idle }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AgentUIState.Idle)
 
-    private fun setAgentState(sessionId: String, state: AgentUIState) {
-        _agentStates.value = _agentStates.value + (sessionId to state)
-    }
+    private fun setAgentState(sessionId: String, state: AgentUIState) = agentStateStore.set(sessionId, state)
 
     /**
      * 失败文案：服务端给了类型码（如拒答/上下文超限）时用本地化说明，
@@ -1396,13 +1394,13 @@ class AIAgentViewModel @Inject constructor(
         // 等待用户审批的会话标签覆写为「需要审批」，优先于正在执行的具体工具。
         viewModelScope.launch {
             combine(
-                _agentStates,
+                agentStates,
                 _runningTools,
                 _preparingTools,
                 _compactingSessions,
                 approvalSessionIds
             ) { states, tools, preparing, compacting, approvals ->
-                states.filterValues { it is AgentUIState.Streaming }
+                states.filterValues { it.isBusy }
                     .keys
                     .associateWith { sid ->
                         val toolName = tools[sid]?.values?.lastOrNull()?.toolName?.takeIf { it.isNotBlank() }
@@ -1713,7 +1711,7 @@ class AIAgentViewModel @Inject constructor(
         val sessionId = event.sourceSessionId ?: return
         val jobActive = sessionJobs[sessionId]?.isActive == true
         val currentSid = _currentSessionId.value
-        FileLogger.d(TAG, "handleBgFinished: eventSid=$sessionId currentSid=$currentSid jobActive=$jobActive state=${_agentStates.value[sessionId]}")
+        FileLogger.d(TAG, "handleBgFinished: eventSid=$sessionId currentSid=$currentSid jobActive=$jobActive state=${agentStates.value[sessionId]}")
         val item = event.toPendingNotification()
         deliverSystemEvent(sessionId, item)
     }
@@ -1802,7 +1800,7 @@ class AIAgentViewModel @Inject constructor(
         if (sessionJobs[sessionId]?.isActive == true || sessionId in _runningCommandSessions.value) return
         val items = agentNotificationCenter.peek(sessionId)
         if (items.isEmpty()) return
-        FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${items.size} state=${_agentStates.value[sessionId]}")
+        FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${items.size} state=${agentStates.value[sessionId]}")
         val interjections = items.filter { it.kind == AgentNotificationKind.USER_MESSAGE }
         val systemItems = items.filterNot { it.kind == AgentNotificationKind.USER_MESSAGE }
         viewModelScope.launch {
@@ -2089,6 +2087,9 @@ class AIAgentViewModel @Inject constructor(
                 if (cause != null && !userMessagePersisted) pendingUserMessages.acknowledge(sessionId, setOf(clientMessageId))
             }
         }
+        if (slashCommandRegistry.resolve(request) == null) {
+            agentStateStore.prepare(sessionId, checkNotNull(coroutineContext[Job])) { it.toUserMessage(context) }
+        }
         // 执行前只拦两种真错误：没有可用工作区、会话绑定的目录已被删除。
         // 路径不一致不再拒绝——全局列表里点开别的工作区的历史本就是要接着聊，
         // 选中会话时已自动切到它所属的工作区（见 openSessionInWorkspace）。
@@ -2111,7 +2112,7 @@ class AIAgentViewModel @Inject constructor(
                         TAG,
                         "执行被拒绝: sessionId=$sessionId boundWorkspace=$boundWs reason=${if (dirMissing) "dir_missing" else "no_workspace"}"
                     )
-                    _agentStates.value = _agentStates.value + (sessionId to AgentUIState.Error(reason))
+                    setAgentState(sessionId, AgentUIState.Error(reason))
                     pendingUserMessages.acknowledge(sessionId, setOfNotNull(clientMessageId))
                     return@launch
                 }
@@ -2160,7 +2161,7 @@ class AIAgentViewModel @Inject constructor(
         }
 
         coroutineContext[Job]?.let { sessionJobs[sessionId] = it }
-        FileLogger.d(TAG, "stream start: sid=$sessionId prevState=${_agentStates.value[sessionId]} isAutoTrigger=$isAutoTrigger")
+        FileLogger.d(TAG, "stream start: sid=$sessionId prevState=${agentStates.value[sessionId]} isAutoTrigger=$isAutoTrigger")
         acquireKeepalive()
 
         // 本轮是否登记过可认领的助手行 id（有可见正文或 reasoning 的落库行）。job 收尾时据此判断本轮
@@ -2251,11 +2252,7 @@ class AIAgentViewModel @Inject constructor(
             }
             sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
 
-            // 本次用户消息落库（上面的 persist 已返回）之后才点「正在工作」的灯：灯早于消息上屏时，
-            // 用户看到的是「三点已亮 + 正在思考，消息还没出现」。这一段前置工作（buildHistory、persist）
-            // 都在主线程上跑，会话越长越慢，灯早亮几百毫秒就是同一现象的放大器。
-            // 队列/停止等等分支都不看这个状态（队列看 sessionJobs，见 enqueueAgentRequest），判据与本行位置无关；
-            // 错误路径：buildHistory 抛异常时状态还是 Idle，直接由下面的 catch 置 Error，不存在从 Streaming 回退的问题。
+            // 正式流的轮首锚点依赖已落库的用户行；此前由 Preparing 提供反馈，不能提前复用 Streaming。
             setAgentState(sessionId, AgentUIState.Streaming)
 
             val sessionEntity = sessionUseCase.getSessionById(sessionId)
@@ -2606,7 +2603,7 @@ class AIAgentViewModel @Inject constructor(
             sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
             // 仅当本 job 仍持有忙状态时才置完成态：并发场景下队列/通知可能已启动新的 job
             // 并把状态改为 Streaming，不能被先结束的 job 误覆盖成 Result（按钮会提前变回发送）。
-            val finishedState = _agentStates.value[sessionId]
+            val finishedState = agentStates.value[sessionId]
             if (!failed && finishedState is AgentUIState.Streaming) {
                 setAgentState(sessionId, AgentUIState.Result)
             }
@@ -2636,10 +2633,10 @@ class AIAgentViewModel @Inject constructor(
             }
 
         } catch (e: CancellationException) {
-            val cancelledState = _agentStates.value[sessionId]
+            val cancelledState = agentStates.value[sessionId]
             val isOwnJob = sessionJobs[sessionId] == coroutineContext[Job]
             FileLogger.d(TAG, "stream cancelled: sid=$sessionId isOwnJob=$isOwnJob state=$cancelledState")
-            if (isOwnJob && cancelledState is AgentUIState.Streaming) {
+            if (isOwnJob && cancelledState?.isBusy == true) {
                 setAgentState(sessionId, AgentUIState.Idle)
             }
             // goal 自主循环期间用户打断：暂停目标，避免下条消息后自动续跑（对齐 Codex「打断即暂停」）。
@@ -2679,7 +2676,7 @@ class AIAgentViewModel @Inject constructor(
         } finally {
             startPendingTitle()
             val isOwnJob = sessionJobs[sessionId] == coroutineContext[Job]
-            FileLogger.d(TAG, "stream finally: sid=$sessionId isOwnJob=$isOwnJob state=${_agentStates.value[sessionId]}")
+            FileLogger.d(TAG, "stream finally: sid=$sessionId isOwnJob=$isOwnJob state=${agentStates.value[sessionId]}")
             // 子会话并发名额的兜底释放：正常路径已由 COMPLETED/FAILED/STOPPED 事件移出活跃集合，
             // 这里覆盖取消（如切换工作区的 stopAllAgents）、外层异常等不发事件的收尾路径。
             // 已释放时 release 返回 false 无副作用；不在此补发通知——需要通知的路径都各自处理过。
@@ -2710,7 +2707,7 @@ class AIAgentViewModel @Inject constructor(
 
             // 先发布本轮终态，再 flush/处理队列；否则接替的新 job 会先 started，
             // 这里再 finished 会把新轮次误标成已结束。
-            val finishState = _agentStates.value[sessionId]
+            val finishState = agentStates.value[sessionId]
             val finishStatus = when {
                 runStatus != "success" -> runStatus
                 finishState is AgentUIState.Error -> "error"
@@ -2726,7 +2723,7 @@ class AIAgentViewModel @Inject constructor(
             }
 
             // 正常完成时先回到 Idle，再处理队列；队列若有下一轮会重新设 Streaming
-            val currentState = _agentStates.value[sessionId]
+            val currentState = agentStates.value[sessionId]
             if (currentState !is AgentUIState.Error && currentState !is AgentUIState.Streaming) {
                 setAgentState(sessionId, AgentUIState.Idle)
             }
@@ -2796,7 +2793,7 @@ class AIAgentViewModel @Inject constructor(
         jobs.forEach { it.cancel() }
         sessionJobs.clear()
         _runningCommandSessions.value = emptySet()
-        _agentStates.value = _agentStates.value.mapValues { AgentUIState.Idle }
+        agentStateStore.reset()
         _streamingTexts.value = emptyMap()
         _streamingReasonings.value = emptyMap()
         _reasoningTimings.value = emptyMap()
@@ -2846,7 +2843,7 @@ class AIAgentViewModel @Inject constructor(
         val pendingPermission = toolPermissionManager.pendingForSession(sessionId)
         val stoppedText = context.getString(R.string.agent_stopped_by_user)
         val pendingNotifs = agentNotificationCenter.pendingCount(sessionId)
-        FileLogger.d(TAG, "stopAgent: sid=$sessionId runningTools=${runningTools.size} pendingPerm=${pendingPermission?.id} pendingNotifs=$pendingNotifs state=${_agentStates.value[sessionId]}")
+        FileLogger.d(TAG, "stopAgent: sid=$sessionId runningTools=${runningTools.size} pendingPerm=${pendingPermission?.id} pendingNotifs=$pendingNotifs state=${agentStates.value[sessionId]}")
         // 用户点了停止：若本轮 Final 的 AssistantText 在 stopAgent 之前已落库（streamingText
         // 还没来得及清），快照路径会与落库行同源、重复落库；若尚未落库，则由 stopRequested
         // 标记让 AssistantText 路径补「已停止」。两边串行消费同一个标记，只有一边会真正落库。
@@ -2980,7 +2977,7 @@ class AIAgentViewModel @Inject constructor(
         _queuedRequests.value = _queuedRequests.value - sessionId
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
-        _agentStates.value = _agentStates.value - sessionId
+        agentStateStore.remove(sessionId)
         _streamingTexts.value = _streamingTexts.value - sessionId
         setStreamingReasoning(sessionId, null)
         pendingAssistantTextStop.remove(sessionId)

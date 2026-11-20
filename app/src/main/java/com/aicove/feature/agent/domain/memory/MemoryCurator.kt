@@ -1,6 +1,7 @@
 package com.aicove.feature.agent.domain.memory
 
 import com.aicove.core.util.FileLogger
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,7 +45,10 @@ class MemoryCurator @Inject constructor(
         complete: (suspend (String) -> String?)? = null
     ): Result {
         val memories = runCatching { memoryRepository.listMemories(projectRoot) }
-            .getOrDefault(emptyList())
+            .getOrElse {
+                if (it is CancellationException) throw it
+                emptyList()
+            }
         if (memories.size < MIN_MEMORIES_FOR_CURATION) return Result(0, 0)
 
         val toArchive = linkedSetOf<String>()
@@ -80,7 +84,10 @@ class MemoryCurator @Inject constructor(
         // ---- 第二层：一次小调用，只发摘要 ----
         val survivors = kept.filterNot { it.name in mergeGroups }
         if (complete != null && survivors.size >= MIN_MEMORIES_FOR_MODEL) {
-            val raw = runCatching { complete(buildDigest(survivors)) }.getOrNull()
+            val raw = runCatching { complete(buildDigest(survivors)) }.getOrElse {
+                if (it is CancellationException) throw it
+                null
+            }
             if (raw != null) {
                 parseVerdict(raw).forEach { verdict ->
                     when (verdict) {
@@ -97,16 +104,18 @@ class MemoryCurator @Inject constructor(
             }
         }
 
-        // 被合并掉的条目本身也要退场
-        mergeGroups.values.forEach { toArchive += it }
-        toArchive -= mergeGroups.keys
-
         // ---- 执行 ----
         var archived = 0
         var merged = 0
+        val mergedKeepNames = mutableSetOf<String>()
         mergeGroups.forEach { (keepName, otherNames) ->
-            if (merge(keepName, otherNames, projectRoot)) merged++
+            if (merge(keepName, otherNames, projectRoot)) {
+                merged++
+                mergedKeepNames += keepName
+                toArchive += otherNames
+            }
         }
+        toArchive -= mergeGroups.keys
         // 退场要按名字找回 Memory 对象：deleteMemory 需要 name 与作用域
         val byName = memories.associateBy { it.name }
         toArchive.forEach { name ->
@@ -120,14 +129,17 @@ class MemoryCurator @Inject constructor(
         // 幸存的条目 = 治理后既没归档也没被合并掉的：校验环节要逐条对照当前事实。
         // 与上面第二层的 survivors 不同名：那个是「进了模型判定的那批」，这个是「治理后的全部幸存者」。
         val remaining = memories.filter { memory ->
-            memory.name !in toArchive && mergeGroups.keys.none { it == memory.name }
+            memory.name !in toArchive && memory.name !in mergedKeepNames
         }
         return Result(archived, merged, remaining)
     }
 
-    /** 合并：把其它条目的正文并进保留项（本地读内容，不上传），再把它们归档。 */
+    /** 合并：把其它条目的正文并进保留项（本地读内容，不上传）。 */
     private suspend fun merge(keepName: String, otherNames: List<String>, projectRoot: String): Boolean {
-        val all = runCatching { memoryRepository.listMemories(projectRoot) }.getOrDefault(emptyList())
+        val all = runCatching { memoryRepository.listMemories(projectRoot) }.getOrElse {
+            if (it is CancellationException) throw it
+            emptyList()
+        }
         val keep = all.firstOrNull { it.name == keepName } ?: return false
         val others = otherNames.mapNotNull { name -> all.firstOrNull { it.name == name } }
         if (others.isEmpty()) return false
@@ -148,7 +160,7 @@ class MemoryCurator @Inject constructor(
             }
         }.trim()
 
-        val saved = memoryRepository.saveMemory(
+        return memoryRepository.saveMemory(
             name = keep.name,
             description = keep.description,
             content = mergedContent,
@@ -158,9 +170,6 @@ class MemoryCurator @Inject constructor(
             source = keep.source,
             createdAt = keep.createdAt
         )
-        if (!saved) return false
-        others.forEach { other -> retire(other, projectRoot) }
-        return true
     }
 
     /**

@@ -5,10 +5,11 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -57,6 +58,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -184,6 +187,17 @@ internal fun ChatHeader(
                 var workbenchExpanded by remember { mutableStateOf(false) }
                 val shelfVisibility = remember { MutableTransitionState(false) }
                 shelfVisibility.targetState = workbenchExpanded
+                val shelfTransition = updateTransition(shelfVisibility, label = "workbench")
+                val shelfProgress = shelfTransition.animateFloat(
+                    transitionSpec = {
+                        if (targetState) keyframes {
+                            durationMillis = 260
+                            1.2f at 213
+                            1f at 260
+                        } else tween(180, easing = FastOutLinearInEasing)
+                    },
+                    label = "workbench-progress"
+                ) { if (it) 1f else 0f }
                 val density = LocalDensity.current
                 Box {
                     val moreBtnInteraction = remember { MutableInteractionSource() }
@@ -221,24 +235,20 @@ internal fun ChatHeader(
                             onDismissRequest = { workbenchExpanded = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            androidx.compose.animation.AnimatedVisibility(
-                                visibleState = shelfVisibility,
-                                enter = fadeIn(tween(180)) + expandVertically(
-                                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
-                                    expandFrom = Alignment.Top
-                                ) + scaleIn(
-                                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
-                                    initialScale = 0.92f,
-                                    transformOrigin = TransformOrigin(1f, 0f)
-                                ),
-                                exit = fadeOut(tween(140)) + shrinkVertically(
-                                    animationSpec = tween(190),
-                                    shrinkTowards = Alignment.Top
-                                ) + scaleOut(
-                                    animationSpec = tween(190),
-                                    targetScale = 0.92f,
-                                    transformOrigin = TransformOrigin(1f, 0f)
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        val progress = shelfProgress.value
+                                        alpha = (progress * 1.3f).coerceIn(0f, 1f)
+                                        scaleX = 0.96f + 0.04f * progress
+                                        scaleY = scaleX
+                                        transformOrigin = TransformOrigin(1f, 0f)
+                                    }
+                                    .drawWithContent {
+                                        clipRect(bottom = size.height * shelfProgress.value.coerceIn(0f, 1f)) {
+                                            drawContent()
+                                        }
+                                    }
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
