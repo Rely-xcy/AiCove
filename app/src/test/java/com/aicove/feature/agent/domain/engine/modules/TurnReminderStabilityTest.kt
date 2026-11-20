@@ -238,7 +238,7 @@ class TurnReminderStabilityTest {
         assertTrue(text.contains("[~] 重写 TodoTool"))
 
         // 记忆召回：主动记忆规则 + 召回清单都在
-        assertTrue(text.contains("长期记忆（开关已打开，你需要主动维护，用户能在设置里的记忆页看到）："))
+        assertTrue(text.contains("主动记忆已开启。按「记忆」规则维护有长期价值且有依据的信息，无合适内容时无需写入。"))
         assertTrue(text.contains("只使用与当前问题真正相关的记忆；无关的直接忽略，不必为了显得连贯而硬提。"))
         assertTrue(text.contains("全局记忆 (跨项目个人偏好"))
         assertTrue(text.contains("prefers-brief"))
@@ -252,7 +252,7 @@ class TurnReminderStabilityTest {
         }
 
         // 子代理：不给主动记忆规则、不给工作状态，清单纪律仍走系统提示词的 subAgentRules
-        assertFalse(text.contains("长期记忆（开关已打开"))
+        assertFalse(text.contains("主动记忆已开启。"))
         assertFalse(text.contains("## 会话工作状态"))
         assertFalse(text.contains("① 开始多步任务"))
         // 清单本身照旧给到子代理
