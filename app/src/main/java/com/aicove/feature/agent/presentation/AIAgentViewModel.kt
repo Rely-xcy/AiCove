@@ -2969,7 +2969,7 @@ class AIAgentViewModel @Inject constructor(
      * 已删除的会话补送通知或执行队列下一条——白烧一轮 LLM、往不存在的会话落孤儿消息。
      */
     private fun clearSessionRuntimeState(sessionId: String) {
-        subAgentEventBus.release(sessionId)
+        subAgentEventBus.release(sessionId).also { clearSessionChatUiState(sessionId) }
         // 先清队列再取消 job：cancel 可能在调用栈内同步跑 finally → flushPendingNotifications，
         // 队列已空则直接返回，不会为已删除会话再起一轮。
         agentNotificationCenter.clear(sessionId)

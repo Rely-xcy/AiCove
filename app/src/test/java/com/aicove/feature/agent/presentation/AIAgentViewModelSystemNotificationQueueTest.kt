@@ -183,6 +183,40 @@ class AIAgentViewModelSystemNotificationQueueTest {
     }
 
     @Test
+    fun deletingSessionClearsItsMessageUiStateAndPreservesOtherSessions() {
+        val otherSession = "other-session"
+        viewModel.turnMessageKeys[SID] = mutableMapOf(
+            "user-1" to "turn:user-1",
+            "tool-1" to "turn:user-1",
+            "assistant-1" to "turn:user-1",
+        )
+        viewModel.turnMessageKeys[otherSession] = mutableMapOf("other-user" to "turn:other-user")
+        viewModel.setToolExpanded("tool-1", true)
+        viewModel.setToolExpanded("toolgroup:tool-1", true)
+        viewModel.setToolExpanded("other-tool", true)
+        viewModel.setTurnExpanded("turn:user-1", true)
+        viewModel.setTurnExpanded("turn:other-user", true)
+        viewModel.setReasoningExpanded("assistant-1", true)
+        viewModel.setReasoningExpanded(viewModel.streamingReasoningKey(SID), true)
+        viewModel.setReasoningExpanded("other-assistant", true)
+        coEvery { sessions.deleteSession(SID) } returns listOf(SID)
+
+        viewModel.deleteSession(SID)
+        mainDispatcher.scheduler.runCurrent()
+
+        assertFalse(viewModel.turnMessageKeys.containsKey(SID))
+        assertFalse(viewModel.toolExpansionOverrides.containsKey("tool-1"))
+        assertFalse(viewModel.toolExpansionOverrides.containsKey("toolgroup:tool-1"))
+        assertFalse(viewModel.turnExpansionOverrides.containsKey("turn:user-1"))
+        assertFalse(viewModel.reasoningExpansionOverrides.containsKey("assistant-1"))
+        assertFalse(viewModel.reasoningExpansionOverrides.containsKey(viewModel.streamingReasoningKey(SID)))
+        assertEquals(mapOf("other-user" to "turn:other-user"), viewModel.turnMessageKeys[otherSession])
+        assertEquals(true, viewModel.toolExpansionOverrides["other-tool"])
+        assertEquals(true, viewModel.turnExpansionOverrides["turn:other-user"])
+        assertEquals(true, viewModel.reasoningExpansionOverrides["other-assistant"])
+    }
+
+    @Test
     fun stopEchoesTheEditedQueuedRequestWhileHistoryIsStillLoading() = runBlocking {
         val historyStarted = CompletableDeferred<Unit>()
         coEvery { persistence.buildHistory(any(), any()) } coAnswers {
