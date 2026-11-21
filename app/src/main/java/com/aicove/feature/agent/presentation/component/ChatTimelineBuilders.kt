@@ -9,7 +9,7 @@ internal fun buildTruncatedTurnItems(
     expanded: Boolean,
     groupOverrides: Map<String, Boolean>,
 ): List<ChatRenderItem> {
-    val resultId = if (running) null else messages.lastOrNull { it.isResultCandidate() }?.id
+    val resultId = if (running) null else messages.lastOrNull()?.takeIf { it.isResultCandidate() }?.id
     val items = mutableListOf<ChatRenderItem>()
     var process = mutableListOf<AgentUIMessage>()
     var processTail = mutableListOf<ChatRenderItem>()
