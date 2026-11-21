@@ -3,8 +3,13 @@
     <string name="plugin_sources_current">插件源：%1$s</string>
     <string name="plugin_sources_title">插件源</string>
     <string name="plugin_sources_upstream">上游</string>
-    <string name="plugin_sources_hint">点击一个来源立即切换并记住选择。商店仅显示所选来源的插件，不会自动跨源更新。</string>
+    <string name="plugin_sources_hint">选择一个来源切换浏览；全部来源会合并列表，安装与更新仍按原来源识别。</string>
     <string name="plugin_sources_selected">已选择</string>
+    <string name="plugin_sources_index_count">索引源数量：%1$d</string>
+    <string name="plugin_sources_custom_count">自定义源：%1$d</string>
+    <string name="plugin_sources_manage_custom">管理自定义索引</string>
+    <string name="plugin_sources_item_count">已加载 %1$d 条</string>
+    <string name="plugin_sources_item_origin">来源：%1$s</string>
     <string name="plugin_sources_custom">自定义索引</string>
     <string name="plugin_sources_custom_hint">每行一个 GitHub 仓库或索引直链。保存后点击上方列表中的来源即可切换；删除某行并保存可移除该自定义源。</string>
     <string name="plugin_sources_saved">已保存，可在上方选择来源。</string>

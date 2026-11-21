@@ -3,8 +3,13 @@
     <string name="plugin_sources_current">Plugin source: %1$s</string>
     <string name="plugin_sources_title">Plugin sources</string>
     <string name="plugin_sources_upstream">Upstream</string>
-    <string name="plugin_sources_hint">Tap a source to switch and remember your choice. The store only shows plugins from the selected source and does not automatically update across sources.</string>
+    <string name="plugin_sources_hint">Choose a source to filter the store. All sources merges the lists; installs and updates still match their original source.</string>
     <string name="plugin_sources_selected">Selected</string>
+    <string name="plugin_sources_index_count">Indexes: %1$d</string>
+    <string name="plugin_sources_custom_count">Custom: %1$d</string>
+    <string name="plugin_sources_manage_custom">Manage custom indexes</string>
+    <string name="plugin_sources_item_count">%1$d loaded</string>
+    <string name="plugin_sources_item_origin">Source: %1$s</string>
     <string name="plugin_sources_custom">Custom indexes</string>
     <string name="plugin_sources_custom_hint">One GitHub repository or direct index URL per line. Save, then select a source above to switch. Remove a line and save to delete that custom source.</string>
     <string name="plugin_sources_saved">Saved. You can select a source above.</string>

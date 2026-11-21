@@ -26,7 +26,7 @@
     <string name="muse_plugin_publish_manifest_too_large">plugin.json 超过 1 MB。</string>
     <string name="muse_plugin_publish_bundle_unsupported">组合包包含多份清单，请拆分成单个插件包后发布。</string>
     <string name="muse_plugin_sources_all">全部来源</string>
-    <string name="muse_plugin_sources_all_hint">聚合所有内置与自定义来源；也可选择下方单一来源。</string>
+    <string name="muse_plugin_sources_all_hint">聚合全部索引；同名插件会按来源分别显示。</string>
     <string name="plugins_backup_section">备份与还原事件</string>
     <string name="plugins_backup_export_summary">插件数据：已导出 %1$d 个，跳过 %2$d 个</string>
     <string name="plugins_backup_restore_summary">插件数据：已恢复 %1$d 个，跳过 %2$d 个，失败 %3$d 个</string>

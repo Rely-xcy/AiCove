@@ -122,6 +122,10 @@ internal fun PluginStoreSection(
         }
     }
 
+    val loadedCountsBySourceId = remember(state.items, state.loading) {
+        if (state.loading) emptyMap() else state.items.groupingBy { it.source.id }.eachCount()
+    }
+    val showSourceOrigin = state.selectedSourceId == PluginIndexDefaults.ALL_SOURCES_ID
     val filteredItems = remember(state.items, searchQuery, languageTag) {
         val query = searchQuery.trim().lowercase()
         if (query.isEmpty()) {
@@ -224,6 +228,7 @@ internal fun PluginStoreSection(
                                 StorePluginRow(
                                     item = item,
                                     languageTag = languageTag,
+                                    showSourceOrigin = showSourceOrigin,
                                     onClick = { onOpenDetail(item) }
                                 )
                             }
@@ -235,9 +240,10 @@ internal fun PluginStoreSection(
         }
     }
     if (showSources) {
-        PluginStoreSourcesDialog(
+        PluginStoreSourcesSheet(
             sources = state.sources.ifEmpty { PluginIndexDefaults.builtIns },
             selectedSourceId = state.selectedSourceId,
+            loadedCountsBySourceId = loadedCountsBySourceId,
             onSelect = viewModel::selectSource,
             onSaveCustomSources = viewModel::saveCustomSources,
             onDismiss = { showSources = false }
@@ -251,7 +257,12 @@ private fun pluginVersionText(version: String?): String =
 
 /** 商店列表与已安装列表同版式：图标 + 名称 + 描述；商店不需要开关，点击进入独立详情页。 */
 @Composable
-private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: () -> Unit) {
+private fun StorePluginRow(
+    item: PluginStoreItem,
+    languageTag: String,
+    showSourceOrigin: Boolean,
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -326,6 +337,15 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth()
             )
+            if (showSourceOrigin) {
+                Text(
+                    text = stringResource(R.string.plugin_sources_item_origin, pluginSourceName(item.source)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.semanticColors.subtleText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(Spacing.sm))

@@ -26,7 +26,7 @@
     <string name="muse_plugin_publish_manifest_too_large">plugin.json exceeds 1 MB.</string>
     <string name="muse_plugin_publish_bundle_unsupported">The bundle contains multiple manifests. Publish each plugin as a separate package.</string>
     <string name="muse_plugin_sources_all">All sources</string>
-    <string name="muse_plugin_sources_all_hint">Aggregate built-in and custom sources, or select a single source below.</string>
+    <string name="muse_plugin_sources_all_hint">Combine all indexes; same-named plugins remain separate by source.</string>
     <string name="plugins_backup_section">Backup and restore events</string>
     <string name="plugins_backup_export_summary">Plugin data: %1$d exported, %2$d skipped</string>
     <string name="plugins_backup_restore_summary">Plugin data: %1$d restored, %2$d skipped, %3$d failed</string>
