@@ -137,6 +137,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -292,8 +293,7 @@ class AIAgentViewModel @Inject constructor(
         return if (event.error.isBlank()) localized else "$localized\n${event.error}"
     }
 
-    private val _messageLimit = MutableStateFlow<Map<String, Int>>(emptyMap())
-    private val defaultLimit = 30
+    private val messageWindow = ChatMessageWindowState()
 
     /** 聊天记录搜索：命中条数上限、输入防抖、片段上下文宽度、定位时预留的分页余量。 */
     private val chatSearchLimit = 50
@@ -394,13 +394,13 @@ class AIAgentViewModel @Inject constructor(
         val sid = _currentSessionId.value ?: return
         val state = messagesState.value
         if (state.sessionId != sid || !state.loaded || !state.hasMore) return
-        val currentLimit = _messageLimit.value[sid] ?: defaultLimit
+        val currentLimit = messageWindow.limitFor(sid)
         // 在途判定：台账已变、但状态里的 limit 还没追上来，说明上一次加载还没产出。
         // 用数值比较而不是「在途集合」：没有任何需要清的状态，就不会残留把上滑永久拦死。
         if (state.limit != currentLimit) return
         // 按当前上限的一定比例递增：一轮长过程折叠后可见项很少，定步长 30 条要连续补载很多次才能翻过它。
         // 单次步长封顶 90：每次补载都要重查、重转换并重建列表，步长随上限无界增长会让单次卡顿越来越长。
-        _messageLimit.value = _messageLimit.value + (sid to (currentLimit + (currentLimit / 2).coerceIn(30, 90)))
+        messageWindow.loadMore(sid)
     }
 
     /** 容器初始化实时进度（解压/部署/装包），AI 页底部气泡展示。 */
@@ -519,10 +519,8 @@ class AIAgentViewModel @Inject constructor(
                 val needed = withContext(Dispatchers.IO) {
                     agentMessageDao.countMessagesFromTimestamp(hit.sessionId, timestamp)
                 } + messageLimitMargin
-                val current = _messageLimit.value[hit.sessionId] ?: defaultLimit
-                if (needed > current) {
-                    _messageLimit.value = _messageLimit.value + (hit.sessionId to needed)
-                }
+                if (_currentSessionId.value != hit.sessionId) return@launch
+                messageWindow.includeAtLeast(hit.sessionId, needed)
             }
             _pendingScrollMessage.value = hit.sessionId to hit.messageId
         }
@@ -850,8 +848,9 @@ class AIAgentViewModel @Inject constructor(
      */
     val messagesState: StateFlow<ChatMessagesState> = combine(
         _currentSessionId,
-        _messageLimit
-    ) { id, limitMap -> id to (limitMap[id] ?: defaultLimit) }
+        messageWindow.limits
+    ) { id, limits -> id to messageWindow.limitFor(id, limits) }
+        .distinctUntilChanged()
         .flatMapLatest { (id, limit) ->
             if (id == null) flowOf(ChatMessagesState(null, emptyList(), loaded = false))
             else combine(
@@ -866,10 +865,7 @@ class AIAgentViewModel @Inject constructor(
                     else (paged + summaries).distinctBy { it.id }.sortedBy { it.timestamp }
                     ChatMessagesState(
                         sessionId = id,
-                        messages = list.asSequence()
-                            .map { entity -> entity.toUIMessage() }
-                            .filter { it.hasRenderableChatContent() }
-                            .toList(),
+                        messages = list.mapNotNull { entity -> entity.toUIMessage().takeIf { it.hasRenderableChatContent() } },
                         loaded = true,
                         hasMore = paged.size >= limit,
                         isLoadingMore = false,
@@ -3440,6 +3436,7 @@ class AIAgentViewModel @Inject constructor(
 
     fun selectSession(id: String) {
         if (_currentSessionId.value == id) return
+        messageWindow.reset(id)
         _currentSessionId.value = id
     }
 

@@ -124,6 +124,35 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate_69_to_70_adds_message_session_timestamp_index() {
+        helper.createDatabase(dbName, 69).close()
+
+        val db = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .build()
+        val indexes = mutableSetOf<String>()
+        val sqlite = db.openHelper.writableDatabase
+        sqlite.query("SELECT name FROM sqlite_master WHERE type='index'")
+            .use { cursor -> while (cursor.moveToNext()) indexes += cursor.getString(0) }
+        val queryPlan = buildString {
+            sqlite.query(
+                "EXPLAIN QUERY PLAN SELECT * FROM (SELECT * FROM agent_messages " +
+                    "WHERE sessionId = 'session' ORDER BY timestamp DESC LIMIT 30) ORDER BY timestamp ASC"
+            ).use { cursor ->
+                while (cursor.moveToNext()) append(cursor.getString(3)).append('\n')
+            }
+        }
+        db.close()
+
+        assertTrue(
+            "迁移 70 应新增 agent_messages(sessionId, timestamp) 索引，实际索引：$indexes",
+            "index_agent_messages_sessionId_timestamp" in indexes
+        )
+        assertTrue("旧单列索引应由复合索引取代，实际索引：$indexes", "index_agent_messages_sessionId" !in indexes)
+        assertTrue("分页排序查询应使用复合索引，实际查询计划：$queryPlan", queryPlan.contains("index_agent_messages_sessionId_timestamp"))
+    }
+
+    @Test
     fun migrate_65_to_66_adds_session_briefs() {
         helper.createDatabase(dbName, 65).close()
 

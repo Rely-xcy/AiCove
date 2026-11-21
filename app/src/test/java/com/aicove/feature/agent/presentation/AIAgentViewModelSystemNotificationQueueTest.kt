@@ -10,6 +10,8 @@ import com.aicove.feature.agent.domain.notification.AgentNotificationFormatter
 import com.aicove.feature.agent.domain.notification.AgentNotificationKind
 import com.aicove.feature.agent.domain.notification.NotificationOutcome
 import com.aicove.feature.agent.domain.notification.PendingNotification
+import com.aicove.feature.agent.data.local.dao.AgentMessageDao
+import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
 import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.terminal.domain.TabFinishedEvent
@@ -30,6 +32,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -66,6 +69,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
     private lateinit var viewModel: AIAgentViewModel
     private lateinit var notificationCenter: AgentNotificationCenter
     private val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
+    private val messageDao = mockk<AgentMessageDao>(relaxed = true)
     private val sessions = mockk<SessionUseCase>(relaxed = true) {
         coEvery { getSessionById(any()) } returns null
     }
@@ -79,6 +83,8 @@ class AIAgentViewModelSystemNotificationQueueTest {
         // 断言之间不需要等待。
         Dispatchers.setMain(mainDispatcher)
         notificationCenter = AgentNotificationCenter()
+        every { messageDao.getMessagesBySessionPaged(any(), any()) } returns flowOf(emptyList())
+        every { messageDao.getContextSummaryRows(any()) } returns flowOf(emptyList())
         viewModel = newViewModel()
         // queuedRequests 按 _currentSessionId 取队列，先切到被测会话。
         viewModel.selectSession(SID)
@@ -98,6 +104,38 @@ class AIAgentViewModelSystemNotificationQueueTest {
             }
         }
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun reopeningSessionResetsOlderPageLimitButSearchHitExpandsIt() = runBlocking {
+        val hitTimestamp = 123L
+        coEvery { messageDao.getMessageById("old-hit") } returns AgentMessageEntity(
+            id = "old-hit",
+            sessionId = SID,
+            role = MessageRole.USER.name,
+            content = "search hit",
+            timestamp = hitTimestamp,
+        )
+        coEvery { messageDao.countMessagesFromTimestamp(SID, hitTimestamp) } returns 100
+
+        viewModel.openChatSearchHit(
+            ChatSearchHit(SID, "session", "old-hit", "search hit", hitTimestamp)
+        )
+        val searchWindow = withTimeout(3_000) {
+            viewModel.messagesState.first { it.sessionId == SID && it.limit == 105 }
+        }
+        assertEquals(105, searchWindow.limit)
+
+        viewModel.selectSession("other-session")
+        withTimeout(3_000) {
+            viewModel.messagesState.first { it.sessionId == "other-session" && it.limit == 30 }
+        }
+        viewModel.selectSession(SID)
+
+        val reopened = withTimeout(3_000) {
+            viewModel.messagesState.first { it.sessionId == SID && it.limit == 30 }
+        }
+        assertEquals(30, reopened.limit)
     }
 
     @Test
@@ -270,7 +308,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
         agentWorkflow = mockk(relaxed = true),
         toolRegistry = mockk(relaxed = true),
         agentEngine = mockk(relaxed = true),
-        agentMessageDao = mockk(relaxed = true),
+        agentMessageDao = messageDao,
         agentDatabase = mockk(relaxed = true),
         chatSessionDao = mockk(relaxed = true),
         llmCallRecordDao = mockk(relaxed = true),

@@ -15,7 +15,7 @@ import kotlinx.serialization.json.Json
 
 @Entity(
     tableName = "agent_messages",
-    indices = [Index(value = ["sessionId"])]
+    indices = [Index(value = ["sessionId", "timestamp"])]
 )
 data class AgentMessageEntity(
     @PrimaryKey val id: String,
