@@ -8,6 +8,8 @@
     <string name="plugin_sources_index_count">索引源数量：%1$d</string>
     <string name="plugin_sources_custom_count">自定义源：%1$d</string>
     <string name="plugin_sources_manage_custom">管理自定义索引</string>
+    <string name="plugin_sources_custom_expanded">已展开</string>
+    <string name="plugin_sources_custom_collapsed">已收起</string>
     <string name="plugin_sources_item_count">已加载 %1$d 条</string>
     <string name="plugin_sources_item_origin">来源：%1$s</string>
     <string name="plugin_sources_custom">自定义索引</string>

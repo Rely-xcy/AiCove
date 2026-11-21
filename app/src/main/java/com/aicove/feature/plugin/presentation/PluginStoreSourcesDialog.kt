@@ -35,8 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.expanded
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,6 +92,10 @@ internal fun PluginStoreSourcesSheet(
     val customCount = sources.count { source ->
         PluginIndexDefaults.builtIns.none { it.id == source.id }
     }
+    val customStateDescription = stringResource(
+        if (customExpanded) R.string.plugin_sources_custom_expanded
+        else R.string.plugin_sources_custom_collapsed
+    )
 
     fun switchSource(sourceId: String) {
         if (busy) return
@@ -201,7 +205,7 @@ internal fun PluginStoreSourcesSheet(
                 enabled = !busy,
                 color = MaterialTheme.semanticColors.cardSurface,
                 shape = RoundedCornerShape(Radius.mdLarge),
-                modifier = Modifier.semantics { expanded = customExpanded }
+                modifier = Modifier.semantics { stateDescription = customStateDescription }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),

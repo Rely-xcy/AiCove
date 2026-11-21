@@ -8,6 +8,8 @@
     <string name="plugin_sources_index_count">Indexes: %1$d</string>
     <string name="plugin_sources_custom_count">Custom: %1$d</string>
     <string name="plugin_sources_manage_custom">Manage custom indexes</string>
+    <string name="plugin_sources_custom_expanded">Expanded</string>
+    <string name="plugin_sources_custom_collapsed">Collapsed</string>
     <string name="plugin_sources_item_count">%1$d loaded</string>
     <string name="plugin_sources_item_origin">Source: %1$s</string>
     <string name="plugin_sources_custom">Custom indexes</string>
