@@ -9,6 +9,7 @@ class ChatMessageWindowStateTest {
     fun searchWindowExpandsForHitAndResetsWhenSessionIsReopened() {
         val state = ChatMessageWindowState()
 
+        assertEquals(30, state.limitFor(null))
         assertEquals(30, state.limitFor("session-1"))
         state.includeAtLeast("session-1", 105)
         assertEquals(105, state.limitFor("session-1"))

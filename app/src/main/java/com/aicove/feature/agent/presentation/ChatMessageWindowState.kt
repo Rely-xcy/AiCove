@@ -8,8 +8,8 @@ internal class ChatMessageWindowState(private val defaultLimit: Int = 30) {
     private val _limits = MutableStateFlow<Map<String, Int>>(emptyMap())
     val limits: StateFlow<Map<String, Int>> = _limits.asStateFlow()
 
-    fun limitFor(sessionId: String, snapshot: Map<String, Int> = _limits.value): Int =
-        snapshot[sessionId] ?: defaultLimit
+    fun limitFor(sessionId: String?, snapshot: Map<String, Int> = _limits.value): Int =
+        sessionId?.let(snapshot::get) ?: defaultLimit
 
     fun reset(sessionId: String) {
         _limits.value = _limits.value - sessionId
