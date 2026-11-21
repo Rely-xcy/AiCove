@@ -79,4 +79,19 @@ class HasVisibleContentTest {
         assertTrue("  hello  ".hasVisibleContent())
         assertTrue("\n\ttest\n".hasVisibleContent())
     }
+
+    @Test
+    fun assistantImageAttachment_isRenderableWithoutText() {
+        val image = AgentUIMessage(
+            id = "image-result",
+            role = MessageRole.ASSISTANT,
+            content = "",
+            attachments = listOf(
+                AgentAttachment("image.png", "/image.png", "/image.png", "image/png", 1L, true)
+            ),
+        )
+
+        assertTrue(image.hasRenderableChatContent())
+        assertFalse(AgentUIMessage("empty", MessageRole.ASSISTANT, "").hasRenderableChatContent())
+    }
 }

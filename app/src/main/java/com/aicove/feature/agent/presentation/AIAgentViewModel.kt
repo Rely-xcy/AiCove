@@ -867,12 +867,8 @@ class AIAgentViewModel @Inject constructor(
                     ChatMessagesState(
                         sessionId = id,
                         messages = list.asSequence()
-                            .filterNot {
-                                it.role == MessageRole.ASSISTANT.name &&
-                                    !it.content.hasVisibleContent() &&
-                                    it.reasoning.isNullOrEmpty()
-                            }
                             .map { entity -> entity.toUIMessage() }
+                            .filter { it.hasRenderableChatContent() }
                             .toList(),
                         loaded = true,
                         hasMore = paged.size >= limit,

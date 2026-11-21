@@ -63,6 +63,87 @@ class ToolGroupExpansionTest {
     }
 
     @Test
+    fun truncatedTurn_attachmentRemainsBeforeLaterAssistantResult() {
+        val attachment = AgentAttachment(
+            fileName = "report.pdf",
+            containerPath = "~/workspace/report.pdf",
+            localPath = "/tmp/report.pdf",
+            mimeType = "application/pdf",
+            sizeBytes = 1024,
+            isImage = false,
+        )
+        val send = tool("send").copy(toolName = "sendFile", attachments = listOf(attachment))
+        val window = listOf(send, tool("later-tool"), assistant("final"))
+        val turnKeys = mapOf(
+            "send" to "turn:user-head",
+            "later-tool" to "turn:user-head",
+            "final" to "turn:user-head",
+        )
+
+        val expanded = flattenChatProcesses(buildChatItems(
+            window,
+            emptyMap(),
+            turnOverrides = mapOf("turn:user-head" to true),
+            sessionId = "session-1",
+            turnKeys = turnKeys,
+        ))
+        val collapsed = flattenChatProcesses(buildChatItems(
+            window,
+            emptyMap(),
+            turnOverrides = mapOf("turn:user-head" to false),
+            sessionId = "session-1",
+            turnKeys = turnKeys,
+        ))
+
+        val expandedSendIndex = expanded.indexOfFirst { it.key == "send" }
+        assertTrue("expanded: file must stay before later tool output", expandedSendIndex < expanded.indexOfFirst { it.key == "later-tool" })
+        assertTrue("expanded: file must stay before the final answer", expandedSendIndex < expanded.indexOfFirst { it.key == "final" })
+        assertTrue("collapsed: file must stay before the final answer", collapsed.indexOfFirst { it.key == "send" } < collapsed.indexOfFirst { it.key == "final" })
+    }
+
+    @Test
+    fun assistantImageAttachment_staysVisibleWithoutText() {
+        val image = assistant("image-result").copy(
+            content = "",
+            attachments = listOf(
+                AgentAttachment("image.png", "/image.png", "/image.png", "image/png", 1L, true)
+            ),
+        )
+
+        val rendered = items(listOf(user("u0"), image), turnOverrides = mapOf("turn:u0" to true))
+
+        assertTrue(rendered.any { it.message.id == "image-result" })
+    }
+
+    @Test
+    fun asyncChatItems_areNotBuiltSynchronouslyBeforeBackgroundResult() {
+        val expected = listOf(ChatRenderItem(user("u0"), "u0", "USER"))
+        var synchronousBuilds = 0
+
+        val waiting = resolveChatItems(
+            messagesReady = true,
+            useAsyncItems = true,
+            asyncItems = null,
+        ) {
+            synchronousBuilds++
+            expected
+        }
+        val ready = resolveChatItems(
+            messagesReady = true,
+            useAsyncItems = true,
+            asyncItems = expected,
+        ) {
+            synchronousBuilds++
+            emptyList()
+        }
+
+        assertTrue(waiting.isEmpty())
+        assertEquals(expected, ready)
+        assertEquals("large chat item lists stay off the composition thread", 0, synchronousBuilds)
+        assertEquals(expected, resolveChatItems(true, false, null) { expected })
+    }
+
+    @Test
     fun attachmentTool_keepsTimelinePosition_notPushedToTurnEnd() {
         // 带附件的工具（sendFile / generateImage 产出的文件行）是常显项：停在自己的时间线位置，
         // 不推到该轮最末；晚于它的过程项另起一段轮头。

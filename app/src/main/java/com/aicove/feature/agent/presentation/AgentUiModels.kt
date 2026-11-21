@@ -283,6 +283,9 @@ fun CharSequence.hasVisibleContent(): Boolean {
     return false
 }
 
+internal fun AgentUIMessage.hasRenderableChatContent(): Boolean =
+    role != MessageRole.ASSISTANT || content.hasVisibleContent() || !reasoning.isNullOrEmpty() || attachments.isNotEmpty()
+
 /**
  * 运行中工具的实时累积输出。仅存内存、不落库：用于在该工具消息气泡里实时叠加显示
  * 命令逐行 stdout；命令结束后清空，最终完整结果走正常 persist 落库。
