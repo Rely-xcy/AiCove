@@ -46,9 +46,10 @@ class NetworkConnectivityObserver @Inject constructor(
             connectivityManager.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     val changed = network != lastNetwork
+                    val switched = lastNetwork != null && changed
                     lastNetwork = network
                     _isOnline.value = true
-                    NetworkStatus.update(true)
+                    NetworkStatus.update(true, networkChanged = switched)
                     if (changed) {
                         FileLogger.i(TAG, "默认网络可用，触发重连")
                         _recovered.tryEmit(Unit)

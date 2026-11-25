@@ -7,10 +7,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
 import retrofit2.await
@@ -34,9 +38,6 @@ private const val TAG = "RetryPolicy"
 
 // 对应 opencode 的 attempts = 3（最多 2 次重试）→ 提升至 6 次重试以应对不稳定网络
 const val MAX_NETWORK_RETRIES = 6
-
-/** 网络不可用时单次等待恢复的上限；超时后照常重试，交由重试逻辑自行失败。 */
-private const val NETWORK_WAIT_TIMEOUT_MS = 30_000L
 
 /**
  * 每次流式尝试从发起请求到首个有效内容的等待上限，包含等待响应头。
@@ -108,11 +109,18 @@ suspend fun withFirstContentTimeout(
                     attemptJob.cancel(CancellationException("First content timeout"))
                 }
             }
+            val startNetworkRevision = NetworkStatus.revision
+            val networkMonitor = launch(start = CoroutineStart.UNDISPATCHED) {
+                NetworkStatus.state.collect { network ->
+                    if (!network.online || network.revision != startNetworkRevision) guard.closeBody()
+                }
+            }
             guard.timer = timer
             timer.start()
             try {
                 block(guard)
             } finally {
+                networkMonitor.cancel()
                 timer.cancel()
                 handle.dispose()
             }
@@ -179,17 +187,53 @@ fun exponentialDelayMillis(retryIndex: Int): Long {
     return min(wait, maxDelay)
 }
 
-/**
- * 网络不可用时先等待恢复（最长 [NETWORK_WAIT_TIMEOUT_MS]），避免把有限的重试次数消耗在
- * 完全断网的窗口内（如切后台后网络被系统短暂收回）。超时后照常继续，交由重试逻辑自行失败。
- */
-private suspend fun awaitNetworkIfOffline() {
-    if (NetworkStatus.isOnline) return
-    withTimeoutOrNull(NETWORK_WAIT_TIMEOUT_MS) {
-        while (!NetworkStatus.isOnline) delay(500)
+private suspend fun awaitNetworkOrBackoff(
+    startRevision: Long,
+    backoffMillis: Long,
+    preserveBackoff: Boolean = false
+) {
+    if (preserveBackoff) {
+        if (backoffMillis > 0) delay(backoffMillis)
+        if (!NetworkStatus.isOnline) NetworkStatus.state.first { it.online }
+        return
     }
+
+    val current = NetworkStatus.state.value
+    if (!current.online) {
+        NetworkStatus.state.first { it.online }
+        return
+    }
+    if (current.revision != startRevision || backoffMillis <= 0) return
+
+    val changed = withTimeoutOrNull(backoffMillis) {
+        NetworkStatus.state.first { !it.online || it.revision != startRevision }
+    }
+    val latest = changed ?: NetworkStatus.state.value
+    if (!latest.online) NetworkStatus.state.first { it.online }
 }
 
+private class NetworkChangedCancellation : CancellationException("Network changed during request")
+
+private suspend fun <T> withNetworkCancellation(startRevision: Long, block: suspend () -> T): T =
+    supervisorScope {
+        val request = async { block() }
+        val monitor = launch(start = CoroutineStart.UNDISPATCHED) {
+            NetworkStatus.state.collect { network ->
+                if (!network.online || network.revision != startRevision) {
+                    request.cancel(NetworkChangedCancellation())
+                }
+            }
+        }
+        try {
+            request.await()
+        } catch (e: CancellationException) {
+            coroutineContext.ensureActive()
+            if (e is NetworkChangedCancellation) throw IOException("Network changed during request", e)
+            throw e
+        } finally {
+            monitor.cancel()
+        }
+    }
 /**
  * SSE 流中收到的 error 事件，携带错误码用于重试判定。
  *
@@ -386,10 +430,12 @@ fun extractRetryAfterMillis(t: Throwable): Long? {
     val http = findHttpException(t) ?: return null
     val header = http.response()?.headers()?.get("Retry-After") ?: return null
 
-    // 格式 1：纯秒数
+    // 格式 1：纯秒数。先封顶再乘，避免超大合法数值溢出后绕过上限。
     header.toLongOrNull()?.let { seconds ->
-        return seconds * 1000L
+        if (seconds <= 0) return null
+        return seconds.coerceAtMost(MAX_RETRY_AFTER_MILLIS / 1_000L) * 1_000L
     }
+    if (header.isNotEmpty() && header.all { it in '0'..'9' }) return MAX_RETRY_AFTER_MILLIS
 
     // 格式 2：HTTP 日期（RFC 1123）
     return runCatching {
@@ -469,8 +515,9 @@ suspend fun <T> retryStaircase(
 ): T {
     var attempt = 0
     while (true) {
+        val networkRevision = NetworkStatus.revision
         try {
-            return block()
+            return withNetworkCancellation(networkRevision, block)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -487,20 +534,23 @@ suspend fun <T> retryStaircase(
             val wait = retryDelayMillis(attempt, e)
             FileLogger.w(TAG, "网络请求失败，第 ${attempt + 1}/$maxRetries 次重试（等待 ${wait}ms）: ${e.describeForRetryLog()}")
             onRetry?.invoke(attempt + 1, maxRetries, e.toRetryErrorInfo())
-            awaitNetworkIfOffline()
             attempt++
-            if (wait > 0) delay(wait)
+            awaitNetworkOrBackoff(
+                networkRevision,
+                wait,
+                preserveBackoff = extractRetryAfterMillis(e)?.let { it > 0 } == true
+            )
         }
     }
 }
 
 /**
- * 流式请求的重试封装（保持原方法名）。
+ * 流式请求的重试封装（保持原方法名）。首个有效内容前保留网络重试与 Key 切换；
+ * 首个有效内容后异常直接抛出，不自动重发已展示的部分内容。
  *
- * @param onKeyFailure 多 Key 切换回调：在判定为「不可重试」的失败时先调用，入参为
- *        (触发失败, 是否允许重发)。仅当本次尝试尚未收到任何内容时才会传入允许重发；
- *        已吐字时仍可能切换（供后续请求用新 Key）但不会重发，避免用户看到重复内容。
- *        返回 false 时，尚未吐字的限流类失败会退避重试，其余抛出原异常。
+ * @param onKeyFailure 多 Key 切换回调：不可重试的失败会传入 (异常, 是否允许重发)；
+ *        已收到内容时仍可切换 Key 供后续请求使用，但不允许本次重发。首内容前无 Key 可切的限流失败会退避重试，
+ *        其余抛出原异常。
  * @param onRetry 重试前回调，参数为 (当前重试次数, 最大重试次数)；用于通知上层"正在重试"。
  *                回调在 delay 之前调用，确保 UI 能立即展示重试状态。声明为 suspend 以便
  *                调用方在其中通过 Flow 的 emit() 推送重试事件。
@@ -515,6 +565,7 @@ suspend fun streamWithStaircaseRetry(
 ) {
     var attempt = 0
     while (true) {
+        val networkRevision = NetworkStatus.revision
         var receivedContent = false
         try {
             attemptOnce { receivedContent = true }
@@ -524,20 +575,24 @@ suspend fun streamWithStaircaseRetry(
         } catch (e: Throwable) {
             coroutineContext.ensureActive()
             if (!isRetriableNetworkError(e)) {
-                if (onKeyFailure?.invoke(e, !receivedContent) == true) {
+                if (onKeyFailure?.invoke(e, !receivedContent) == true && !receivedContent) {
                     attempt = 0
                     continue
                 }
                 // 限流且尚未吐字、又无 Key 可切（单 Key）→ 退避重试；已吐字不重发，保持原行为
                 if (!(isRateLimitError(e) && !receivedContent)) throw e
             }
+            if (receivedContent) throw e
             if (attempt >= maxRetries) throw e
             val wait = retryDelayMillis(attempt, e)
             FileLogger.w(TAG, "流式请求失败，第 ${attempt + 1}/$maxRetries 次重试（等待 ${wait}ms）: ${e.describeForRetryLog()}")
             onRetry?.invoke(attempt + 1, maxRetries, e.toRetryErrorInfo())
-            awaitNetworkIfOffline()
             attempt++
-            if (wait > 0) delay(wait)
+            awaitNetworkOrBackoff(
+                networkRevision,
+                wait,
+                preserveBackoff = extractRetryAfterMillis(e)?.let { it > 0 } == true
+            )
         }
     }
 }

@@ -168,7 +168,13 @@ data class AgentUIMessage(
     val cachedInputTokens: Int = 0,
     // 历史数据：早期版本把模式提醒拼进了用户消息正文，这里承载按前缀折出来的提醒文本，
     // 由 UI 渲染为灰色提示条（气泡只显示剩余的用户原话）。新数据不再产生，见 [MODE_REMINDER_PREFIX]。
-    val legacyModeReminder: String? = null
+    val legacyModeReminder: String? = null,
+    /** 仅 ASSISTANT 且持久化 isError=true 时表示该回答在部分输出后中断。 */
+    val isInterrupted: Boolean = false,
+    /** 仍在聊天显示但已从模型上下文排除的消息（如重新生成前的旧 partial）。 */
+    val isContextExcluded: Boolean = false,
+    /** 仅最新一轮的中断回答可手动重生成；由聊天时间轴在展示时计算。 */
+    val isRegeneratable: Boolean = false
 )
 
 @Immutable
@@ -184,6 +190,35 @@ data class AgentAttachment(
 
 enum class MessageRole {
     USER, ASSISTANT, TOOL
+}
+
+internal fun isInterruptedAssistantRole(role: String, isError: Boolean): Boolean =
+    role == MessageRole.ASSISTANT.name && isError
+
+internal fun latestInterruptedAssistantId(messages: List<AgentUIMessage>): String? {
+    val assistant = messages.lastOrNull {
+        !it.isContextExcluded && !it.isCompactionMarker && !it.isContextSummary &&
+            !it.isCompactionFailure && !it.isBackgroundNotification && !it.isInterjection
+    }?.takeIf { it.role == MessageRole.ASSISTANT && it.isInterrupted } ?: return null
+    val assistantIndex = messages.indexOfLast { it.id == assistant.id }
+    if (assistantIndex <= 0) return null
+    val userIndex = (assistantIndex - 1 downTo 0).firstOrNull { index ->
+        val message = messages[index]
+        message.role == MessageRole.USER && !message.isContextExcluded &&
+            !message.isInterjection && !message.isBackgroundNotification
+    } ?: return null
+    val priorAssistantOrTool = (userIndex + 1 until assistantIndex).any {
+        val message = messages[it]
+        !message.isContextExcluded && !message.isCompactionMarker && !message.isContextSummary &&
+            !message.isCompactionFailure && !message.isBackgroundNotification && !message.isInterjection &&
+            (message.role == MessageRole.ASSISTANT || message.role == MessageRole.TOOL)
+    }
+    return if (priorAssistantOrTool) null else assistant.id
+}
+
+internal fun List<AgentUIMessage>.withLatestInterruptedAssistantAction(): List<AgentUIMessage> {
+    val latestId = latestInterruptedAssistantId(this) ?: return this
+    return map { it.copy(isRegeneratable = it.id == latestId) }
 }
 
 /**
@@ -321,7 +356,9 @@ data class QueuedRequest(
     val clientMessageId: String? = null,
 
     /** 是否把本轮用户消息落库；goal 续跑等内部轮次置 false，避免污染会话历史。 */
-    val persistUserMessage: Boolean = true
+    val persistUserMessage: Boolean = true,
+    /** 手动重生成时复用的原始用户行 id；与 goal 续跑的无用户行语义分开。 */
+    val replayUserMessageId: String? = null
 )
 
 /**

@@ -12,17 +12,29 @@ import com.aicove.feature.agent.domain.notification.NotificationOutcome
 import com.aicove.feature.agent.domain.notification.PendingNotification
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
+import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicove.feature.agent.domain.engine.AgentEngine
+import com.aicove.feature.agent.domain.model.AgentContext
+import com.aicove.feature.agent.domain.model.AgentImage
+import com.aicove.feature.agent.domain.model.AgentMessage
+import com.aicove.feature.agent.domain.model.AgentMode
+import com.aicove.feature.agent.domain.model.GoalStatus
 import com.aicove.feature.agent.domain.session.MessagePersistenceUseCase
+import com.aicove.feature.agent.domain.workflow.AgentEvent
+import com.aicove.feature.agent.domain.workflow.AgentWorkflow
 import com.aicove.feature.agent.domain.session.SessionUseCase
 import com.aicove.feature.terminal.domain.TabFinishedEvent
 import com.aicove.feature.terminal.domain.TerminalSessionManager
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
 import com.aicove.feature.workspace.domain.FileAccessProvider
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.firstArg
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -70,6 +82,13 @@ class AIAgentViewModelSystemNotificationQueueTest {
     private lateinit var notificationCenter: AgentNotificationCenter
     private val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
     private val messageDao = mockk<AgentMessageDao>(relaxed = true)
+    private val workflow = mockk<AgentWorkflow>(relaxed = true)
+    private val engine = mockk<AgentEngine>(relaxed = true)
+    private val generalSettings = mockk<com.aicove.feature.settings.data.repository.GeneralSettingsRepository>(relaxed = true)
+    private val fileAccess = mockk<FileAccessProvider>(relaxed = true) {
+        every { exists(any()) } returns true
+        every { isDirectory(any()) } returns true
+    }
     private val sessions = mockk<SessionUseCase>(relaxed = true) {
         coEvery { getSessionById(any()) } returns null
     }
@@ -292,6 +311,161 @@ class AIAgentViewModelSystemNotificationQueueTest {
         exitCode = 0
     )
 
+    @Test
+    fun failedPartialAssistant_isPersistedInterrupted_andDoesNotCompleteMemoryOrGoal() = runBlocking {
+        val session = ChatSessionEntity(
+            id = SID,
+            title = "test",
+            createdAt = 0,
+            updatedAt = 0,
+            workspacePath = WORKSPACE,
+            goal = "finish task",
+            goalStatus = GoalStatus.ACTIVE.name,
+            providerId = "bound-provider",
+            model = "bound-model"
+        )
+        coEvery { sessions.getSessionById(SID) } returns session
+        coEvery { persistence.buildHistory(SID, any()) } returns emptyList()
+        coEvery { generalSettings.goalMaxTurns() } returns 5
+        coEvery { generalSettings.goalMaxTokens() } returns 10_000
+        every { workflow.executeEvents(any(), any(), any()) } returns flowOf(
+            AgentEvent.AssistantText("partial", reasoning = "thinking", isInterrupted = true),
+            AgentEvent.Failed("network error")
+        )
+        viewModel.setWorkspace(WORKSPACE)
+
+        withTimeout(5_000) {
+            viewModel.executeAgentRequestStream(
+                request = "input",
+                projectRoot = WORKSPACE,
+                targetSessionId = SID
+            ).join()
+        }
+
+        coVerify {
+            persistence.persist(
+                SID,
+                MessageRole.ASSISTANT,
+                "partial",
+                id = any(),
+                reasoning = "thinking",
+                isError = true
+            )
+        }
+        verify(exactly = 0) { engine.onTurnCompleted(any()) }
+        coVerify(exactly = 0) { sessions.incrementGoalTurn(SID) }
+        coVerify(exactly = 0) { sessions.updateGoalStatus(SID, GoalStatus.EXHAUSTED) }
+        verify(exactly = 1) { workflow.executeEvents(any(), any(), any()) }
+    }
+
+    @Test
+    fun regenerateInterruptedAnswer_reusesUserRowAndImageContext_withoutPersistingAnotherUser() = runBlocking {
+        val userId = "user-original"
+        val assistantId = "assistant-partial"
+        val image = AgentImage("image/png", "base64-data", "~/workspace/image.png")
+        val userContent = "describe this image"
+        val history = listOf(
+            AgentMessage.UserMessage(id = userId, content = userContent, images = listOf(image)),
+            AgentMessage.AssistantMessage(id = assistantId, content = "partial", reasoning = "thinking")
+        )
+        val rows = mutableListOf(
+            AgentMessageEntity(userId, SID, MessageRole.USER.name, "describe this image", 1),
+            AgentMessageEntity(assistantId, SID, MessageRole.ASSISTANT.name, "partial", 2, isError = true)
+        )
+        val session = ChatSessionEntity(
+            id = SID,
+            title = "test",
+            createdAt = 0,
+            updatedAt = 0,
+            workspacePath = WORKSPACE,
+            mode = AgentMode.PLAN.name,
+            providerId = "bound-provider",
+            model = "bound-model"
+        )
+        coEvery { messageDao.getMessageById(assistantId) } returns rows.last()
+        coEvery { messageDao.getMessagesBySessionOnce(SID) } coAnswers { rows.toList() }
+        coEvery { messageDao.insert(any()) } coAnswers {
+            val updated = firstArg<AgentMessageEntity>()
+            val index = rows.indexOfFirst { it.id == updated.id }
+            if (index >= 0) rows[index] = updated
+        }
+        coEvery { persistence.buildHistory(SID, any()) } coAnswers {
+            history.filterNot { it is AgentMessage.AssistantMessage && it.id == assistantId }
+        }
+        coEvery { sessions.getSessionById(SID) } returns session
+        val requests = mutableListOf<Pair<String, AgentContext>>()
+        every { workflow.executeEvents(any(), any(), any()) } answers {
+            requests += firstArg<String>() to secondArg<AgentContext>()
+            flowOf(AgentEvent.Failed("test end"))
+        }
+        viewModel.setWorkspace(WORKSPACE)
+
+        withTimeout(5_000) {
+            viewModel.regenerateInterruptedAssistant(assistantId).join()
+        }
+
+        assertEquals(1, requests.size)
+        val (request, context) = requests.single()
+        assertEquals(userContent, request)
+        assertEquals(userId, context.userMessageId)
+        assertEquals(SID, context.sessionId)
+        assertEquals(emptyList<AgentMessage>(), context.history)
+        assertEquals(listOf(image), context.inputImages)
+        assertEquals(AgentMode.PLAN, context.mode)
+        coVerify(exactly = 1) {
+            messageDao.insert(match {
+                it.id == assistantId && it.content == "partial" && it.isError && it.isContextExcluded
+            })
+        }
+        val retainedPartial = rows.firstOrNull { it.id == assistantId }
+        assertEquals("partial", retainedPartial?.content)
+        assertEquals(true, retainedPartial?.isError)
+        assertEquals(true, retainedPartial?.isContextExcluded)
+        coVerify(exactly = 0) { messageDao.deleteMessageById(assistantId) }
+        coVerify(exactly = 0) { persistence.persist(SID, MessageRole.USER, any(), id = any(), attachments = any()) }
+    }
+
+    @Test
+    fun regenerateInterruptedAnswerWithToolSideEffect_isRejected() = runBlocking {
+        val user = AgentMessageEntity("user", SID, MessageRole.USER.name, "write file", 1)
+        val tool = AgentMessageEntity("tool", SID, MessageRole.TOOL.name, "written", 2, toolCallId = "call")
+        val assistant = AgentMessageEntity(
+            "assistant",
+            SID,
+            MessageRole.ASSISTANT.name,
+            "partial",
+            3,
+            isError = true
+        )
+        coEvery { messageDao.getMessageById("assistant") } returns assistant
+        coEvery { messageDao.getMessagesBySessionOnce(SID) } returns listOf(user, tool, assistant)
+        coEvery { sessions.getSessionById(SID) } returns ChatSessionEntity(
+            id = SID,
+            title = "test",
+            createdAt = 0,
+            updatedAt = 0,
+            workspacePath = WORKSPACE
+        )
+        viewModel.setWorkspace(WORKSPACE)
+
+        withTimeout(5_000) {
+            viewModel.regenerateInterruptedAssistant("assistant").join()
+        }
+
+        coVerify(exactly = 0) { persistence.buildHistory(SID, any()) }
+        verify(exactly = 0) { workflow.executeEvents(any(), any(), any()) }
+    }
+
+    @Test
+    fun assistantErrorMapsToInterrupted_butToolErrorDoesNot() {
+        val assistant = AgentMessageEntity("a", SID, MessageRole.ASSISTANT.name, "partial", 1, isError = true)
+        val tool = AgentMessageEntity("t", SID, MessageRole.TOOL.name, "tool failed", 2, isError = true)
+
+        assertTrue(isInterruptedAssistantRole(assistant.role, assistant.isError))
+        assertFalse(isInterruptedAssistantRole(tool.role, tool.isError))
+        assertTrue(tool.toUIMessage().isError)
+    }
+
     /** 只改一个私有映射：会话视为「有一轮正在跑」，但不启动任何真实轮次。 */
     private fun markSessionBusy() {
         val field = AIAgentViewModel::class.java.getDeclaredField("sessionJobs").apply { isAccessible = true }
@@ -305,9 +479,9 @@ class AIAgentViewModelSystemNotificationQueueTest {
      * 否则 init 里的 collect 立刻空转或拿到 null。
      */
     private fun newViewModel(): AIAgentViewModel = AIAgentViewModel(
-        agentWorkflow = mockk(relaxed = true),
+        agentWorkflow = workflow,
         toolRegistry = mockk(relaxed = true),
-        agentEngine = mockk(relaxed = true),
+        agentEngine = engine,
         agentMessageDao = messageDao,
         agentDatabase = mockk(relaxed = true),
         chatSessionDao = mockk(relaxed = true),
@@ -344,13 +518,13 @@ class AIAgentViewModelSystemNotificationQueueTest {
         backupManager = mockk(relaxed = true),
         mcpManager = mockk(relaxed = true),
         agentSoundSettings = mockk(relaxed = true),
-        generalSettingsRepository = mockk(relaxed = true),
+        generalSettingsRepository = generalSettings,
         keepaliveSettings = mockk(relaxed = true),
         subAgentEventBus = mockk(relaxed = true) { every { events } returns MutableSharedFlow() },
         agentNotificationCenter = notificationCenter,
         agentDefinitionRepository = mockk(relaxed = true),
         todoItemDao = mockk(relaxed = true),
-        fileAccess = mockk<FileAccessProvider>(relaxed = true),
+        fileAccess = fileAccess,
         fileChangeHub = mockk(relaxed = true),
         workspaceWriteSignal = mockk(relaxed = true) { every { writes } returns MutableSharedFlow() },
         contextUsageHolder = mockk(relaxed = true),

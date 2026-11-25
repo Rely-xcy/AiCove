@@ -1,6 +1,9 @@
 package com.aicove.feature.agent.domain.provider
 
+import com.aicove.core.net.NetworkStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.buffer
@@ -91,36 +94,13 @@ class RetryPolicyTest {
 
     @Test(timeout = 10000)
     fun real_http1_body_read_is_cancelled_on_timeout() = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
-        val release = java.util.concurrent.CountDownLatch(1)
-        val serverThread = Thread {
-            try {
-                server.accept().use { socket ->
-                    val reader = socket.getInputStream().bufferedReader()
-                    while (!reader.readLine().isNullOrEmpty()) Unit
-                    socket.getOutputStream().apply {
-                        write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n".toByteArray())
-                        flush()
-                    }
-                    release.await()
-                }
-            } catch (_: java.io.IOException) {
-            }
-        }.apply { isDaemon = true; start() }
-        val client = okhttp3.OkHttpClient.Builder().readTimeout(0, java.util.concurrent.TimeUnit.SECONDS).build()
-        val api = retrofit2.Retrofit.Builder()
-            .baseUrl("http://127.0.0.1:${server.localPort}/")
-            .client(client)
-            .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create())
-            .build()
-            .create(com.aicove.feature.agent.data.remote.openai.OpenAIApi::class.java)
-        val call = api.streamChatCompletion(
-            "http://127.0.0.1:${server.localPort}/", "test", emptyMap(),
-            com.aicove.feature.agent.data.remote.openai.ChatCompletionRequest(model = "test", messages = emptyList(), stream = true)
-        )
+        val fixture = BlockingHttp1Stream()
+        var call: retrofit2.Call<okhttp3.ResponseBody>? = null
         try {
+            call = fixture.createCall()
+            val activeCall = requireNotNull(call)
             withFirstContentTimeout(500) { guard ->
-                val body = guard.awaitBody(call)
+                val body = guard.awaitBody(activeCall)
                 body.use {
                     guard.attach { body.close() }
                     body.charStream().buffered().readLine()
@@ -128,13 +108,41 @@ class RetryPolicyTest {
             }
             org.junit.Assert.fail("Expected timeout")
         } catch (e: SocketTimeoutException) {
-            assertEquals(true, call.isCanceled)
+            assertEquals(true, call?.isCanceled)
         } finally {
-            release.countDown()
-            server.close()
-            serverThread.join(1000)
-            client.connectionPool.evictAll()
-            client.dispatcher.executorService.shutdown()
+            fixture.close(call)
+        }
+    }
+
+    @Test(timeout = 10000)
+    fun real_http1_body_read_is_cancelled_on_network_loss() = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+        NetworkStatus.update(true)
+        val fixture = BlockingHttp1Stream()
+        var call: retrofit2.Call<okhttp3.ResponseBody>? = null
+        try {
+            call = fixture.createCall()
+            val activeCall = requireNotNull(call)
+            val read = async {
+                try {
+                    withFirstContentTimeout(5_000) { guard ->
+                        val body = guard.awaitBody(activeCall)
+                        body.use {
+                            guard.attach { body.close() }
+                            fixture.bodyReadStarted.countDown()
+                            body.charStream().buffered().readLine()
+                        }
+                    }
+                    false
+                } catch (_: IOException) {
+                    activeCall.isCanceled
+                }
+            }
+            assertEquals(true, fixture.bodyReadStarted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            NetworkStatus.update(false)
+            assertEquals(true, kotlinx.coroutines.withTimeout(2_000) { read.await() })
+        } finally {
+            NetworkStatus.update(true)
+            fixture.close(call)
         }
     }
 
@@ -185,14 +193,14 @@ class RetryPolicyTest {
                 maxRetries = 1,
                 attemptOnce = { onContent ->
                     withFirstContentTimeout(100) { guard ->
-                        onContent()
                         if (attempt++ == 0) {
-                            send("content-1")
-                            // 会合点挂起（消费端 delay 中），超时取消信号落点
-                            send("content-2")
-                            org.junit.Assert.fail("首次尝试应在挂起的 send 上被首字节超时打断")
+                            // 首内容前发出非内容状态；buffer(0) 下第二次 send 挂起，首内容超时须打断它。
+                            send("progress")
+                            send("waiting")
+                            org.junit.Assert.fail("首次尝试应在首内容前的挂起 send 上被超时打断")
                         } else {
                             guard.receivedContent()
+                            onContent()
                             send("recovered")
                         }
                     }
@@ -205,46 +213,341 @@ class RetryPolicyTest {
             delay(1_000)
             events.add(it)
         }
-        assertEquals(listOf("content-1", "retry-1", "recovered"), events)
+        assertEquals(listOf("progress", "retry-1", "recovered"), events)
     }
 
     @Test
-    fun partialContentDisconnects_respectRetryLimit() = runTest {
+    fun networkLossCancelsNonStreamingCoroutineAndRecoveryRestartsRequest() = runTest {
+        NetworkStatus.update(true)
         var requests = 0
+        var firstAttemptCancelled = false
         val retries = mutableListOf<Int>()
+        try {
+            val result = async {
+                retryStaircase(
+                    maxRetries = 1,
+                    onRetry = { attempt, _, _ -> retries += attempt }
+                ) {
+                    requests++
+                    if (requests == 1) {
+                        try {
+                            kotlinx.coroutines.awaitCancellation()
+                        } finally {
+                            firstAttemptCancelled = true
+                        }
+                    }
+                    "recovered"
+                }
+            }
+            runCurrent()
+            assertEquals(1, requests)
+
+            NetworkStatus.update(false)
+            runCurrent()
+            assertEquals(true, firstAttemptCancelled)
+            assertEquals(1, requests)
+            assertEquals(listOf(1), retries)
+
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals("offline retry must wait for recovery", 1, requests)
+
+            NetworkStatus.update(true)
+            runCurrent()
+            assertEquals("recovered", result.await())
+            assertEquals(2, requests)
+        } finally {
+            NetworkStatus.update(true)
+        }
+    }
+
+    @Test
+    fun streamDisconnectBeforeContentCancelsAndRetriesAfterRecovery() = runTest {
+        NetworkStatus.update(true)
+        var requests = 0
+        val callClosed = CompletableDeferred<Unit>()
+        val retries = mutableListOf<Int>()
+        try {
+            val result = async {
+                streamWithStaircaseRetry(
+                    maxRetries = 1,
+                    attemptOnce = { onContent ->
+                        requests++
+                        if (requests == 1) {
+                            withFirstContentTimeout(5_000) { guard ->
+                                guard.attach { callClosed.complete(Unit) }
+                                callClosed.await()
+                                throw IOException("call cancelled on network loss")
+                            }
+                        } else {
+                            withFirstContentTimeout(5_000) { guard ->
+                                guard.receivedContent()
+                                onContent()
+                            }
+                        }
+                    },
+                    onRetry = { attempt, _, _ -> retries += attempt }
+                )
+            }
+            runCurrent()
+            NetworkStatus.update(false)
+            runCurrent()
+            callClosed.await()
+            assertEquals(1, requests)
+
+            NetworkStatus.update(true)
+            runCurrent()
+
+            result.await()
+            assertEquals(2, requests)
+            assertEquals(listOf(1), retries)
+        } finally {
+            NetworkStatus.update(true)
+        }
+    }
+
+    @Test
+    fun networkSwitchCancelsActiveStreamAndRetriesImmediately() = runTest {
+        NetworkStatus.update(true)
+        var requests = 0
+        val callClosed = CompletableDeferred<Unit>()
+        try {
+            val result = async {
+                streamWithStaircaseRetry(
+                    maxRetries = 1,
+                    attemptOnce = { onContent ->
+                        requests++
+                        if (requests == 1) {
+                            withFirstContentTimeout(5_000) { guard ->
+                                guard.attach { callClosed.complete(Unit) }
+                                callClosed.await()
+                                throw IOException("old network socket is stale")
+                            }
+                        } else {
+                            withFirstContentTimeout(5_000) { guard ->
+                                guard.receivedContent()
+                                onContent()
+                            }
+                        }
+                    }
+                )
+            }
+            runCurrent()
+            NetworkStatus.update(true, networkChanged = true)
+            runCurrent()
+            callClosed.await()
+
+            result.await()
+            assertEquals(2, requests)
+        } finally {
+            NetworkStatus.update(true)
+        }
+    }
+
+    @Test
+    fun partialContentDisconnect_isNotRetriedAndDoesNotClearPartial() = runTest {
+        var requests = 0
+        var keyFailures = 0
+        val retries = mutableListOf<Int>()
+        val received = mutableListOf<String>()
+        try {
+            channelFlow {
+                streamWithStaircaseRetry(
+                    maxRetries = 2,
+                    onKeyFailure = { _, _ -> keyFailures++; true },
+                    attemptOnce = { onContent ->
+                        requests++
+                        onContent()
+                        send("partial")
+                        throw IOException("Connection reset")
+                    },
+                    onRetry = { attempt, _, _ -> retries += attempt; send("retry-$attempt") }
+                )
+            }.collect { received += it }
+            org.junit.Assert.fail("Expected IOException")
+        } catch (_: IOException) {
+            assertEquals(1, requests)
+            assertEquals(0, keyFailures)
+            assertEquals(emptyList<Int>(), retries)
+            assertEquals(listOf("partial"), received)
+        }
+    }
+
+    @Test
+    fun partialContentNonRetryableFailureDoesNotReplayEvenWhenKeySwitchIsAvailable() = runTest {
+        var requests = 0
+        val keyRetryAllowed = mutableListOf<Boolean>()
+        val retries = mutableListOf<Int>()
+        val received = mutableListOf<String>()
+        try {
+            channelFlow {
+                streamWithStaircaseRetry(
+                    maxRetries = 2,
+                    onKeyFailure = { _, canRetry -> keyRetryAllowed += canRetry; true },
+                    attemptOnce = { onContent ->
+                        requests++
+                        onContent()
+                        send("partial")
+                        throw httpError(401)
+                    },
+                    onRetry = { attempt, _, _ -> retries += attempt; send("retry-$attempt") }
+                )
+            }.collect { received += it }
+            org.junit.Assert.fail("Expected HttpException")
+        } catch (e: HttpException) {
+            assertEquals(401, e.code())
+            assertEquals(1, requests)
+            assertEquals(listOf(false), keyRetryAllowed)
+            assertEquals(emptyList<Int>(), retries)
+            assertEquals(listOf("partial"), received)
+        }
+    }
+
+    @Test
+    fun userCancellationAfterContent_isPassedThroughUnchanged() = runTest {
+        val cancellation = CancellationException("caller cancelled")
+        var requests = 0
         try {
             streamWithStaircaseRetry(
                 maxRetries = 2,
                 attemptOnce = { onContent ->
                     requests++
                     onContent()
-                    if (requests > 3) org.junit.Assert.fail("Retry limit exceeded")
-                    throw IOException("Connection reset")
-                },
-                onRetry = { attempt, _, _ -> retries.add(attempt) }
+                    throw cancellation
+                }
             )
-            org.junit.Assert.fail("Expected IOException")
-        } catch (_: IOException) {
-            assertEquals(3, requests)
-            assertEquals(listOf(1, 2), retries)
+            org.junit.Assert.fail("Expected CancellationException")
+        } catch (e: CancellationException) {
+            assertEquals(true, e === cancellation)
+            assertEquals(1, requests)
         }
     }
 
     @Test
-    fun partialContentDisconnect_withRetriesDisabled_doesNotRetry() = runTest {
+    fun callerCancellationBeforeContentIsNotRetried() = runTest {
+        var requests = 0
+        var retries = 0
+        val request = launch {
+            retryStaircase(
+                maxRetries = 2,
+                onRetry = { _, _, _ -> retries++ }
+            ) {
+                requests++
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+
+        runCurrent()
+        assertEquals(1, requests)
+        request.cancel()
+        request.join()
+
+        assertEquals(1, requests)
+        assertEquals(0, retries)
+    }
+
+    @Test
+    fun networkRecoveryDuringBackoffWakesRetryImmediately() = runTest {
+        NetworkStatus.update(true)
+        var requests = 0
+        val retries = mutableListOf<Int>()
+        try {
+            val result = async {
+                streamWithStaircaseRetry(
+                    maxRetries = 1,
+                    attemptOnce = {
+                        requests++
+                        if (requests == 1) throw IOException("Connection reset")
+                    },
+                    onRetry = { attempt, _, _ -> retries += attempt }
+                )
+            }
+            runCurrent()
+            assertEquals(1, requests)
+            advanceTimeBy(200)
+            runCurrent()
+            assertEquals(1, requests)
+
+            NetworkStatus.update(false)
+            runCurrent()
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals("offline retry must wait for recovery", 1, requests)
+
+            val recoveryTime = testScheduler.currentTime
+            NetworkStatus.update(true)
+            runCurrent()
+            assertEquals("recovery must wake the retry without advancing virtual time", 2, requests)
+            assertEquals(recoveryTime, testScheduler.currentTime)
+            result.await()
+            assertEquals(listOf(1), retries)
+        } finally {
+            NetworkStatus.update(true)
+        }
+    }
+
+    @Test
+    fun networkSwitchWhileOnlineBackoffWakesRetryImmediately() = runTest {
+        NetworkStatus.update(true)
         var requests = 0
         try {
-            streamWithStaircaseRetry(
-                maxRetries = 0,
-                attemptOnce = { onContent ->
+            val result = async {
+                retryStaircase(maxRetries = 1) {
                     requests++
-                    onContent()
-                    throw IOException("Connection reset")
+                    if (requests == 1) throw IOException("Connection reset")
+                    "recovered"
                 }
-            )
-            org.junit.Assert.fail("Expected IOException")
-        } catch (_: IOException) {
+            }
+
+            runCurrent()
             assertEquals(1, requests)
+            advanceTimeBy(200)
+            runCurrent()
+            NetworkStatus.update(true, networkChanged = true)
+            runCurrent()
+
+            assertEquals("online network switch must wake retry without waiting full backoff", 2, requests)
+            assertEquals("recovered", result.await())
+        } finally {
+            NetworkStatus.update(true)
+        }
+    }
+
+    @Test
+    fun networkRecoveryDoesNotSkipServerRetryAfter() = runTest {
+        NetworkStatus.update(true)
+        var requests = 0
+        val retries = mutableListOf<Int>()
+        try {
+            val result = async {
+                retryStaircase(
+                    maxRetries = 1,
+                    onRetry = { attempt, _, _ ->
+                        retries += attempt
+                        NetworkStatus.update(false)
+                    }
+                ) {
+                    requests++
+                    if (requests == 1) throw httpErrorWithRetryAfter("30")
+                    "recovered"
+                }
+            }
+            runCurrent()
+            assertEquals(1, requests)
+            assertEquals(listOf(1), retries)
+
+            NetworkStatus.update(true)
+            runCurrent()
+            assertEquals("recovery before Retry-After must not retry early", 1, requests)
+            advanceTimeBy(29_999)
+            runCurrent()
+            assertEquals(1, requests)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(2, requests)
+            assertEquals("recovered", result.await())
+        } finally {
+            NetworkStatus.update(true)
         }
     }
 
@@ -268,6 +571,14 @@ class RetryPolicyTest {
                     .build()
             )
         )
+
+    @Test
+    fun retryAfter_largeDeltaSecondsSaturatesAtMaximumInsteadOfOverflowing() {
+        val huge = httpErrorWithRetryAfter("999999999999999999999999999999999999999")
+
+        assertEquals(60_000L, extractRetryAfterMillis(huge))
+        assertEquals(60_000L, retryDelayMillis(0, huge))
+    }
 
     @Test
     fun retryAfter_isReadThroughWrapperCauseChain() {
@@ -346,5 +657,65 @@ class RetryPolicyTest {
         assertNull(SocketTimeoutException().toRetryErrorInfo().statusCode)
         assertNull(IOException().toRetryErrorInfo().statusCode)
         assertNull(StreamApiException("server_is_overloaded", "m").toRetryErrorInfo().statusCode)
+    }
+}
+
+private class BlockingHttp1Stream {
+    val bodyReadStarted = java.util.concurrent.CountDownLatch(1)
+    private val release = java.util.concurrent.CountDownLatch(1)
+    private var server: java.net.ServerSocket? = null
+    private var serverThread: Thread? = null
+    @Volatile private var connectedSocket: java.net.Socket? = null
+    private var client: okhttp3.OkHttpClient? = null
+
+    fun createCall(): retrofit2.Call<okhttp3.ResponseBody> {
+        val localServer = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        server = localServer
+        try {
+            serverThread = Thread {
+                try {
+                    localServer.accept().use { socket ->
+                        connectedSocket = socket
+                        val reader = socket.getInputStream().bufferedReader()
+                        while (!reader.readLine().isNullOrEmpty()) Unit
+                        socket.getOutputStream().apply {
+                            write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n".toByteArray())
+                            flush()
+                        }
+                        release.await()
+                    }
+                } catch (_: java.io.IOException) {
+                }
+            }.apply { isDaemon = true; start() }
+            val localClient = okhttp3.OkHttpClient.Builder()
+                .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            client = localClient
+            val api = retrofit2.Retrofit.Builder()
+                .baseUrl("http://127.0.0.1:${localServer.localPort}/")
+                .client(localClient)
+                .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create())
+                .build()
+                .create(com.aicove.feature.agent.data.remote.openai.OpenAIApi::class.java)
+            return api.streamChatCompletion(
+                "http://127.0.0.1:${localServer.localPort}/", "test", emptyMap(),
+                com.aicove.feature.agent.data.remote.openai.ChatCompletionRequest(
+                    model = "test", messages = emptyList(), stream = true
+                )
+            )
+        } catch (error: Throwable) {
+            close(null)
+            throw error
+        }
+    }
+
+    fun close(call: retrofit2.Call<okhttp3.ResponseBody>?) {
+        runCatching { call?.cancel() }
+        release.countDown()
+        runCatching { connectedSocket?.close() }
+        runCatching { server?.close() }
+        runCatching { serverThread?.join(1_000) }
+        runCatching { client?.connectionPool?.evictAll() }
+        runCatching { client?.dispatcher?.executorService?.shutdown() }
     }
 }
