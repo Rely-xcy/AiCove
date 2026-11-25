@@ -1,5 +1,15 @@
 package com.aicove.feature.agent.presentation.component
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 /**
  * 贴底校准的门槛：这一帧能不能请求「滚回锚点」。
  *
@@ -72,4 +82,72 @@ internal fun isScrolledToBottom(
     if (totalItemsCount <= 0 || lastVisibleIndex < totalItemsCount - 1) return false
     val gap = safeBottomPx - lastVisibleBottomPx
     return gap >= -tolerancePx && gap <= tolerancePx
+}
+
+/** 同会话列表重建时复用已提交的稳定 item keys，避免 LazyColumn 丢失历史滚动锚点。 */
+internal data class ChatItemsScrollState(
+    val items: List<ChatRenderItem>,
+    val isBuilding: Boolean,
+)
+
+private class ChatItemsScrollSnapshot(
+    val sessionId: String?,
+    val requestKey: Any,
+    val items: List<ChatRenderItem>,
+)
+
+private class ChatItemsScrollSnapshotHolder {
+    var value: ChatItemsScrollSnapshot? = null
+}
+
+/** 列表构建沿用后台线程；切换会话时隔离快照，构建中继续提供同会话上次的 LazyColumn keys。 */
+@Composable
+internal fun rememberChatItemsForScroll(
+    sessionId: String?,
+    requestKey: Any,
+    messagesReady: Boolean,
+    useAsyncItems: Boolean,
+    buildItems: () -> List<ChatRenderItem>,
+): ChatItemsScrollState {
+    var asyncSnapshot by remember(sessionId) { mutableStateOf<ChatItemsScrollSnapshot?>(null) }
+    val committed = remember(sessionId) { ChatItemsScrollSnapshotHolder() }
+    LaunchedEffect(sessionId, requestKey, useAsyncItems, messagesReady) {
+        if (!useAsyncItems || !messagesReady) return@LaunchedEffect
+        val built = withContext(Dispatchers.Default) { buildItems() }
+        asyncSnapshot = ChatItemsScrollSnapshot(sessionId, requestKey, built)
+    }
+    val ready = asyncSnapshot?.takeIf {
+        messagesReady && useAsyncItems && it.sessionId == sessionId && it.requestKey == requestKey
+    }
+    val isBuilding = useAsyncItems && messagesReady && ready == null
+    val previous = committed.value?.takeIf { messagesReady && it.sessionId == sessionId }
+    val items = remember(requestKey, messagesReady, useAsyncItems, ready) {
+        resolveChatItemsKeepingPrevious(
+            messagesReady = messagesReady,
+            useAsyncItems = useAsyncItems,
+            asyncItems = ready?.items,
+            previousItems = previous?.items,
+            buildSynchronously = buildItems,
+        )
+    }
+    SideEffect {
+        if (messagesReady && !isBuilding && committed.value?.requestKey != requestKey) {
+            committed.value = ChatItemsScrollSnapshot(sessionId, requestKey, items)
+        }
+    }
+    return ChatItemsScrollState(items, isBuilding)
+}
+
+/** 用于单测的纯列表决策：长列表构建中保留上一组 key，短列表继续同步构建。 */
+internal fun resolveChatItemsKeepingPrevious(
+    messagesReady: Boolean,
+    useAsyncItems: Boolean,
+    asyncItems: List<ChatRenderItem>?,
+    previousItems: List<ChatRenderItem>?,
+    buildSynchronously: () -> List<ChatRenderItem>,
+): List<ChatRenderItem> = when {
+    asyncItems != null -> asyncItems
+    !messagesReady -> emptyList()
+    useAsyncItems -> previousItems.orEmpty()
+    else -> buildSynchronously()
 }
