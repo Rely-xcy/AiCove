@@ -1,5 +1,8 @@
 package com.aicove.feature.agent.presentation.component
 
+import com.aicove.feature.agent.presentation.AgentUIMessage
+import com.aicove.feature.agent.presentation.MessageRole
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,6 +15,63 @@ import org.junit.Test
  * 表现成「慢慢滑也会跳上去」。
  */
 class ChatScrollFollowPolicyTest {
+
+    @Test
+    fun `异步重建列表期间保留已提交的历史锚点 key`() {
+        val anchor = ChatRenderItem(
+            message = AgentUIMessage(id = "history-42", role = MessageRole.USER, content = "history"),
+            key = "history-42",
+            contentType = "USER",
+        )
+        val updated = anchor.copy(message = anchor.message.copy(content = "updated"))
+        var synchronousBuildCalled = false
+
+        val duringBuild = resolveChatItemsKeepingPrevious(
+            messagesReady = true,
+            useAsyncItems = true,
+            asyncItems = null,
+            previousItems = listOf(anchor),
+            buildSynchronously = {
+                synchronousBuildCalled = true
+                listOf(updated)
+            },
+        )
+
+        assertEquals("后台构建未完成时 LazyColumn 的稳定 key 不能被清空", listOf("history-42"), duringBuild.map { it.key })
+        assertFalse("长列表仍禁止退回主线程同步构建", synchronousBuildCalled)
+        assertEquals(
+            "构建完成后再提交新列表",
+            listOf(updated),
+            resolveChatItemsKeepingPrevious(true, true, listOf(updated), listOf(anchor)) { emptyList() },
+        )
+    }
+
+    @Test
+    fun `消息未就绪时不展示旧列表且短列表仍同步构建`() {
+        val stale = ChatRenderItem(
+            message = AgentUIMessage(id = "old-session", role = MessageRole.USER, content = "old"),
+            key = "old-session",
+            contentType = "USER",
+        )
+        var synchronousBuildCalled = false
+        assertTrue(
+            resolveChatItemsKeepingPrevious(false, true, null, listOf(stale)) {
+                synchronousBuildCalled = true
+                emptyList()
+            }.isEmpty(),
+        )
+        assertFalse(synchronousBuildCalled)
+
+        val fresh = stale.copy(message = stale.message.copy(id = "fresh-session"), key = "fresh-session")
+        assertEquals(
+            listOf(fresh),
+            resolveChatItemsKeepingPrevious(true, false, null, listOf(stale)) {
+                synchronousBuildCalled = true
+                listOf(fresh)
+            },
+        )
+        assertTrue("非异步列表必须即时采用最新构建结果", synchronousBuildCalled)
+    }
 
     @Test
     fun `手指已落屏但还没越过 slop 时不校准`() {
