@@ -218,8 +218,7 @@ internal data class ChatRenderItem(
 
 /** 消息条数超过此值后，渲染项列表改在后台线程重建。 */
 private const val ASYNC_CHAT_ITEMS_THRESHOLD = 120
-
-private class AsyncChatItems(val sessionId: String?, val items: List<ChatRenderItem>)
+// Async item snapshots are coordinated by rememberChatItemsForScroll.
 
 /** 工具调用分组头 item 的 contentType。 */
 private const val TOOL_GROUP_CONTENT_TYPE = "tool-group"
@@ -1098,17 +1097,18 @@ fun AIChatPanel(
         ))
     }
     val useAsyncItems = messages.size > ASYNC_CHAT_ITEMS_THRESHOLD
-    var asyncItems by remember(currentSessionId, useAsyncItems) { mutableStateOf<AsyncChatItems?>(null) }
-    LaunchedEffect(chatItemsKey, useAsyncItems, messagesReady) {
-        if (!useAsyncItems || !messagesReady) return@LaunchedEffect
-        val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { buildItems() }
-        asyncItems = AsyncChatItems(messagesState.sessionId, built)
-    }
-    val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && messagesReady && it.sessionId == currentSessionId }
-    val isBuildingAsyncChatItems = useAsyncItems && messagesReady && readyAsyncItems == null
-    val chatItems = remember(chatItemsKey, messagesReady, useAsyncItems, readyAsyncItems) {
-        resolveChatItems(messagesReady, useAsyncItems, readyAsyncItems?.items, buildItems)
-    }
+    // Keep the same-session keys mounted until background list construction commits.
+    // An empty intermediate list drops the LazyColumn anchor and clamps the old index to zero.
+    // Search restoration below waits for the current request's list; followBottom is unchanged.
+    val chatItemsState = rememberChatItemsForScroll(
+        sessionId = currentSessionId,
+        requestKey = chatItemsKey,
+        messagesReady = messagesReady,
+        useAsyncItems = useAsyncItems,
+        buildItems = buildItems,
+    )
+    val chatItems = chatItemsState.items
+    val isBuildingAsyncChatItems = chatItemsState.isBuilding
     val pendingIds = remember(pendingUserMessages) { pendingUserMessages.mapTo(HashSet()) { it.id } }
     val settledUserIds = remember(chatItems, messages, messagesReady, pendingUserMessages) {
         if (!messagesReady || pendingIds.isEmpty()) emptySet() else settledUserMessageIds(pendingUserMessages, chatItems) +
@@ -1851,8 +1851,8 @@ fun AIChatPanel(
     }
 
     // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
-    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems, isBuildingAsyncChatItems) {
+        if (!messagesReady || isBuildingAsyncChatItems) return@LaunchedEffect
         val pending = pendingScroll
         if (pending != null && pending.first == currentSessionId) {
             val index = findChatMessageIndex(chatItems, pending.second)
