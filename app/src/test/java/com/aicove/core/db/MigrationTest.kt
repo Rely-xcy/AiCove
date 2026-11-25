@@ -7,12 +7,20 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aicove.feature.agent.data.local.database.AgentDatabase
+import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
+import com.aicove.feature.agent.data.local.entity.MemoryRecordEntity
+import com.aicove.feature.agent.data.local.entity.MemorySourceHash
+import com.aicove.feature.agent.data.local.entity.MemorySourceInput
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -121,6 +129,160 @@ class MigrationTest {
             "迁移 59 应新增 backup_targets 表，实际表：$tables",
             tables.contains("backup_targets")
         )
+    }
+
+    @Test
+    fun migrate_70_to_71_adds_memory_tables_and_message_lineage_triggers() = runBlocking {
+        helper.createDatabase(dbName, 70).close()
+
+        val database = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .addCallback(AgentDatabase.memorySourceCallback())
+            .build()
+        try {
+            val sqlite = database.openHelper.writableDatabase
+            val tables = mutableSetOf<String>()
+            sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table'").use { cursor ->
+                while (cursor.moveToNext()) tables += cursor.getString(0)
+            }
+            assertTrue(tables.containsAll(listOf("memory_records", "memory_sources", "memory_versions")))
+
+            val sourceForeignKeys = mutableSetOf<Pair<String, String>>()
+            val versionLinkColumns = mutableSetOf<Pair<String, String>>()
+            sqlite.query("PRAGMA foreign_key_list(`memory_sources`)").use { cursor ->
+                while (cursor.moveToNext()) {
+                    val table = cursor.getString(2)
+                    sourceForeignKeys += table to cursor.getString(6)
+                    if (table == "memory_versions") {
+                        versionLinkColumns += cursor.getString(3) to cursor.getString(4)
+                    }
+                }
+            }
+            assertTrue(
+                "memory_sources 应保留 memory/version，消息删除应 SET NULL：$sourceForeignKeys",
+                sourceForeignKeys.containsAll(
+                    setOf(
+                        "memory_records" to "CASCADE",
+                        "memory_versions" to "CASCADE",
+                        "agent_messages" to "SET NULL"
+                    )
+                )
+            )
+            assertEquals(setOf("memoryId" to "memoryId", "versionId" to "id"), versionLinkColumns)
+
+            val triggers = mutableSetOf<String>()
+            sqlite.query("SELECT name FROM sqlite_master WHERE type = 'trigger'").use { cursor ->
+                while (cursor.moveToNext()) triggers += cursor.getString(0)
+            }
+            assertTrue("删除来源消息的触发器缺失：$triggers", "memory_sources_agent_message_deleted" in triggers)
+            assertTrue("编辑来源消息的触发器缺失：$triggers", "memory_sources_agent_message_content_changed" in triggers)
+
+            val message = AgentMessageEntity(
+                id = "migration-source-message",
+                sessionId = "migration-source-session",
+                role = "USER",
+                content = "source content",
+                timestamp = 1L
+            )
+            val record = MemoryRecordEntity(
+                id = "migration-memory",
+                markdownPath = null,
+                name = "migration-memory",
+                description = "migration test",
+                scope = "GLOBAL",
+                kind = "PROFILE",
+                source = "auto-distill",
+                createdAt = 1L,
+                updatedAt = 1L,
+                hitCount = 0,
+                lastHitAt = 0L,
+                pinned = false
+            )
+            database.agentMessageDao().insert(message)
+            database.memoryRecordDao().saveVersion(
+                record = record,
+                content = "independent memory content",
+                sources = listOf(
+                    MemorySourceInput(
+                        messageId = message.id,
+                        evidenceType = "transcript",
+                        position = 0,
+                        messageHash = MemorySourceHash.sha256(message.content)
+                    )
+                ),
+                reason = "migration-test",
+                createdAt = 2L
+            )
+
+            database.agentMessageDao().updateMessageContent(message.id, "edited source")
+            assertEquals(
+                "SOURCE_CHANGED",
+                database.memoryRecordDao().getCurrentSources(record.id).single().status
+            )
+
+            database.agentMessageDao().deleteMessageById(message.id)
+            val source = database.memoryRecordDao().getCurrentSources(record.id).single()
+            assertNull(source.messageId)
+            assertEquals("SOURCE_DELETED", source.status)
+            assertEquals("independent memory content", database.memoryRecordDao().getVersionHistory(record.id).single().content)
+            assertNotNull(database.memoryRecordDao().getRecordById(record.id))
+
+            val deletedIds = mutableSetOf<String>()
+            sqlite.query("SELECT messageId FROM memory_sources WHERE messageId IS NOT NULL").use { cursor ->
+                while (cursor.moveToNext()) deletedIds += cursor.getString(0)
+            }
+            assertTrue("删除后的来源 ID 不得在历史版本来源里残留：$deletedIds", message.id !in deletedIds)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun migrate_71_to_72_adds_task_state_evidence_schema_and_lifecycle_triggers() {
+        helper.createDatabase(dbName, 71).close()
+
+        val database = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .addCallback(AgentDatabase.memorySourceCallback())
+            .build()
+        try {
+            val sqlite = database.openHelper.writableDatabase
+            val tables = mutableSetOf<String>()
+            sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table'").use { cursor ->
+                while (cursor.moveToNext()) tables += cursor.getString(0)
+            }
+            assertTrue(tables.containsAll(listOf("task_states", "task_evidence")))
+
+            val taskIndexes = mutableSetOf<String>()
+            sqlite.query("PRAGMA index_list(`task_states`)").use { cursor ->
+                while (cursor.moveToNext()) taskIndexes += cursor.getString(1)
+            }
+            val evidenceIndexes = mutableSetOf<String>()
+            sqlite.query("PRAGMA index_list(`task_evidence`)").use { cursor ->
+                while (cursor.moveToNext()) evidenceIndexes += cursor.getString(1)
+            }
+            assertTrue("task state project/status/update index missing: $taskIndexes", "index_task_states_projectKey_status_updatedAt" in taskIndexes)
+            assertTrue("task evidence task/status index missing: $evidenceIndexes", "index_task_evidence_taskId_verificationStatus" in evidenceIndexes)
+            assertTrue("task evidence source message index missing: $evidenceIndexes", "index_task_evidence_sourceMessageId" in evidenceIndexes)
+
+            val evidenceForeignKeys = mutableSetOf<Pair<String, String>>()
+            sqlite.query("PRAGMA foreign_key_list(`task_evidence`)").use { cursor ->
+                while (cursor.moveToNext()) evidenceForeignKeys += cursor.getString(2) to cursor.getString(6)
+            }
+            assertTrue(
+                "task evidence must cascade with task and null its source message: $evidenceForeignKeys",
+                evidenceForeignKeys.containsAll(setOf("task_states" to "CASCADE", "agent_messages" to "SET NULL"))
+            )
+
+            val triggers = mutableSetOf<String>()
+            sqlite.query("SELECT name FROM sqlite_master WHERE type = 'trigger'").use { cursor ->
+                while (cursor.moveToNext()) triggers += cursor.getString(0)
+            }
+            assertTrue("source delete trigger missing: $triggers", "task_evidence_agent_message_deleted" in triggers)
+            assertTrue("source edit trigger missing: $triggers", "task_evidence_agent_message_content_changed" in triggers)
+        } finally {
+            database.close()
+        }
     }
 
     @Test

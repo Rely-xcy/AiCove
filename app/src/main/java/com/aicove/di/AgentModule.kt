@@ -5,11 +5,13 @@ import com.aicove.core.net.applyTcpKeepAlive
 import com.aicove.core.plugin.AgentLifecycleHooks
 import androidx.room.Room
 import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
 import com.aicove.feature.agent.data.local.dao.CheckpointDao
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
+import com.aicove.feature.agent.data.local.dao.MemoryRecordDao
+import com.aicove.feature.agent.data.local.dao.MemorySourceDao
+import com.aicove.feature.agent.data.local.dao.MemoryVersionDao
 import com.aicove.feature.agent.data.local.dao.TodoItemDao
 import com.aicove.feature.agent.data.local.dao.SessionBriefDao
 import com.aicove.feature.backup.data.local.dao.BackupTargetDao
@@ -129,6 +131,7 @@ object AgentModule {
             AgentDatabase::class.java,
             AgentDatabase.DATABASE_NAME
         ).addMigrations(*MigrationLoader.loadMigrations(context))
+            .addCallback(AgentDatabase.memorySourceCallback())
             .build()
     }
 
@@ -142,6 +145,24 @@ object AgentModule {
     @Singleton
     fun provideAgentMessageDao(database: AgentDatabase): AgentMessageDao {
         return database.agentMessageDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideMemoryRecordDao(database: AgentDatabase): MemoryRecordDao {
+        return database.memoryRecordDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideMemorySourceDao(database: AgentDatabase): MemorySourceDao {
+        return database.memorySourceDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideMemoryVersionDao(database: AgentDatabase): MemoryVersionDao {
+        return database.memoryVersionDao()
     }
 
     @Provides
