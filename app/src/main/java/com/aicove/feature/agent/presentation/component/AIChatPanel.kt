@@ -219,8 +219,6 @@ internal data class ChatRenderItem(
 /** 消息条数超过此值后，渲染项列表改在后台线程重建。 */
 private const val ASYNC_CHAT_ITEMS_THRESHOLD = 120
 
-private class AsyncChatItems(val sessionId: String?, val items: List<ChatRenderItem>)
-
 /** 工具调用分组头 item 的 contentType。 */
 private const val TOOL_GROUP_CONTENT_TYPE = "tool-group"
 
@@ -282,7 +280,7 @@ private fun toolGroupKey(first: AgentUIMessage): String = "toolgroup:${first.id}
 private fun AgentUIMessage.rendersActionRow(): Boolean =
     role == MessageRole.ASSISTANT &&
         !isCompactionMarker && !isContextSummary && !isCompactionFailure && !isBackgroundNotification &&
-        (content.hasVisibleContent() || attachments.isNotEmpty())
+        (content.hasVisibleContent() || attachments.isNotEmpty() || isInterrupted)
 
 /**
  * 本轮助手消息是否已经在消息列表里正式就位渲染：底部残留的流式 / 思考气泡是否该退休，靠它判定。
@@ -637,8 +635,7 @@ internal fun actionableResultIds(
         val turn = turns[i]
         val turnFinished = if (runningFrom != null) i < runningFrom else (!busy || i != turns.lastIndex)
         if (!turnFinished) continue
-        val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() && it.rendersActionRow() }
-            ?: turn.messages.lastOrNull { it.rendersActionRow() }
+        val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() }
         if (resultMsg != null) {
             ids += resultMsg.id
         }
@@ -671,9 +668,8 @@ internal fun AgentUIMessage.isPersistentInTurn(): Boolean =
 private fun AgentUIMessage.isSystemCardInTurn(): Boolean =
     isCompactionMarker || isContextSummary || isCompactionFailure || isBackgroundNotification
 
-/** 能否作为一轮的「结果」：最后一条有可见正文的普通助手消息（系统卡片不算，见 [isSystemCardInTurn]）。 */
-internal fun AgentUIMessage.isResultCandidate(): Boolean =
-    role == MessageRole.ASSISTANT && !isSystemCardInTurn() && (content.hasVisibleContent() || attachments.isNotEmpty())
+/** 能否作为一轮可挂操作行的「结果」；系统卡片与无正文的普通思考消息不会入选。 */
+internal fun AgentUIMessage.isResultCandidate(): Boolean = rendersActionRow()
 
 /**
  * 轮内「过程」项（保持原序）：思考、连续工具调用分组、中间助手正文、后台通知条与压缩卡片。
@@ -1098,17 +1094,20 @@ fun AIChatPanel(
         ))
     }
     val useAsyncItems = messages.size > ASYNC_CHAT_ITEMS_THRESHOLD
-    var asyncItems by remember(currentSessionId, useAsyncItems) { mutableStateOf<AsyncChatItems?>(null) }
-    LaunchedEffect(chatItemsKey, useAsyncItems, messagesReady) {
-        if (!useAsyncItems || !messagesReady) return@LaunchedEffect
-        val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { buildItems() }
-        asyncItems = AsyncChatItems(messagesState.sessionId, built)
-    }
-    val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && messagesReady && it.sessionId == currentSessionId }
-    val isBuildingAsyncChatItems = useAsyncItems && messagesReady && readyAsyncItems == null
-    val chatItems = remember(chatItemsKey, messagesReady, useAsyncItems, readyAsyncItems) {
-        resolveChatItems(messagesReady, useAsyncItems, readyAsyncItems?.items, buildItems)
-    }
+    // 同会话列表重建期间复用已提交的稳定 keys；协调器隔离会话并在后台结果就绪后替换。
+    // 构建等待期间只复用旧的渲染项，尾部流式 item 仍由 LazyColumn 独立生成。
+    // 这段协调不修改 followBottom 或手势状态，也不主动发起滚动请求。
+    // 异步列表就绪后，搜索定位仍按原有 messageId 目标执行。
+    // 不使用旧快照的索引去定位新请求，避免列表版本与滚动目标错配。
+    val chatItemsState = rememberChatItemsForScroll(
+        sessionId = currentSessionId,
+        requestKey = chatItemsKey,
+        messagesReady = messagesReady,
+        useAsyncItems = useAsyncItems,
+        buildItems = buildItems,
+    )
+    val chatItems = chatItemsState.items
+    val isBuildingAsyncChatItems = chatItemsState.isBuilding
     val pendingIds = remember(pendingUserMessages) { pendingUserMessages.mapTo(HashSet()) { it.id } }
     val settledUserIds = remember(chatItems, messages, messagesReady, pendingUserMessages) {
         if (!messagesReady || pendingIds.isEmpty()) emptySet() else settledUserMessageIds(pendingUserMessages, chatItems) +
@@ -1851,8 +1850,8 @@ fun AIChatPanel(
     }
 
     // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
-    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems, isBuildingAsyncChatItems) {
+        if (!messagesReady || isBuildingAsyncChatItems) return@LaunchedEffect
         val pending = pendingScroll
         if (pending != null && pending.first == currentSessionId) {
             val index = findChatMessageIndex(chatItems, pending.second)
@@ -2568,7 +2567,8 @@ fun AIChatPanel(
                         }
                     },
                     onForkClick = { viewModel.forkFromMessage(message.id) },
-                    onDeleteClick = { viewModel.deleteMessage(message.id) }
+                    onDeleteClick = { viewModel.deleteMessage(message.id) },
+                    onRegenerateClick = { viewModel.regenerateInterruptedAssistant(message.id) }
                 )
             }
 
