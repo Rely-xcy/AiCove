@@ -6,6 +6,7 @@ import com.aicove.feature.agent.domain.engine.EngineContext
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
 import com.aicove.feature.agent.data.local.dao.SessionBriefDao
+import com.aicove.feature.agent.data.local.dao.TodoItemDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.model.AgentMode
 import com.aicove.feature.agent.domain.model.GoalStatus
@@ -21,6 +22,7 @@ class SessionUseCase @Inject constructor(
     private val chatSessionDao: ChatSessionDao,
     private val agentMessageDao: AgentMessageDao,
     private val sessionBriefDao: SessionBriefDao,
+    private val todoItemDao: TodoItemDao,
     // 会话删除要一并丢掉 [MessagePersistenceUseCase] 的历史缓存（它只增不删会一直占着整段历史）。
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     // Lazy 断环：引擎 → 记忆模块 → MemoryRepository → ProjectAicodeRoot → WorkspaceRepository → 本类，
@@ -85,11 +87,13 @@ class SessionUseCase @Inject constructor(
         chatSessionDao.getSubSessionsByParentOnce(id).forEach { child ->
             agentMessageDao.deleteBySession(child.id)
             sessionBriefDao.deleteBySession(child.id)
+            todoItemDao.deleteBySession(child.id)
             chatSessionDao.delete(child.id)
             deleted.add(child.id)
         }
         agentMessageDao.deleteBySession(id)
         sessionBriefDao.deleteBySession(id)
+        todoItemDao.deleteBySession(id)
         chatSessionDao.delete(id)
         // 历史缓存按 sessionId 存，删掉的会话不会再 buildHistory，不清就永久占着
         deleted.forEach { sessionId -> messagePersistenceUseCase.evictHistory(sessionId) }
@@ -106,6 +110,7 @@ class SessionUseCase @Inject constructor(
         if (sessions.isEmpty()) return 0
         sessions.forEach { session -> agentMessageDao.deleteBySession(session.id) }
         sessions.forEach { session -> sessionBriefDao.deleteBySession(session.id) }
+        sessions.forEach { session -> todoItemDao.deleteBySession(session.id) }
         chatSessionDao.deleteByWorkspace(workspacePath)
         // 与 deleteSession 同一条清理：批量删同样会让这些 sessionId 的历史缓存永久留在内存里。
         sessions.forEach { session -> messagePersistenceUseCase.evictHistory(session.id) }

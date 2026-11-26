@@ -57,7 +57,7 @@ class TodoTool @Inject constructor(
         "⑥ 完成一项就把它留在清单里（update 成 completed，不要逐项删）；**清单里的任务全部完成后**，" +
         "用 clear 把整张清单一次清空、不留残余条目。清单要能看出整体进度。" +
         "status 取值 pending / in_progress / implemented（实现完待验证）/ verifying / completed / blocked / failed / cancelled。" +
-        "子任务用 parent_id 指向父任务的 subject；父任务在子任务全部完成前不能标 completed。" +
+        "子任务用 parent_id 指向父任务的 subject（也接受稳定 ID）；父任务在子任务全部完成前不能标 completed。" +
         "清单每轮都会重新注入系统提示词，压缩上下文不会丢。"
 
     override val permissionPolicy = ToolPermissionPolicy.AUTO_APPROVE
@@ -91,7 +91,7 @@ class TodoTool @Inject constructor(
             ),
             "parent_id" to mapOf(
                 "type" to "string",
-                "description" to "父任务的 subject（可选）：本项是它的子任务"
+                "description" to "父任务的 subject 或稳定 ID（可选）：本项是它的子任务"
             ),
             "priority" to mapOf(
                 "type" to "integer",
@@ -130,7 +130,7 @@ class TodoTool @Inject constructor(
         "parent_id" to ToolParameter(
             name = "parent_id",
             type = ParameterType.STRING,
-            description = "父任务的 subject（可选）：本项是它的子任务；父任务在子任务全部完成前不能标 completed。",
+            description = "父任务的 subject 或稳定 ID（可选）：本项是它的子任务；父任务在子任务全部完成前不能标 completed。",
             required = false
         ),
         "description" to ToolParameter(
@@ -215,10 +215,11 @@ class TodoTool @Inject constructor(
             .groupBy { normalize(it.subject) }
             .mapValues { (_, items) -> items.toMutableList() }
         val now = System.currentTimeMillis()
-        val entities = itemElements.mapIndexed { idx, element ->
+        val references = mutableMapOf<String, ParentReference>()
+        val planned = itemElements.mapIndexed { idx, element ->
             val draft = parseDraft(element, idx)
             val previous = existingBySubject[normalize(draft.subject)]?.removeFirstOrNull()
-            TodoItemEntity(
+            val entity = TodoItemEntity(
                 id = previous?.id ?: UUID.randomUUID().toString(),
                 sessionId = sessionId,
                 subject = draft.subject,
@@ -230,6 +231,14 @@ class TodoTool @Inject constructor(
                 updatedAt = now,
                 parentId = draft.parentId ?: previous?.parentId
             )
+            entity.parentId?.let { rawParent ->
+                references[entity.id] = ParentReference(draft.parentId ?: rawParent)
+            }
+            entity
+        }
+        val entities = when (val resolved = resolveParentLinks(planned, references)) {
+            is ParentLinksResult.Valid -> resolved.items
+            is ParentLinksResult.Invalid -> return resolved.error
         }
 
         todoItemDao.replaceAll(sessionId, entities)
@@ -249,14 +258,26 @@ class TodoTool @Inject constructor(
 
         val now = System.currentTimeMillis()
         val rows = existing.toMutableList()
+        val references = existing.mapNotNull { item ->
+            val parentReference = item.parentId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            if (existing.any { it.id == parentReference }) return@mapNotNull null
+            item.id to ParentReference(parentReference)
+        }.toMap().toMutableMap()
         var nextOrder = (rows.maxOfOrNull { it.order } ?: -1) + 1
         val touched = mutableListOf<TodoItemEntity>()
         val created = mutableListOf<String>()
         val merged = mutableListOf<String>()
 
         for (draft in drafts) {
-            val hitIndex = rows.indexOfFirst { normalize(it.subject) == normalize(draft.subject) }
-            if (hitIndex >= 0) {
+            val hitIndexes = rows.indices.filter { normalize(rows[it].subject) == normalize(draft.subject) }
+            if (hitIndexes.size > 1) {
+                return ToolResult.Error(
+                    "「${draft.subject}」匹配到多个同名待办，无法安全更新。",
+                    "AMBIGUOUS_SUBJECT"
+                )
+            }
+            val hitIndex = hitIndexes.singleOrNull()
+            if (hitIndex != null) {
                 // 标题已存在就按更新处理：清单里出现两条一样的待办比少一条更难收拾
                 val hit = rows[hitIndex]
                 val updated = hit.copy(
@@ -267,6 +288,9 @@ class TodoTool @Inject constructor(
                     parentId = draft.parentId ?: hit.parentId
                 )
                 rows[hitIndex] = updated
+                draft.parentId?.let { rawParent ->
+                    references[updated.id] = ParentReference(rawParent)
+                }
                 touched += updated
                 merged += updated.subject
                 continue
@@ -287,11 +311,20 @@ class TodoTool @Inject constructor(
                 parentId = draft.parentId
             )
             rows += entity
+            draft.parentId?.let { rawParent ->
+                references[entity.id] = ParentReference(rawParent)
+            }
             touched += entity
             created += entity.subject
         }
 
-        todoItemDao.upsertAll(touched)
+        val resolvedRows = when (val resolved = resolveParentLinks(rows, references)) {
+            is ParentLinksResult.Valid -> resolved.items
+            is ParentLinksResult.Invalid -> return resolved.error
+        }
+        val resolvedById = resolvedRows.associateBy { it.id }
+        val resolvedTouched = touched.distinctBy { it.id }.map { resolvedById.getValue(it.id) }
+        todoItemDao.upsertAll(resolvedTouched)
         val message = buildString {
             if (created.isNotEmpty()) append("已新增 ${created.size} 项：${created.joinToString("、")}")
             if (merged.isNotEmpty()) {
@@ -328,14 +361,66 @@ class TodoTool @Inject constructor(
             is Locate.Hit -> located.entity
             else -> return locateError(located, subject, existing)
         }
+        if (status != null && status != TodoStatus.COMPLETED) {
+            val visited = mutableSetOf(target.id)
+            var frontier = listOfNotNull(target.parentId)
+            var completedAncestor: TodoItemEntity? = null
+            while (frontier.isNotEmpty() && completedAncestor == null) {
+                val next = mutableListOf<String>()
+                for (reference in frontier) {
+                    val ancestors = when (val located = locateParent(existing, reference)) {
+                        is Locate.Hit -> listOf(located.entity)
+                        is Locate.Ambiguous -> existing.filter { candidate ->
+                            located.candidates.any { normalize(it) == normalize(candidate.subject) }
+                        }
+                        Locate.None -> emptyList()
+                    }
+                    for (ancestor in ancestors) {
+                        if (!visited.add(ancestor.id)) continue
+                        if (ancestor.status == TodoStatus.COMPLETED.name) {
+                            completedAncestor = ancestor
+                            break
+                        }
+                        ancestor.parentId?.let(next::add)
+                    }
+                    if (completedAncestor != null) break
+                }
+                frontier = next
+            }
+            completedAncestor?.let { ancestor ->
+                return ToolResult.Error(
+                    "父任务「${ancestor.subject}」已完成；请先把父任务改回未完成状态，再修改子任务进度。",
+                    "COMPLETED_PARENT_REOPEN"
+                )
+            }
+        }
         // 父任务完成前必须所有子任务已完成：一个子任务完成不代表父任务完成（V2 8.6）。
         if (status == TodoStatus.COMPLETED) {
-            val unfinished = existing.filter {
-                it.parentId == target.id && it.status != TodoStatus.COMPLETED.name
+            val unfinished = mutableListOf<TodoItemEntity>()
+            val visited = mutableSetOf(target.id)
+            var frontier = listOf(target.id)
+            while (frontier.isNotEmpty()) {
+                val next = mutableListOf<String>()
+                for (child in existing) {
+                    if (child.id in visited) continue
+                    val parentReference = child.parentId?.takeIf { it.isNotBlank() } ?: continue
+                    val parentMatches = when (val located = locateParent(existing, parentReference)) {
+                        is Locate.Hit -> located.entity.id in frontier
+                        is Locate.Ambiguous -> located.candidates.any { candidate ->
+                            existing.any { it.id in frontier && normalize(it.subject) == normalize(candidate) }
+                        }
+                        Locate.None -> false
+                    }
+                    if (!parentMatches) continue
+                    visited += child.id
+                    next += child.id
+                    if (child.status != TodoStatus.COMPLETED.name) unfinished += child
+                }
+                frontier = next
             }
             if (unfinished.isNotEmpty()) {
                 return ToolResult.Error(
-                    "「${target.subject}」还有 ${unfinished.size} 个未完成子任务：" +
+                    "「${target.subject}」还有 ${unfinished.size} 个未完成下属任务：" +
                         unfinished.joinToString("、") { it.subject },
                     "PARENT_HAS_UNFINISHED_CHILDREN"
                 )
@@ -367,6 +452,13 @@ class TodoTool @Inject constructor(
         val target = when (val located = locate(existing, subject)) {
             is Locate.Hit -> located.entity
             else -> return locateError(located, subject, existing)
+        }
+        val children = existing.filter { child -> child.id != target.id && isChildOf(child, target, existing) }
+        if (children.isNotEmpty()) {
+            return ToolResult.Error(
+                "「${target.subject}」还有 ${children.size} 个子任务；请先移除或重新挂接子任务。",
+                "PARENT_HAS_CHILDREN"
+            )
         }
         todoItemDao.delete(target.id)
         FileLogger.d(TAG, "todo remove: 已删除「${target.subject}」")
@@ -456,7 +548,9 @@ class TodoTool @Inject constructor(
                 subject = subject,
                 description = args["description"]?.jsonPrimitive?.contentOrNull,
                 status = parseStatus(args["status"]?.jsonPrimitive?.contentOrNull),
-                priority = args["priority"]?.jsonPrimitive?.intOrNull
+                priority = args["priority"]?.jsonPrimitive?.intOrNull,
+                parentId = (args["parent_id"] ?: args["parentId"])?.jsonPrimitive?.contentOrNull
+                    ?.trim()?.takeIf { it.isNotEmpty() }
             )
         )
     }
@@ -528,7 +622,9 @@ class TodoTool @Inject constructor(
      */
     private fun locate(items: List<TodoItemEntity>, subject: String): Locate {
         val key = normalize(subject)
-        items.firstOrNull { normalize(it.subject) == key }?.let { return Locate.Hit(it) }
+        val exact = items.filter { normalize(it.subject) == key }
+        if (exact.size == 1) return Locate.Hit(exact.single())
+        if (exact.size > 1) return Locate.Ambiguous(exact.map { it.subject })
         val loose = items.filter {
             val name = normalize(it.subject)
             name.startsWith(key) || key.startsWith(name) || name.contains(key)
@@ -538,6 +634,113 @@ class TodoTool @Inject constructor(
             1 -> Locate.Hit(loose.first())
             else -> Locate.Ambiguous(loose.map { it.subject })
         }
+    }
+
+    /** parent_id 解析严格检查重复标题；不能像普通 subject 定位一样命中第一个同名项。 */
+    private fun locateParent(items: List<TodoItemEntity>, reference: String): Locate {
+        val byId = items.filter { it.id.equals(reference, ignoreCase = true) }
+        if (byId.size == 1) return Locate.Hit(byId.single())
+        if (byId.size > 1) return Locate.Ambiguous(byId.map { it.subject })
+
+        val key = normalize(reference)
+        val exact = items.filter { normalize(it.subject) == key }
+        if (exact.size == 1) return Locate.Hit(exact.single())
+        if (exact.size > 1) return Locate.Ambiguous(exact.map { it.subject })
+
+        val loose = items.filter {
+            val name = normalize(it.subject)
+            name.startsWith(key) || key.startsWith(name) || name.contains(key)
+        }
+        return when (loose.size) {
+            0 -> Locate.None
+            1 -> Locate.Hit(loose.single())
+            else -> Locate.Ambiguous(loose.map { it.subject })
+        }
+    }
+
+    private fun isChildOf(child: TodoItemEntity, parent: TodoItemEntity, items: List<TodoItemEntity>): Boolean {
+        val reference = child.parentId?.takeIf { it.isNotBlank() } ?: return false
+        if (reference.equals(parent.id, ignoreCase = true)) return true
+        return when (val located = locateParent(items, reference)) {
+            is Locate.Hit -> located.entity.id == parent.id
+            is Locate.Ambiguous -> located.candidates.any { normalize(it) == normalize(parent.subject) }
+            Locate.None -> false
+        }
+    }
+
+    /** 把 ID 或文档约定的父 subject 统一解析为 ID，并验证整个计划清单的父子图。 */
+    private fun resolveParentLinks(
+        items: List<TodoItemEntity>,
+        references: Map<String, ParentReference>
+    ): ParentLinksResult {
+        val itemIds = items.mapTo(mutableSetOf()) { it.id }
+        val parentByChild = items.mapNotNull { item ->
+            item.parentId?.takeIf { it in itemIds }?.let { item.id to it }
+        }.toMap().toMutableMap()
+        for ((childId, reference) in references) {
+            val located = locateParent(items, reference.value)
+            val parent = when (located) {
+                is Locate.Hit -> located.entity
+                is Locate.Ambiguous -> return ParentLinksResult.Invalid(
+                    ToolResult.Error(
+                        "parent_id「${reference.value}」匹配到多个父任务：${located.candidates.joinToString("、")}。请提供唯一标题或稳定 ID。",
+                        "AMBIGUOUS_PARENT"
+                    )
+                )
+                Locate.None -> return ParentLinksResult.Invalid(
+                    ToolResult.Error(
+                        "parent_id「${reference.value}」未匹配到当前清单或本次提交中的父任务。",
+                        "PARENT_NOT_FOUND"
+                    )
+                )
+            }
+            if (parent.id == childId) {
+                val child = items.firstOrNull { it.id == childId }
+                return ParentLinksResult.Invalid(
+                    ToolResult.Error(
+                        "待办「${child?.subject.orEmpty()}」不能把自己设为父任务。",
+                        "INVALID_PARENT_HIERARCHY"
+                    )
+                )
+            }
+            parentByChild[childId] = parent.id
+        }
+
+        for ((childId, parentId) in parentByChild) {
+            val child = items.first { it.id == childId }
+            val parent = items.first { it.id == parentId }
+            if (parent.status == TodoStatus.COMPLETED.name && child.status != TodoStatus.COMPLETED.name) {
+                return ParentLinksResult.Invalid(
+                    ToolResult.Error(
+                        "父任务「${parent.subject}」不能先于未完成子任务「${child.subject}」标记完成。",
+                        "PARENT_HAS_UNFINISHED_CHILDREN"
+                    )
+                )
+            }
+        }
+
+        for (childId in parentByChild.keys) {
+            val seen = mutableSetOf<String>()
+            var current: String? = childId
+            while (current != null) {
+                if (!seen.add(current)) {
+                    val subject = items.firstOrNull { it.id == current }?.subject.orEmpty()
+                    return ParentLinksResult.Invalid(
+                        ToolResult.Error(
+                            "parent_id 形成循环依赖，涉及「$subject」；请调整父子关系后重试。",
+                            "INVALID_PARENT_HIERARCHY"
+                        )
+                    )
+                }
+                current = parentByChild[current]
+            }
+        }
+
+        return ParentLinksResult.Valid(
+            items.map { item ->
+                parentByChild[item.id]?.let { item.copy(parentId = it) } ?: item
+            }
+        )
     }
 
     private fun locateError(located: Locate, subject: String, items: List<TodoItemEntity>): ToolResult.Error {
@@ -567,6 +770,13 @@ class TodoTool @Inject constructor(
 
     private fun normalize(subject: String): String =
         subject.trim().lowercase().replace(Regex("\\s+"), "")
+}
+
+private data class ParentReference(val value: String)
+
+private sealed interface ParentLinksResult {
+    data class Valid(val items: List<TodoItemEntity>) : ParentLinksResult
+    data class Invalid(val error: ToolResult.Error) : ParentLinksResult
 }
 
 private data class Draft(

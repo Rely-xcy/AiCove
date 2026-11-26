@@ -3,6 +3,7 @@ package com.aicove.feature.agent.domain.session
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
 import com.aicove.feature.agent.data.local.dao.SessionBriefDao
+import com.aicove.feature.agent.data.local.dao.TodoItemDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.engine.AgentEngine
 import dagger.Lazy
@@ -39,31 +40,51 @@ class SessionUseCaseWorkspaceDeletionTest {
     fun deleteSessionsByWorkspace_deletesMessagesThenSessions() = runBlocking {
         val chatDao = mockk<ChatSessionDao>(relaxed = true)
         val messageDao = mockk<AgentMessageDao>(relaxed = true)
+        val todoDao = mockk<TodoItemDao>(relaxed = true)
         coEvery { chatDao.getAllSessionsByWorkspaceOnce("/ws/a") } returns listOf(
             session("root", "/ws/a"),
             session("sub", "/ws/a", parentId = "root")
         )
 
-        val useCase = SessionUseCase(chatDao, messageDao, mockk<SessionBriefDao>(relaxed = true), noopPersistence(), emptyEngine())
+        val useCase = SessionUseCase(chatDao, messageDao, mockk<SessionBriefDao>(relaxed = true), todoDao, noopPersistence(), emptyEngine())
         val deleted = useCase.deleteSessionsByWorkspace("/ws/a")
 
         assertEquals(2, deleted)
         coVerify(exactly = 1) { messageDao.deleteBySession("root") }
         coVerify(exactly = 1) { messageDao.deleteBySession("sub") }
+        coVerify(exactly = 1) { todoDao.deleteBySession("root") }
+        coVerify(exactly = 1) { todoDao.deleteBySession("sub") }
         coVerify(exactly = 1) { chatDao.deleteByWorkspace("/ws/a") }
+    }
+
+    @Test
+    fun deleteSession_deletesTasksForRootAndChildSessions() = runBlocking {
+        val chatDao = mockk<ChatSessionDao>(relaxed = true)
+        val messageDao = mockk<AgentMessageDao>(relaxed = true)
+        val todoDao = mockk<TodoItemDao>(relaxed = true)
+        coEvery { chatDao.getSubSessionsByParentOnce("root") } returns listOf(session("child", "/ws/a", "root"))
+
+        val useCase = SessionUseCase(chatDao, messageDao, mockk<SessionBriefDao>(relaxed = true), todoDao, noopPersistence(), emptyEngine())
+        val deleted = useCase.deleteSession("root")
+
+        assertEquals(listOf("root", "child"), deleted)
+        coVerify(exactly = 1) { todoDao.deleteBySession("root") }
+        coVerify(exactly = 1) { todoDao.deleteBySession("child") }
     }
 
     @Test
     fun deleteSessionsByWorkspace_noSessions_skipsDeletion() = runBlocking {
         val chatDao = mockk<ChatSessionDao>(relaxed = true)
         val messageDao = mockk<AgentMessageDao>(relaxed = true)
+        val todoDao = mockk<TodoItemDao>(relaxed = true)
         coEvery { chatDao.getAllSessionsByWorkspaceOnce("/ws/empty") } returns emptyList()
 
-        val useCase = SessionUseCase(chatDao, messageDao, mockk<SessionBriefDao>(relaxed = true), noopPersistence(), emptyEngine())
+        val useCase = SessionUseCase(chatDao, messageDao, mockk<SessionBriefDao>(relaxed = true), todoDao, noopPersistence(), emptyEngine())
         val deleted = useCase.deleteSessionsByWorkspace("/ws/empty")
 
         assertEquals(0, deleted)
         coVerify(exactly = 0) { messageDao.deleteBySession(any()) }
+        coVerify(exactly = 0) { todoDao.deleteBySession(any()) }
         coVerify(exactly = 0) { chatDao.deleteByWorkspace(any()) }
     }
 }

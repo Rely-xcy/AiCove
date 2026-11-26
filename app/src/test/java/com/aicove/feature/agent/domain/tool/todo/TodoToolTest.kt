@@ -85,7 +85,213 @@ class TodoToolTest {
         assertEquals(50, dao.rows.size)
     }
 
+    @Test
+    fun add_itemsBeyondCapRollsBackEarlierUpdatesInSameRequest() = runTest {
+        repeat(50) { index ->
+            seed("待办 $index", order = index, id = "id-$index")
+        }
+        val original = dao.rows.toList()
+
+        val result = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(
+                    mapOf("subject" to str("待办 0"), "status" to str("completed")),
+                    mapOf("subject" to str("第 51 项"))
+                )
+            ),
+            context
+        )
+
+        assertEquals("TOO_MANY_ITEMS", errorCode(result))
+        assertEquals(original, dao.rows)
+    }
+
+    @Test
+    fun add_topLevelParentIdAcceptsSubjectAndStableId() = runTest {
+        val parent = seed("父任务")
+
+        val bySubject = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "subject" to str("按标题挂接的子任务"),
+                "parent_id" to str(parent.subject)
+            ),
+            context
+        )
+        val byFuzzySubject = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "subject" to str("按模糊标题挂接的子任务"),
+                "parent_id" to str("父")
+            ),
+            context
+        )
+        val byId = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "subject" to str("按ID挂接的子任务"),
+                "parent_id" to str(parent.id)
+            ),
+            context
+        )
+
+        assertNull(errorCodeOrNull(bySubject))
+        assertNull(errorCodeOrNull(byFuzzySubject))
+        assertNull(errorCodeOrNull(byId))
+        assertEquals(parent.id, dao.rows.single { it.subject == "按标题挂接的子任务" }.parentId)
+        assertEquals(parent.id, dao.rows.single { it.subject == "按模糊标题挂接的子任务" }.parentId)
+        assertEquals(parent.id, dao.rows.single { it.subject == "按ID挂接的子任务" }.parentId)
+
+        val completed = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(parent.subject), "status" to str("completed")),
+            context
+        )
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(completed))
+        assertEquals(TodoStatus.PENDING.name, dao.rows.single { it.id == parent.id }.status)
+    }
+
+    @Test
+    fun add_detectsCycleThroughLegacyParentIdWithDifferentCaseWithoutWriting() = runTest {
+        val first = seed("环A", id = "id-a")
+        val second = seed("环B", order = 1, id = "id-b")
+        dao.rows[0] = first.copy(parentId = "ID-B")
+        val original = dao.rows.toList()
+
+        val result = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "subject" to str(second.subject),
+                "parent_id" to str(first.id)
+            ),
+            context
+        )
+
+        assertEquals("INVALID_PARENT_HIERARCHY", errorCode(result))
+        assertEquals(original, dao.rows)
+    }
+
+    @Test
+    fun add_itemsCanReferenceLaterParentAndBlocksCompletionUntilChildCompletes() = runTest {
+        val added = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(
+                    mapOf("subject" to str("子任务"), "parent_id" to str("父任务")),
+                    mapOf("subject" to str("父任务"))
+                )
+            ),
+            context
+        )
+
+        assertNull(errorCodeOrNull(added))
+        val parent = dao.rows.single { it.subject == "父任务" }
+        val child = dao.rows.single { it.subject == "子任务" }
+        assertEquals(parent.id, child.parentId)
+
+        val blocked = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str("父任务"), "status" to str("completed")),
+            context
+        )
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(blocked))
+
+        tool.executeWithContext(
+            args("action" to str("update"), "subject" to str("子任务"), "status" to str("completed")),
+            context
+        )
+        val completed = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str("父任务"), "status" to str("completed")),
+            context
+        )
+        assertNull(errorCodeOrNull(completed))
+        assertEquals(TodoStatus.COMPLETED.name, dao.rows.single { it.id == parent.id }.status)
+    }
+
+    @Test
+    fun add_rejectsCompletedParentWithUnfinishedChildWithoutWriting() = runTest {
+        val original = seed("保留原任务")
+
+        val result = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(
+                    mapOf("subject" to str("已完成父任务"), "status" to str("completed")),
+                    mapOf("subject" to str("未完成子任务"), "parent_id" to str("已完成父任务"))
+                )
+            ),
+            context
+        )
+
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(result))
+        assertEquals(listOf(original), dao.rows)
+    }
+
     // ------------------------------------------------------------ update
+
+    @Test
+    fun exactDuplicateSubjectsMakeUpdateAndRemoveAmbiguousWithoutWriting() = runTest {
+        seed("旧任务")
+        val replaced = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("重复标题")),
+                    mapOf("subject" to str("重复标题"))
+                )
+            ),
+            context
+        )
+        assertNull(errorCodeOrNull(replaced))
+        val original = dao.rows.toList()
+
+        val update = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str("重复标题"), "status" to str("completed")),
+            context
+        )
+        val remove = tool.executeWithContext(
+            args("action" to str("remove"), "subject" to str("重复标题")),
+            context
+        )
+
+        assertEquals("AMBIGUOUS_SUBJECT", errorCode(update))
+        assertEquals("AMBIGUOUS_SUBJECT", errorCode(remove))
+        assertEquals(original, dao.rows)
+    }
+
+    @Test
+    fun update_parentCompletionChecksUnfinishedGrandchildrenInLegacyTree() = runTest {
+        val parent = seed("根任务")
+        val child = seed("已完成子任务", status = TodoStatus.COMPLETED, order = 1, id = "id-child")
+            .copy(parentId = parent.id)
+        val grandchild = seed("未完成孙任务", order = 2, id = "id-grandchild")
+            .copy(parentId = child.id)
+        dao.rows[1] = child
+        dao.rows[2] = grandchild
+
+        val result = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(parent.subject), "status" to str("completed")),
+            context
+        )
+
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(result))
+        assertEquals(TodoStatus.PENDING.name, dao.rows.first { it.id == parent.id }.status)
+    }
+
+    @Test
+    fun update_reopeningChildUnderCompletedParentIsRejectedWithoutWriting() = runTest {
+        val parent = seed("已完成父任务", status = TodoStatus.COMPLETED)
+        val child = seed("子任务", order = 1, id = "id-child").copy(parentId = parent.id)
+        dao.rows[1] = child
+        val original = dao.rows.toList()
+
+        val result = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(child.subject), "status" to str("pending")),
+            context
+        )
+
+        assertEquals("COMPLETED_PARENT_REOPEN", errorCode(result))
+        assertEquals(original, dao.rows)
+    }
 
     @Test
     fun update_fuzzySubject_marksCompletedAndKeepsId() = runTest {
@@ -163,6 +369,22 @@ class TodoToolTest {
     // ------------------------------------------------------------ remove / replace / list
 
     @Test
+    fun remove_parentWithChildrenIsRejectedWithoutWriting() = runTest {
+        val parent = seed("父任务")
+        val child = seed("子任务", order = 1, id = "id-child").copy(parentId = parent.id)
+        dao.rows[1] = child
+        val original = dao.rows.toList()
+
+        val result = tool.executeWithContext(
+            args("action" to str("remove"), "subject" to str(parent.subject)),
+            context
+        )
+
+        assertEquals("PARENT_HAS_CHILDREN", errorCode(result))
+        assertEquals(original, dao.rows)
+    }
+
+    @Test
     fun remove_deletesItem() = runTest {
         seed("分析现有实现")
         seed("重写工具", order = 1, id = "id-second")
@@ -199,6 +421,171 @@ class TodoToolTest {
         assertEquals(TodoStatus.COMPLETED.name, kept.status)
         assertEquals(1, dao.rows.count { it.subject == "重写工具" })
         assertEquals("completed", statusOf(result, "分析现有实现"))
+    }
+
+    @Test
+    fun replace_itemsCanReferenceLaterParent() = runTest {
+        seed("将被替换的旧任务")
+
+        val result = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("替换后子任务"), "parent_id" to str("替换后父任务")),
+                    mapOf("subject" to str("替换后父任务"))
+                )
+            ),
+            context
+        )
+
+        assertNull(errorCodeOrNull(result))
+        val parent = dao.rows.single { it.subject == "替换后父任务" }
+        val child = dao.rows.single { it.subject == "替换后子任务" }
+        assertEquals(parent.id, child.parentId)
+        assertEquals(2, dao.rows.size)
+
+        val blocked = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(parent.subject), "status" to str("completed")),
+            context
+        )
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(blocked))
+        tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(child.subject), "status" to str("completed")),
+            context
+        )
+        val completed = tool.executeWithContext(
+            args("action" to str("update"), "subject" to str(parent.subject), "status" to str("completed")),
+            context
+        )
+        assertNull(errorCodeOrNull(completed))
+    }
+
+    @Test
+    fun replaceCanResolveStableIdBeforeLaterParentAndRejectsCyclesAtomically() = runTest {
+        val parent = seed("沿用ID的父任务", id = "stable-parent-id")
+        val linked = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("子任务"), "parent_id" to str(parent.id)),
+                    mapOf("subject" to str(parent.subject))
+                )
+            ),
+            context
+        )
+        assertNull(errorCodeOrNull(linked))
+        assertEquals(parent.id, dao.rows.single { it.subject == "子任务" }.parentId)
+        val stable = dao.rows.toList()
+
+        val cycle = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("环A"), "parent_id" to str("环B")),
+                    mapOf("subject" to str("环B"), "parent_id" to str("环A"))
+                )
+            ),
+            context
+        )
+        assertEquals("INVALID_PARENT_HIERARCHY", errorCode(cycle))
+        assertEquals(stable, dao.rows)
+    }
+
+    @Test
+    fun replace_rejectsCompletedParentWithUnfinishedChildWithoutWriting() = runTest {
+        val original = seed("保留原任务")
+
+        val result = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("已完成父任务"), "status" to str("completed")),
+                    mapOf("subject" to str("未完成子任务"), "parent_id" to str("已完成父任务"))
+                )
+            ),
+            context
+        )
+
+        assertEquals("PARENT_HAS_UNFINISHED_CHILDREN", errorCode(result))
+        assertEquals(listOf(original), dao.rows)
+    }
+
+    @Test
+    fun invalidParentReferencesAndAmbiguousSubjects_leaveOriginalListUnchanged() = runTest {
+        val existing = seed("原有任务")
+        val original = dao.rows.toList()
+
+        val orphan = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(
+                    mapOf("subject" to str("本可新增")),
+                    mapOf("subject" to str("孤儿"), "parent_id" to str("不存在的父任务"))
+                )
+            ),
+            context
+        )
+        assertEquals("PARENT_NOT_FOUND", errorCode(orphan))
+        assertEquals(original, dao.rows)
+
+        seed("模糊父任务甲", order = 1, id = "parent-1")
+        seed("模糊父任务乙", order = 2, id = "parent-2")
+        val beforeAmbiguousAdd = dao.rows.toList()
+        val ambiguousAdd = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "subject" to str("引用模糊父项的子任务"),
+                "parent_id" to str("模糊父任务")
+            ),
+            context
+        )
+        assertEquals("AMBIGUOUS_PARENT", errorCode(ambiguousAdd))
+        assertEquals(beforeAmbiguousAdd, dao.rows)
+
+        val beforeAmbiguousReplace = dao.rows.toList()
+        val ambiguousReplace = tool.executeWithContext(
+            args(
+                "action" to str("replace"),
+                "items" to items(
+                    mapOf("subject" to str("重复规划父项")),
+                    mapOf("subject" to str("重复规划父项")),
+                    mapOf("subject" to str("规划子项"), "parent_id" to str("重复规划父项"))
+                )
+            ),
+            context
+        )
+        assertEquals("AMBIGUOUS_PARENT", errorCode(ambiguousReplace))
+        assertEquals(beforeAmbiguousReplace, dao.rows)
+        assertTrue(dao.rows.any { it.id == existing.id })
+    }
+
+    @Test
+    fun selfParentAndCycles_areRejectedWithoutWriting() = runTest {
+        seed("原有任务")
+        val original = dao.rows.toList()
+
+        val selfParent = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(mapOf("subject" to str("自父项"), "parent_id" to str("自父项")))
+            ),
+            context
+        )
+        assertEquals("INVALID_PARENT_HIERARCHY", errorCode(selfParent))
+        assertEquals(original, dao.rows)
+
+        val cycle = tool.executeWithContext(
+            args(
+                "action" to str("add"),
+                "items" to items(
+                    mapOf("subject" to str("环A"), "parent_id" to str("环B")),
+                    mapOf("subject" to str("环B"), "parent_id" to str("环A"))
+                )
+            ),
+            context
+        )
+        assertEquals("INVALID_PARENT_HIERARCHY", errorCode(cycle))
+        assertEquals(original, dao.rows)
     }
 
     @Test

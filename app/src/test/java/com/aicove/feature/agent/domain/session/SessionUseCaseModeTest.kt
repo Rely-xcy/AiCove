@@ -3,6 +3,7 @@ package com.aicove.feature.agent.domain.session
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
 import com.aicove.feature.agent.data.local.dao.SessionBriefDao
+import com.aicove.feature.agent.data.local.dao.TodoItemDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.engine.AgentEngine
 import com.aicove.feature.agent.domain.model.AgentMode
@@ -23,6 +24,7 @@ class SessionUseCaseModeTest {
         chatSessionDao = mockk<ChatSessionDao>(relaxed = true),
         agentMessageDao = mockk<AgentMessageDao>(relaxed = true),
         sessionBriefDao = mockk<SessionBriefDao>(relaxed = true),
+        todoItemDao = mockk<TodoItemDao>(relaxed = true),
         // 本用例只验证 mode 压平与实体构造，这两条依赖不会走到，relaxed mock 即可。
         messagePersistenceUseCase = mockk<MessagePersistenceUseCase>(relaxed = true),
         agentEngine = Lazy { mockk<AgentEngine>(relaxed = true) }
