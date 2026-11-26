@@ -296,7 +296,7 @@ internal fun AgentMessageItem(
     val hasContent = message.content.hasVisibleContent()
     val hasAttachments = message.attachments.isNotEmpty()
     // 模型直出的图片走附件落库，纯图消息没有正文与思考，同样要展示（不能提前 return）。
-    if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning && !hasAttachments) return
+    if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning && !hasAttachments && !message.isInterrupted) return
 
     val isUser = message.role == MessageRole.USER
     // 分块消息：块间只留一个段落间距，视觉上仍是连续的一段正文（DSH 扁平文档流下不再有描边接缝）。
@@ -436,6 +436,24 @@ internal fun AgentMessageItem(
                 }
                 if ((isUser || message.role == MessageRole.ASSISTANT) && hasAttachments) {
                     MessageAttachmentList(attachments = message.attachments)
+                }
+                if (message.isInterrupted && isChunkFooter) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.chat_response_interrupted),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        if (!hasContent && !hasAttachments && showActions && onMoreClick != null) {
+                            Spacer(Modifier.width(Spacing.xs))
+                            MessageActionIconButton(
+                                icon = FeatherIcons.MoreHorizontal,
+                                contentDescription = stringResource(R.string.chat_more_options),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                onClick = { onMoreClick(message) }
+                            )
+                        }
+                    }
                 }
                 // 气泡下方的元信息行（工具消息不显示）：用户消息每条都常驻「时间 + 复制/回退/更多」，
                 // 助手消息只挂整段会话最新的一条，避免每条回复下面都吊一排按钮把聊天记录割碎。

@@ -32,6 +32,7 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.Copy
 import compose.icons.feathericons.Edit2
 import compose.icons.feathericons.GitBranch
+import compose.icons.feathericons.RefreshCw
 import compose.icons.feathericons.Trash2
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,7 +43,8 @@ internal fun MessageActionsBottomSheet(
     onEditClick: () -> Unit,
     onCopyClick: () -> Unit,
     onForkClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onRegenerateClick: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -65,6 +67,17 @@ internal fun MessageActionsBottomSheet(
             )
 
             Spacer(modifier = Modifier.height(Spacing.xs))
+
+            if (message.isRegeneratable) {
+                MessageActionItem(
+                    icon = FeatherIcons.RefreshCw,
+                    title = stringResource(R.string.chat_action_regenerate),
+                    onClick = {
+                        onDismiss()
+                        onRegenerateClick()
+                    }
+                )
+            }
 
             // 编辑消息
             MessageActionItem(

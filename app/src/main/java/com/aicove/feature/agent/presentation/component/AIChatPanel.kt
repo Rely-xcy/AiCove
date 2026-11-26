@@ -282,7 +282,7 @@ private fun toolGroupKey(first: AgentUIMessage): String = "toolgroup:${first.id}
 private fun AgentUIMessage.rendersActionRow(): Boolean =
     role == MessageRole.ASSISTANT &&
         !isCompactionMarker && !isContextSummary && !isCompactionFailure && !isBackgroundNotification &&
-        (content.hasVisibleContent() || attachments.isNotEmpty())
+        (content.hasVisibleContent() || attachments.isNotEmpty() || isInterrupted)
 
 /**
  * 本轮助手消息是否已经在消息列表里正式就位渲染：底部残留的流式 / 思考气泡是否该退休，靠它判定。
@@ -637,8 +637,7 @@ internal fun actionableResultIds(
         val turn = turns[i]
         val turnFinished = if (runningFrom != null) i < runningFrom else (!busy || i != turns.lastIndex)
         if (!turnFinished) continue
-        val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() && it.rendersActionRow() }
-            ?: turn.messages.lastOrNull { it.rendersActionRow() }
+        val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() }
         if (resultMsg != null) {
             ids += resultMsg.id
         }
@@ -671,9 +670,8 @@ internal fun AgentUIMessage.isPersistentInTurn(): Boolean =
 private fun AgentUIMessage.isSystemCardInTurn(): Boolean =
     isCompactionMarker || isContextSummary || isCompactionFailure || isBackgroundNotification
 
-/** 能否作为一轮的「结果」：最后一条有可见正文的普通助手消息（系统卡片不算，见 [isSystemCardInTurn]）。 */
-internal fun AgentUIMessage.isResultCandidate(): Boolean =
-    role == MessageRole.ASSISTANT && !isSystemCardInTurn() && (content.hasVisibleContent() || attachments.isNotEmpty())
+/** 能否作为一轮可挂操作行的「结果」；系统卡片与无正文的普通思考消息不会入选。 */
+internal fun AgentUIMessage.isResultCandidate(): Boolean = rendersActionRow()
 
 /**
  * 轮内「过程」项（保持原序）：思考、连续工具调用分组、中间助手正文、后台通知条与压缩卡片。
@@ -2568,7 +2566,8 @@ fun AIChatPanel(
                         }
                     },
                     onForkClick = { viewModel.forkFromMessage(message.id) },
-                    onDeleteClick = { viewModel.deleteMessage(message.id) }
+                    onDeleteClick = { viewModel.deleteMessage(message.id) },
+                    onRegenerateClick = { viewModel.regenerateInterruptedAssistant(message.id) }
                 )
             }
 

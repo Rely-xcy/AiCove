@@ -43,9 +43,7 @@ import com.aicove.feature.settings.data.repository.LiveNotificationSettingsRepos
 import com.aicove.feature.settings.data.repository.ApprovalNotificationSettingsRepository
 import com.aicove.feature.settings.data.repository.ModelReasoningEffortRepository
 import com.aicove.feature.settings.data.repository.StartupSessionMode
-import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.model.AgentImage
-import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.agent.domain.model.AgentMode
 import com.aicove.feature.agent.domain.model.GoalStatus
 import com.aicove.feature.agent.domain.model.ChatSession
@@ -57,7 +55,6 @@ import com.aicove.feature.agent.domain.notification.NotificationOutcome
 import com.aicove.feature.agent.domain.notification.PendingNotification
 import com.aicove.feature.agent.domain.permission.PermissionChoice
 import com.aicove.feature.agent.domain.mcp.McpManager
-import com.aicove.feature.agent.domain.subagent.AgentDefinition
 import com.aicove.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aicove.feature.agent.domain.subagent.SubAgentEvent
 import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
@@ -90,7 +87,6 @@ import com.aicove.feature.agent.domain.tool.mode.PlanApprovalChoice
 import com.aicove.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicove.feature.agent.domain.tool.mode.PlanApprovalRequest
 import com.aicove.feature.agent.domain.tool.question.AskUserQuestionManager
-import com.aicove.feature.agent.domain.tool.vscreen.VSCREEN_TOOL_PREFIX
 import com.aicove.feature.agent.domain.tool.question.UserQuestionAnswer
 import com.aicove.feature.agent.domain.session.AgentChatRequest
 import com.aicove.feature.agent.domain.session.AgentChatRequestBus
@@ -203,6 +199,8 @@ class AIAgentViewModel @Inject constructor(
     private val contextUsageHolder: ContextUsageHolder,
     @param:ApplicationContext private val context: Context
 ) : ViewModel(), SlashCommandContext {
+
+    private val interruptedAssistantReplay = InterruptedAssistantReplay(agentMessageDao, messagePersistenceUseCase)
 
     /**
      * 上下文占用快照：压缩判定算出的那套数（占用 / 窗口 / 实际生效阈值）原样给界面，
@@ -865,7 +863,10 @@ class AIAgentViewModel @Inject constructor(
                     else (paged + summaries).distinctBy { it.id }.sortedBy { it.timestamp }
                     ChatMessagesState(
                         sessionId = id,
-                        messages = list.mapNotNull { entity -> entity.toUIMessage().takeIf { it.hasRenderableChatContent() } },
+                        messages = list.mapNotNull { entity ->
+                            interruptedAssistantReplay.toVisibleMessage(entity)
+                                .takeIf { it.hasRenderableChatContent() }
+                        }.withLatestInterruptedAssistantAction(),
                         loaded = true,
                         hasMore = paged.size >= limit,
                         isLoadingMore = false,
@@ -1826,6 +1827,7 @@ class AIAgentViewModel @Inject constructor(
         targetSessionId: String? = null,
         /** 调用方（UI）预生成的用户消息行 id：无论本条走直发还是先入队，落库行的主键都用它。 */
         clientMessageId: String? = null,
+        replayUserMessageId: String? = null,
         /**
          * 非 null 表示本条请求投递的是系统通知（[PendingNotification] 原文，而非用户消息）：
          * 会话忙碌时回投 [agentNotificationCenter]，不进「待发送」面板——那个面板只承载用户消息。
@@ -1857,7 +1859,8 @@ class AIAgentViewModel @Inject constructor(
                 inputAttachments = inputAttachments,
                 isAutoTrigger = isAutoTrigger,
                 clientMessageId = clientMessageId,
-                persistUserMessage = persistUserMessage
+                persistUserMessage = persistUserMessage,
+                replayUserMessageId = replayUserMessageId
             )
             val currentList = _queuedRequests.value[sid] ?: emptyList()
             _queuedRequests.value = _queuedRequests.value + (sid to (currentList + req))
@@ -1874,7 +1877,8 @@ class AIAgentViewModel @Inject constructor(
                 targetSessionId = sid,
                 isAutoTrigger = isAutoTrigger,
                 clientMessageId = clientMessageId,
-                persistUserMessage = persistUserMessage
+                persistUserMessage = persistUserMessage,
+                replayUserMessageId = replayUserMessageId
             )
         }
     }
@@ -1965,7 +1969,8 @@ class AIAgentViewModel @Inject constructor(
             targetSessionId = sessionId,
             isAutoTrigger = next.isAutoTrigger,
             clientMessageId = next.clientMessageId,
-            persistUserMessage = next.persistUserMessage
+            persistUserMessage = next.persistUserMessage,
+            replayUserMessageId = next.replayUserMessageId
         )
     }
 
@@ -2065,7 +2070,9 @@ class AIAgentViewModel @Inject constructor(
          * 本轮要「消费掉」的通知序号（见 [flushPendingNotifications]）：用户行落库后才会 ack，
          * 两者同生共死，不会出现「通知丢了」或「通知重复投递」。
          */
-        notificationSeqs: List<Long> = emptyList()
+        notificationSeqs: List<Long> = emptyList(),
+        /** 手动重生成时复用的原始用户行；与 goal 的 persistUserMessage=false 语义分离。 */
+        replayUserMessageId: String? = null
     ): Job = viewModelScope.launch {
         val sessionId = targetSessionId ?: ensureSession()
         if (sessionId.isBlank()) {
@@ -2140,8 +2147,6 @@ class AIAgentViewModel @Inject constructor(
         val skillInjection = buildSkillInjection(triggeredHits, requestTokenCount)
         // 发出去的就是 modelRequest（附件说明已经包含在里面）。旧代码在命中技能时把它和 request
         // 再拼一遍，既重复又只活在请求里——下一轮从库里重建历史时这行必然变字。
-        val effectiveModelRequest = modelRequest
-
         // 兼容历史会话：若会话尚未持久化绑定 providerId/model，发消息时将其固化，避免后续默认模型变动影响已有会话
         val currentSession = sessionUseCase.getSessionById(sessionId)
         if (currentSession != null && (currentSession.providerId.isNullOrBlank() || currentSession.model.isNullOrBlank())) {
@@ -2182,31 +2187,32 @@ class AIAgentViewModel @Inject constructor(
         try {
             agentRunStateStore.started(sessionId)
             var failed = false
-            // 必须在插入本次用户消息之前读取历史：workflow 会自己 add(userRequest)，避免重复。
-            val historyStartedNs = System.nanoTime()
-            FileLogger.memoryCheckpoint(
-                TAG,
-                "history.start",
-                details = "operation=$historyStartedNs requestChars=${request.length} attachments=${inputAttachments.size}"
-            )
-            // 全量重建历史（读整个会话 + JSON 解码工具快照 + 图片 base64）是重活且会随会话变长变慢，
-            // 留在主线程上会把这一帧的消息回显与滚动一起拖住。它是 suspend，直接切到 IO，主线程只等结果。
-            val history = withContext(Dispatchers.IO) {
-                messagePersistenceUseCase.buildHistory(sessionId, SessionUseCase.PENDING_TOOL_MARKER)
+            val preparedHistory = withContext(Dispatchers.IO) {
+                interruptedAssistantReplay.buildExecutionHistory(
+                    sessionId,
+                    replayUserMessageId,
+                    request.length,
+                    inputAttachments.size
+                )
             }
-            FileLogger.memoryCheckpoint(
-                TAG,
-                "history.ready",
-                elapsedMs = (System.nanoTime() - historyStartedNs) / 1_000_000,
-                details = "operation=$historyStartedNs messages=${history.size}"
-            )
-            val isFirst = history.isEmpty()
+            if (preparedHistory == null) {
+                setAgentState(sessionId, AgentUIState.Error(context.getString(R.string.chat_regenerate_unavailable)))
+                return@launch
+            }
+            val history = preparedHistory.history
+            val requestHistory = preparedHistory.requestHistory
+            val replayUserMessage = preparedHistory.replayUserMessage
+            val effectiveModelRequest = replayUserMessage?.content ?: modelRequest
+            val effectiveInputImages = replayUserMessage?.images ?: inputImages
+            val isFirst = requestHistory.isEmpty()
 
             // 本轮用户消息在库里的行 id：workflow 把模式提醒写回该行的 modelReminder 列（content 保持用户原话）。
             // 自动触发轮次（/init、/skill 等）不落用户行，提醒只在本轮请求里生效。
             // 调用方带了预生成 id（UI 乐观气泡）就用它，让「气泡」与「落库行」是同一条的判据落在 id 上。
-            val userMsgId = if (isAutoTrigger) null else (clientMessageId ?: UUID.randomUUID().toString())
-            if (!persistUserMessage) {
+            val userMsgId = if (isAutoTrigger) null else (replayUserMessageId ?: clientMessageId ?: UUID.randomUUID().toString())
+            if (replayUserMessageId != null) {
+                _runningTurnAnchorIds.value = _runningTurnAnchorIds.value + (sessionId to replayUserMessageId)
+            } else if (!persistUserMessage) {
                 // 目标续跑等内部轮次：不落库、不建检查点，仅把指令作为本轮用户消息发给模型。
             } else if (userMsgId != null) {
                 if (notificationSeqs.isEmpty()) {
@@ -2232,7 +2238,7 @@ class AIAgentViewModel @Inject constructor(
                     _runningTurnAnchorIds.value = _runningTurnAnchorIds.value + (sessionId to userMsgId)
                 }
                 checkpointManager.createCheckpoint(sessionId, userMsgId, request)
-                if (isFirst && !skipTitleUpdate) {
+                if (isFirst && !skipTitleUpdate && replayUserMessageId == null) {
                     sessionUseCase.updateTitle(sessionId, sessionUseCase.deriveTitle(request))
                     // 后台异步用 LLM 生成更贴切的标题替换临时标题；失败/取不到时保留临时标题
                     pendingTitleRequest = {
@@ -2247,67 +2253,26 @@ class AIAgentViewModel @Inject constructor(
             // 正式流的轮首锚点依赖已落库的用户行；此前由 Preparing 提供反馈，不能提前复用 Streaming。
             setAgentState(sessionId, AgentUIState.Streaming)
 
-            val sessionEntity = sessionUseCase.getSessionById(sessionId)
-            val sessionDomain = sessionEntity?.toDomain()
-            val mode = sessionDomain?.mode ?: AgentMode.BUILD
-            // 「是不是子代理会话」只在这里判一次：结构性事实（会话行有 parentId），下面的所有入口都读它。
-            // 以前各处分别拿「有没有自定义定义」近似，默认子代理（没有同名定义）就被当成主对话了。
-            val isSubAgent = sessionEntity?.parentId != null
-            // 子会话的 subagentType 存的是自定义 agent 名；能查到定义时提示词与工具集都按它组装。
-            // 定义是配置性事实，与子代理判定无关，不能拿它兼任。
-            // 目录扫描（远程模式经 SFTP）切到 IO，避免阻塞主线程。
-            val agentDefinition = withContext(Dispatchers.IO) {
-                sessionEntity?.subagentType
-                    ?.takeIf { isSubAgent }
-                    ?.let { agentDefinitionRepository.findIncludingDisabled(it) }
-            }
-
-            // 本轮（一次用户请求 = 一次 agent 循环）的标识：同一轮的多次模型调用共用一个，
-            // 发送前兜底截断据此冻结，不随两次调用之间的估算抖动换截法。
-            val turnId = UUID.randomUUID().toString()
-            val agentContext = AgentContext(
+            val workflowContext = interruptedAssistantReplay.prepareWorkflowContext(
+                sessionId = sessionId,
+                projectRoot = projectRoot,
                 currentFile = currentFile,
                 selectedCode = selectedCode,
-                projectRoot = projectRoot,
-                language = currentFile?.let { detectLanguage(it) },
                 history = history,
-                inputImages = inputImages,
-                sessionId = sessionId,
+                requestHistory = requestHistory,
+                inputImages = effectiveInputImages,
                 userMessageId = userMsgId,
                 skillInjection = skillInjection,
-                turnId = turnId,
-                mode = mode,
-                modeBeforePlan = sessionDomain?.modeBeforePlan,
-                goal = sessionDomain?.goal,
-                goalStatus = sessionDomain?.goalStatus,
-                reasoningEffort = sessionDomain?.reasoningEffort?.apiValue,
-                isSubAgent = isSubAgent,
-                agentDefinition = agentDefinition
+                sessionUseCase = sessionUseCase,
+                agentEngine = agentEngine,
+                toolRegistry = toolRegistry,
+                agentDefinitionRepository = agentDefinitionRepository
             )
-
-            val allTools = (toolRegistry.getAvailableTools() + agentEngine.tools(
-                EngineContext(
-                    sessionId = sessionId,
-                    projectRoot = projectRoot,
-                    mode = mode,
-                    history = history,
-                    isSubAgent = isSubAgent
-                )
-            )).distinctBy { it.name }
-            val goalActive = sessionDomain?.goalStatus == GoalStatus.ACTIVE
-            goalActiveAtTurn = goalActive
-            val tools = when {
-                agentDefinition != null -> {
-                    val allowed = agentDefinition.filterToolNames(allTools.map { it.name }).toSet()
-                    allTools.filter { it.name in allowed }
-                }
-                isSubAgent -> allTools.filterNot { it.name == AgentDefinition.NESTED_TOOL || it.name.startsWith(VSCREEN_TOOL_PREFIX) }
-                else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
-            }.let { list ->
-                // goal 自主循环期间禁用 PLAN（其退出门禁需人工审查）；非 goal 期间不暴露 goalStatus 工具。
-                if (goalActive) list.filterNot { it.name == "planMode" }
-                else list.filterNot { it.name == "goalStatus" }
-            }
+            val mode = workflowContext.mode
+            val isSubAgent = workflowContext.isSubAgent
+            val agentContext = workflowContext.agentContext
+            val tools = workflowContext.tools
+            goalActiveAtTurn = workflowContext.goalActive
 
             var currentReasoningStart: Long? = null
             var currentReasoningEnd: Long? = null
@@ -2457,7 +2422,8 @@ class AIAgentViewModel @Inject constructor(
                             attachments = event.attachments,
                             inputTokens = event.inputTokens,
                             outputTokens = event.outputTokens,
-                            cachedInputTokens = event.cachedInputTokens
+                            cachedInputTokens = event.cachedInputTokens,
+                            isError = event.isInterrupted
                         )
                         if (event.inputTokens > 0 || event.outputTokens > 0) {
                             _llmCallEvents.tryEmit(LlmCallEvent(sessionId, event.inputTokens, event.outputTokens, event.cachedInputTokens))
@@ -2541,6 +2507,7 @@ class AIAgentViewModel @Inject constructor(
                     }
                     is AgentEvent.Failed -> {
                         failed = true
+                        turnSucceeded = false
                         // 失败轮不再补发 Completed（见工作流收尾），所以这里要自己把「重试/换 Key/压缩中」
                         // 这三个瞬时状态收掉，否则失败后界面会停在转圈上。
                         setRetryState(sessionId, null)
@@ -2590,7 +2557,7 @@ class AIAgentViewModel @Inject constructor(
                     }
                 }
             }
-            turnSucceeded = true
+            turnSucceeded = !failed
 
             sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
             // 仅当本 job 仍持有忙状态时才置完成态：并发场景下队列/通知可能已启动新的 job
@@ -3746,6 +3713,35 @@ class AIAgentViewModel @Inject constructor(
 
     // endregion
 
+    fun regenerateInterruptedAssistant(messageId: String) = viewModelScope.launch {
+        val assistant = agentMessageDao.getMessageById(messageId) ?: return@launch
+        val sessionId = assistant.sessionId
+        if (sessionJobs[sessionId]?.isActive == true || sessionId in _runningCommandSessions.value) return@launch
+
+        when (val result = interruptedAssistantReplay.prepare(
+            assistant = assistant,
+            resolveWorkspacePath = { sessionUseCase.getSessionById(it)?.workspacePath },
+            isSlashCommand = { slashCommandRegistry.resolve(it) != null }
+        )) {
+            InterruptedAssistantReplay.Preparation.Ignored -> return@launch
+            InterruptedAssistantReplay.Preparation.Unavailable -> {
+                setAgentState(sessionId, AgentUIState.Error(context.getString(R.string.chat_regenerate_unavailable)))
+                return@launch
+            }
+            is InterruptedAssistantReplay.Preparation.Ready -> {
+                val replay = result.request
+                enqueueAgentRequest(
+                    request = replay.request,
+                    modelRequest = replay.modelRequest,
+                    projectRoot = replay.projectRoot,
+                    inputImages = replay.inputImages,
+                    targetSessionId = replay.sessionId,
+                    replayUserMessageId = replay.userMessageId
+                )
+            }
+        }
+    }
+
     fun updateMessageContent(messageId: String, newContent: String) = viewModelScope.launch {
         try {
             messagePersistenceUseCase.updateContent(messageId, newContent)
@@ -3839,19 +3835,4 @@ class AIAgentViewModel @Inject constructor(
         return result
     }
 
-    private fun detectLanguage(filePath: String): String {
-        return when (filePath.substringAfterLast(".").lowercase()) {
-            "kt", "kotlin" -> "kotlin"
-            "java" -> "java"
-            "dart" -> "dart"
-            "py" -> "python"
-            "js" -> "javascript"
-            "ts" -> "typescript"
-            "tsx" -> "typescript"
-            "jsx" -> "javascript"
-            "go" -> "go"
-            "rs" -> "rust"
-            else -> "text"
-        }
-    }
 }

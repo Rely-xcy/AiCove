@@ -925,6 +925,9 @@
     <string name="chat_compressing_context">正在压缩上下文</string>
     <string name="chat_compaction_progress">正在整理上下文（%1$d/%2$d）</string>
     <string name="chat_retrying">正在重试 %1$s/%2$s</string>
+    <string name="chat_response_interrupted">回答已中断</string>
+    <string name="chat_action_regenerate">重新生成</string>
+    <string name="chat_regenerate_unavailable">无法重新生成：原始用户消息已不在当前上下文中</string>
     <string name="chat_key_switched">已切换到第 %1$d/%2$d 个 Key</string>
     <string name="chat_goal_label">目标·%1$s</string>
     <string name="chat_goal_label_turns">目标·%1$s·已跑 %2$d 轮</string>
