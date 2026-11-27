@@ -1,6 +1,16 @@
 package com.aicove.feature.agent.domain.session
 
+import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
+import com.aicove.feature.agent.domain.model.AgentMessage
+import com.aicove.feature.agent.domain.tool.ToolCall
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -26,6 +36,62 @@ class MessagePersistenceUseCaseTest {
         assertEquals(listOf("marker", "summary", "retained", "latest"), history.map { it.id })
         assertEquals(listOf(200L, 201L, 100L, 300L), history.map { it.timestamp })
         assertEquals(listOf("retained", "marker", "summary", "latest"), display.map { it.id })
+    }
+
+    @Test
+    fun recoveryExcludesOnlyItsUserRowAndLeavesNormalHistoryCached() = runBlocking {
+        val session = "session"
+        val pending = "__pending__"
+        val older = AgentMessageEntity(id = "older", sessionId = session, role = "USER", content = "check again", timestamp = 100)
+        val recovered = older.copy(id = "recovered", timestamp = 200)
+        val call = ToolCall(id = "call-1", name = "readFile", arguments = mapOf("path" to JsonPrimitive("notes.txt")))
+        val assistant = AgentMessageEntity(
+            id = "assistant", sessionId = session, role = "ASSISTANT", content = "", timestamp = 300,
+            toolCallsJson = Json.encodeToString(listOf(call))
+        )
+        val tool = AgentMessageEntity(
+            id = "tool_${call.id}", sessionId = session, role = "TOOL", content = "file contents", timestamp = 400,
+            toolCallId = call.id, toolName = call.name
+        )
+        val dao = mockk<AgentMessageDao>()
+        coEvery { dao.getMessagesBySessionOnce(session) } returns listOf(older, recovered, assistant, tool)
+        val persistence = MessagePersistenceUseCase(dao, mockk(relaxed = true))
+
+        val previousUser = AgentMessage.UserMessage(id = older.id, content = older.content)
+        val toolCall = AgentMessage.AssistantMessage(id = assistant.id, content = "", toolCalls = listOf(call))
+        val toolResult = AgentMessage.ToolResultMessage(id = call.id, toolName = call.name, result = tool.content)
+        val complete = listOf(previousUser, previousUser.copy(id = recovered.id), toolCall, toolResult)
+        assertEquals(complete, persistence.buildHistory(session, pending))
+        assertEquals(complete, persistence.buildHistory(session, pending))
+        coVerify(exactly = 1) { dao.getMessagesBySessionOnce(session) }
+
+        val history = persistence.buildHistoryExcludingMessage(session, pending, recovered.id)
+        assertEquals(listOf(previousUser, toolCall, toolResult), history)
+
+        coEvery { dao.getMessagesBySessionOnce(session) } throws AssertionError("Recovery evicted the normal history cache")
+        assertEquals(complete, persistence.buildHistory(session, pending))
+    }
+
+    @Test
+    fun excludingOnlyTailAfterSummaryDoesNotReplayFoldedRows() = runBlocking {
+        val session = "session"
+        val pending = "__pending__"
+        val old = AgentMessageEntity(id = "old", sessionId = session, role = "USER", content = "already summarized", timestamp = 100)
+        val marker = old.copy(id = "marker", content = "marker", timestamp = 110, isCompactionMarker = true)
+        val summary = AgentMessageEntity(
+            id = "summary", sessionId = session, role = "ASSISTANT", content = "summary", timestamp = 111,
+            isContextSummary = true, foldsUpToTimestamp = old.timestamp
+        )
+        val recovered = old.copy(id = "recovered", content = "resume", timestamp = 200)
+        val dao = mockk<AgentMessageDao>()
+        coEvery { dao.getMessagesBySessionOnce(session) } returns listOf(old, marker, summary, recovered)
+        val persistence = MessagePersistenceUseCase(dao, mockk(relaxed = true))
+
+        val complete = persistence.buildHistory(session, pending)
+        assertEquals(listOf(marker.id, summary.id, recovered.id), complete.map { it.id })
+        val expected = complete.filterNot { it.id == recovered.id }
+        val history = persistence.buildHistoryExcludingMessage(session, pending, recovered.id)
+        assertEquals(expected, history)
     }
 
     @Test

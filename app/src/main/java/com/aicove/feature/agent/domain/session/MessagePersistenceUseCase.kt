@@ -4,6 +4,7 @@ import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.data.local.database.AgentDatabase
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
+import com.aicove.feature.agent.domain.model.AgentImage
 import com.aicove.feature.agent.domain.model.AgentMessage
 import com.aicove.feature.agent.domain.model.toolCallsFrozenForHistory
 import com.aicove.feature.agent.domain.model.toolCallsJsonForStorage
@@ -325,7 +326,7 @@ class MessagePersistenceUseCase @Inject constructor(
         excludedMessageIds: Set<String> = emptySet()
     ): List<AgentMessage> {
         val allEntities = agentMessageDao.getMessagesBySessionOnce(sessionId)
-            .filter { it.id !in excludedMessageIds && !it.isCompacted && !isInternalReminder(it) }
+            .filter { !it.isCompacted && !isInternalReminder(it) }
 
         // 摘要块：isContextSummary 行（含其配对 marker）按 timestamp 升序就是块链的顺序。
         // 已被淘汰的摘要行（isCompacted=1）在上面已被滤掉，不会参与回放。
@@ -353,10 +354,10 @@ class MessagePersistenceUseCase @Inject constructor(
             boundary = latestNormalTs - 1
         }
 
-        // 保留原文：边界之后的普通行（非摘要/marker）。悬挂 tool 配对过滤在下面第二遍完成。
+        // 恢复轮只从保留区排除用户行；提前排除会改变 latestNormalTs，使已折叠原文重新进入窗口。
         val entities = orderHistoryEntities(
             allEntities.filter {
-                !(it.isCompactionMarker || it.isContextSummary) && it.timestamp > boundary
+                !(it.isCompactionMarker || it.isContextSummary) && it.timestamp > boundary && it.id !in excludedMessageIds
             }
         )
 
@@ -517,6 +518,9 @@ class MessagePersistenceUseCase @Inject constructor(
         }
         return pairs
     }
+
+    suspend fun recoverInputImages(attachments: List<AgentAttachment>): List<AgentImage> =
+        withContext(Dispatchers.IO) { attachments.mapNotNull { it.toAgentImage() } }
 
     private fun AgentAttachment.toAgentImage(): com.aicove.feature.agent.domain.model.AgentImage? {
         if (!isImage || localPath.isBlank()) return null

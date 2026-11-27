@@ -2194,11 +2194,11 @@ class AIAgentViewModel @Inject constructor(
                 "history.start",
                 details = "operation=$historyStartedNs requestChars=${request.length} attachments=${inputAttachments.size}"
             )
-            // 全量重建历史（读整个会话 + JSON 解码工具快照 + 图片 base64）是重活且会随会话变长变慢，
-            // 留在主线程上会把这一帧的消息回显与滚动一起拖住。它是 suspend，直接切到 IO，主线程只等结果。
-            val history = withContext(Dispatchers.IO) {
-                messagePersistenceUseCase.buildHistory(sessionId, SessionUseCase.PENDING_TOOL_MARKER)
-            }
+            // 全量重建历史（读整个会话 + JSON 解码工具快照 + 图片 base64）由持久层切到 IO。
+            // 恢复时用户行已经落库，不能再作为历史交给会追加本轮请求的 workflow。
+            val marker = SessionUseCase.PENDING_TOOL_MARKER
+            val history = trackedRunMessageId?.let { messagePersistenceUseCase.buildHistoryExcludingMessage(sessionId, marker, it) }
+                ?: messagePersistenceUseCase.buildHistory(sessionId, marker)
             FileLogger.memoryCheckpoint(
                 TAG,
                 "history.ready",
@@ -2274,7 +2274,7 @@ class AIAgentViewModel @Inject constructor(
                 projectRoot = projectRoot,
                 language = currentFile?.let { detectLanguage(it) },
                 history = history,
-                inputImages = inputImages,
+                inputImages = if (trackedRunMessageId != null) messagePersistenceUseCase.recoverInputImages(inputAttachments) else inputImages,
                 sessionId = sessionId,
                 userMessageId = userMsgId,
                 skillInjection = skillInjection,
