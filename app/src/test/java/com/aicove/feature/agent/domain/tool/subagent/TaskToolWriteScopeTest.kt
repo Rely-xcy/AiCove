@@ -3,6 +3,7 @@ package com.aicove.feature.agent.domain.tool.subagent
 import android.content.Context
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.schedule.WriteLeaseRegistry
@@ -54,6 +55,7 @@ class TaskToolWriteScopeTest {
 
     private val sessionUseCase = mockk<SessionUseCase>()
     private val chatSessionDao = mockk<ChatSessionDao>()
+    private val runDao = mockk<SubagentRunDao>(relaxed = true)
     private val agentMessageDao = mockk<AgentMessageDao>()
     private val bus = SubAgentEventBus()
     private val agentDefinitionRepository = mockk<AgentDefinitionRepository>()
@@ -64,6 +66,7 @@ class TaskToolWriteScopeTest {
     private val tool = TaskTool(
         sessionUseCase,
         chatSessionDao,
+        runDao,
         agentMessageDao,
         bus,
         agentDefinitionRepository,
@@ -107,12 +110,18 @@ class TaskToolWriteScopeTest {
         )
 
         assertTrue("期望成功结果，实际：$result", result is ToolResult.Success)
+        assertEquals("queued", ((result as ToolResult.Success).data.jsonObject["state"] as JsonPrimitive).content)
         // 租约的 pattern 就是入参原文，能证明 writeScope 解析后落到了 spec 上
         assertEquals(
             listOf("app/src/main/java/A.kt"),
             registry.leasesOf("sub-1").map { it.pattern }
         )
-        coVerify(exactly = 1) { sessionUseCase.upsertSession(match { it.id == "sub-1" }) }
+        coVerify(exactly = 1) {
+            runDao.createQueuedRun(
+                match { it.id == "sub-1" && it.parentId == PARENT },
+                match { it.subSessionId == "sub-1" && it.status == "QUEUED" && it.initialPrompt == "改 A 文件" }
+            )
+        }
     }
 
     @Test
@@ -170,7 +179,7 @@ class TaskToolWriteScopeTest {
         // emit(SPAWNED) 会把子会话加进活跃集合，集合为空即证明没有启动任何子代理
         assertTrue("不应有子代理被启动：${bus.activeSubSessionIds.value}", bus.activeSubSessionIds.value.isEmpty())
         assertTrue("预留名额应已归还", bus.activeCount == 0)
-        coVerify(exactly = 0) { sessionUseCase.upsertSession(any()) }
+        coVerify(exactly = 0) { runDao.createQueuedRun(any(), any()) }
         assertTrue("既有租约不应被清掉", registry.leasesOf("other").isNotEmpty())
     }
 
@@ -205,7 +214,7 @@ class TaskToolWriteScopeTest {
         assertTrue("本批已登记的租约应被回滚：${registry.leasesOf("sub-1")}", registry.leasesOf("sub-1").isEmpty())
         assertTrue(registry.leasesOf("sub-2").isEmpty())
         assertTrue("别人的租约不受影响", registry.leasesOf("other").isNotEmpty())
-        coVerify(exactly = 0) { sessionUseCase.upsertSession(any()) }
+        coVerify(exactly = 0) { runDao.createQueuedRun(any(), any()) }
         assertTrue("不应有子代理被启动：${bus.activeSubSessionIds.value}", bus.activeSubSessionIds.value.isEmpty())
         assertTrue("预留名额应已归还", bus.activeCount == 0)
     }
@@ -260,7 +269,7 @@ class TaskToolWriteScopeTest {
         every { agentDefinitionRepository.listEnabledDefinitions() } returns emptyList()
         every { aiProviderRepository.getAllProviders() } returns emptyFlow()
         coEvery { tierSettings.snapshot() } returns emptyMap()
-        coEvery { sessionUseCase.upsertSession(any()) } just Runs
+        coEvery { runDao.createQueuedRun(any(), any()) } just Runs
         var next = 0
         every {
             sessionUseCase.newSubSessionEntity(any(), any(), any(), any(), any(), any(), any(), any())

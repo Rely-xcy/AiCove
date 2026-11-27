@@ -1,12 +1,14 @@
 package com.aicove.di
 
 import android.content.Context
+import com.aicove.core.lifecycle.RunningTurnCancellation
 import com.aicove.core.net.applyTcpKeepAlive
 import com.aicove.core.plugin.AgentLifecycleHooks
 import androidx.room.Room
 import androidx.room.migration.Migration
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.dao.CheckpointDao
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicove.feature.agent.data.local.dao.MemoryRecordDao
@@ -170,6 +172,17 @@ object AgentModule {
     fun provideChatSessionDao(database: AgentDatabase): ChatSessionDao {
         return database.chatSessionDao()
     }
+
+    @Provides
+    @Singleton
+    fun provideSubagentRunDao(database: AgentDatabase): SubagentRunDao {
+        return database.subagentRunDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRunningTurnCancellation(database: AgentDatabase): RunningTurnCancellation =
+        RunningTurnCancellation { database.agentTurnRunDao().cancelRunningRuns(System.currentTimeMillis()) }
 
     @Provides
     @Singleton

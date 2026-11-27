@@ -1,6 +1,9 @@
 package com.aicove.feature.agent.presentation
 
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
+import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
 import androidx.lifecycle.viewModelScope
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
 import com.aicove.core.watch.FileChangeBatch
 import com.aicove.core.watch.FileChangeHub
 import com.aicove.core.watch.WorkspaceWriteSignal
@@ -338,7 +341,9 @@ class AIAgentViewModelBrowseRefreshTest {
         toolRegistry = mockk(relaxed = true),
         agentEngine = mockk(relaxed = true),
         agentMessageDao = mockk(relaxed = true),
-        agentDatabase = mockk(relaxed = true),
+        agentDatabase = mockk(relaxed = true) {
+            every { subagentRunDao() } returns mockk<SubagentRunDao>(relaxed = true)
+        },
         chatSessionDao = mockk(relaxed = true),
         llmCallRecordDao = mockk(relaxed = true),
         modelCostCalculator = mockk(relaxed = true),
@@ -377,7 +382,8 @@ class AIAgentViewModelBrowseRefreshTest {
         agentSoundSettings = mockk(relaxed = true),
         generalSettingsRepository = mockk(relaxed = true),
         keepaliveSettings = mockk(relaxed = true),
-        subAgentEventBus = mockk(relaxed = true) { every { events } returns MutableSharedFlow() },
+        subAgentEventBus = SubAgentEventBus(),
+        backgroundTaskLifecycleBus = BackgroundTaskLifecycleBus(),
         agentNotificationCenter = mockk(relaxed = true),
         agentDefinitionRepository = mockk(relaxed = true),
         todoItemDao = mockk(relaxed = true),

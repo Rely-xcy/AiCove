@@ -76,6 +76,7 @@ class AgentToolTest {
         val taskTool = TaskTool(
             sessionUseCase = mockk(relaxed = true),
             chatSessionDao = mockk(relaxed = true),
+            subagentRunDao = mockk(relaxed = true),
             agentMessageDao = mockk(relaxed = true),
             eventBus = mockk(relaxed = true),
             agentDefinitionRepository = mockk(relaxed = true),

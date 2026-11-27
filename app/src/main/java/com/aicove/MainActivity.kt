@@ -150,6 +150,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import javax.inject.Inject
 import com.aicove.R
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -157,6 +158,9 @@ class MainActivity : ComponentActivity() {
     /** 用于冷启动时在前台恢复常驻保活通知（App.onCreate 的启动可能被后台 FGS 限制挡掉）。 */
     @Inject
     lateinit var keepaliveSettings: KeepaliveSettingsRepository
+
+    @Inject
+    lateinit var backgroundTaskLifecycleBus: BackgroundTaskLifecycleBus
 
     @Inject
     lateinit var themeSettings: ThemeSettingsRepository
@@ -351,6 +355,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        backgroundTaskLifecycleBus.appForegrounded()
         // 远程模式回到前台时，若 SSH 断了立即触发重连，不等 supervisor 轮询
         if (executionModeHolder.currentMode() == com.aicove.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
             lifecycleScope.launch {

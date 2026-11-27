@@ -1,8 +1,11 @@
 package com.aicove.feature.agent.presentation
 
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
+import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
 import android.content.Context
 import android.os.PowerManager
 import androidx.lifecycle.viewModelScope
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.RootfsSource
 import com.aicove.feature.agent.domain.notification.AgentNotificationCenter
@@ -74,6 +77,7 @@ class AIAgentViewModelSystemNotificationQueueTest {
         coEvery { getSessionById(any()) } returns null
     }
     private val mainDispatcher = UnconfinedTestDispatcher()
+    private val lifecycleBus = BackgroundTaskLifecycleBus()
     /** 后台命令完成事件流：真实的 [TabFinishedEvent] 从这里进 [AIAgentViewModel.handleBackgroundCommandFinished]。 */
     private val tabFinishedEvents = MutableSharedFlow<TabFinishedEvent>(extraBufferCapacity = 1)
 
@@ -212,6 +216,23 @@ class AIAgentViewModelSystemNotificationQueueTest {
     }
 
     @Test
+    fun stopAllOnInjectedBusCancelsActiveRequest() = runBlocking {
+        val validationStarted = CompletableDeferred<Unit>()
+        coEvery { sessions.getSessionById(SID) } coAnswers {
+            validationStarted.complete(Unit)
+            awaitCancellation()
+        }
+        val request = viewModel.executeAgentRequestStream("hello", projectRoot = WORKSPACE, targetSessionId = SID)
+        withTimeout(3_000) { validationStarted.await() }
+        assertTrue(request.isActive)
+
+        lifecycleBus.stopAll()
+
+        withTimeout(3_000) { request.join() }
+        assertTrue(request.isCancelled)
+    }
+
+    @Test
     fun historyFailureReplacesPreparingWithError() = runBlocking {
         coEvery { persistence.buildHistory(any(), any()) } throws IllegalStateException("history failed")
         viewModel.enqueueAgentRequest("hello", projectRoot = WORKSPACE, targetSessionId = SID, clientMessageId = "failed-user")
@@ -309,7 +330,9 @@ class AIAgentViewModelSystemNotificationQueueTest {
         toolRegistry = mockk(relaxed = true),
         agentEngine = mockk(relaxed = true),
         agentMessageDao = messageDao,
-        agentDatabase = mockk(relaxed = true),
+        agentDatabase = mockk(relaxed = true) {
+            every { subagentRunDao() } returns mockk<SubagentRunDao>(relaxed = true)
+        },
         chatSessionDao = mockk(relaxed = true),
         llmCallRecordDao = mockk(relaxed = true),
         modelCostCalculator = mockk(relaxed = true),
@@ -328,8 +351,11 @@ class AIAgentViewModelSystemNotificationQueueTest {
         planApprovalManager = mockk(relaxed = true),
         terminalSessionManager = mockk<TerminalSessionManager>(relaxed = true).also { m ->
             every { m.tabFinishedEvents } returns MutableSharedFlow()
+            every { m.tabs } returns MutableStateFlow(emptyList())
         },
-        remoteTerminalSessionManager = mockk(relaxed = true),
+        remoteTerminalSessionManager = mockk(relaxed = true) {
+            every { tabs } returns MutableStateFlow(emptyList())
+        },
         terminalSessionProvider = mockk<TerminalSessionProvider>(relaxed = true).also { m ->
             every { m.tabFinishedEvents } returns tabFinishedEvents
         },
@@ -346,7 +372,8 @@ class AIAgentViewModelSystemNotificationQueueTest {
         agentSoundSettings = mockk(relaxed = true),
         generalSettingsRepository = mockk(relaxed = true),
         keepaliveSettings = mockk(relaxed = true),
-        subAgentEventBus = mockk(relaxed = true) { every { events } returns MutableSharedFlow() },
+        subAgentEventBus = SubAgentEventBus(),
+        backgroundTaskLifecycleBus = lifecycleBus,
         agentNotificationCenter = notificationCenter,
         agentDefinitionRepository = mockk(relaxed = true),
         todoItemDao = mockk(relaxed = true),

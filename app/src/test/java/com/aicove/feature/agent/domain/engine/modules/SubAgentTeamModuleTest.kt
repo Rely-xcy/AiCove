@@ -1,13 +1,13 @@
 package com.aicove.feature.agent.domain.engine.modules
 
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import kotlinx.coroutines.runBlocking
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import com.aicove.feature.agent.domain.engine.EngineContext
 import com.aicove.feature.agent.domain.prompt.SystemPromptProvider
-import com.aicove.feature.agent.domain.subagent.SubAgentEvent
-import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
-import com.aicove.feature.agent.domain.subagent.SubAgentEventType
 import com.aicove.feature.agent.domain.tool.subagent.SubAgentTeamTool
 import dagger.Lazy
 import io.mockk.coEvery
@@ -43,11 +43,23 @@ class SubAgentTeamModuleTest {
         rulesText: String = rules,
         tool: SubAgentTeamTool = mockk(relaxed = true),
         dao: ChatSessionDao = mockk(relaxed = true),
-        bus: SubAgentEventBus = SubAgentEventBus()
-    ) = SubAgentTeamModule(promptProvider(strategyText, rulesText), tool, dao, bus)
+        runDao: SubagentRunDao = mockk(relaxed = true)
+    ) = SubAgentTeamModule(promptProvider(strategyText, rulesText), tool, dao, runDao)
 
     private fun subSession(id: String, parentId: String, title: String = "子代理 $id"): ChatSessionEntity =
         ChatSessionEntity(id = id, title = title, createdAt = 0L, updatedAt = 0L, parentId = parentId)
+
+    private fun run(
+        id: String,
+        parentId: String,
+        status: SubagentRunStatus = SubagentRunStatus.RUNNING
+    ) = SubagentRunEntity(
+        subSessionId = id,
+        parentSessionId = parentId,
+        status = status.name,
+        startedAt = 1L,
+        updatedAt = 2L
+    )
 
     private val mainCtx = EngineContext(sessionId = "s1")
     private val subCtx = EngineContext(sessionId = "sub-1", isSubAgent = true, subAgentName = "Explore")
@@ -100,53 +112,53 @@ class SubAgentTeamModuleTest {
 
     @Test
     fun guard_warnsOncePerSessionWhileSubAgentRunning() = runBlocking {
-        val bus = SubAgentEventBus()
         val dao = mockk<ChatSessionDao>()
+        val runDao = mockk<SubagentRunDao>()
         coEvery { dao.getSubSessionsByParentOnce("s1") } returns listOf(subSession("sub-1", "s1", "调研 A"))
-        bus.emit(SubAgentEvent("sub-1", "s1", SubAgentEventType.SPAWNED))
-        val module = module(dao = dao, bus = bus)
+        coEvery { runDao.getByParentSessionId("s1") } returns listOf(run("sub-1", "s1"))
+        val module = module(dao = dao, runDao = runDao)
 
         val first = module.finalResponseGuard(mainCtx, "做完了")
-        assertTrue("有子代理在跑时必须拦一次", first != null && first!!.contains("1 个子代理在运行"))
+        assertTrue("有子代理在跑时必须拦一次", first != null && first!!.contains("1 个子代理在运行或排队"))
         assertNull("同一会话不重复拦", module.finalResponseGuard(mainCtx, "做完了"))
     }
 
     @Test
     fun guard_silentWithoutActiveSubAgent() = runBlocking {
         val dao = mockk<ChatSessionDao>()
+        val runDao = mockk<SubagentRunDao>()
         coEvery { dao.getSubSessionsByParentOnce(any()) } returns listOf(subSession("sub-1", "s1"))
-        // 活跃集合为空：子代理都已结束
-        val module = module(dao = dao, bus = SubAgentEventBus())
+        coEvery { runDao.getByParentSessionId(any()) } returns emptyList()
+        // 没有持久 RUNNING 行：子代理未运行或已结束
+        val module = module(dao = dao, runDao = runDao)
         assertNull(module.finalResponseGuard(mainCtx, "做完了"))
     }
 
     @Test
     fun guard_ignoresOtherSessionsRunningSubAgents() = runBlocking {
-        val bus = SubAgentEventBus()
         val dao = mockk<ChatSessionDao>()
-        // 本会话没有子会话；活跃的是另一个会话的子代理
+        val runDao = mockk<SubagentRunDao>()
+        // 本会话没有子会话；别的会话运行的子代理不应影响本会话
         coEvery { dao.getSubSessionsByParentOnce("s1") } returns emptyList()
-        bus.emit(SubAgentEvent("sub-9", "s2", SubAgentEventType.SPAWNED))
-        val module = module(dao = dao, bus = bus)
+        coEvery { runDao.getByParentSessionId("s1") } returns emptyList()
+        val module = module(dao = dao, runDao = runDao)
 
         assertNull("别的会话在跑子代理不该拦本会话", module.finalResponseGuard(mainCtx, "做完了"))
     }
 
     @Test
     fun guard_silentForSubAgentSession() = runBlocking {
-        val bus = SubAgentEventBus()
-        bus.emit(SubAgentEvent("sub-1", "s1", SubAgentEventType.SPAWNED))
-        val module = module(bus = bus)
+        val module = module()
         assertNull(module.finalResponseGuard(subCtx, "做完了"))
     }
 
     @Test
     fun onSessionDeleted_clearsReminderLatch() = runBlocking {
-        val bus = SubAgentEventBus()
         val dao = mockk<ChatSessionDao>()
+        val runDao = mockk<SubagentRunDao>()
         coEvery { dao.getSubSessionsByParentOnce("s1") } returns listOf(subSession("sub-1", "s1"))
-        bus.emit(SubAgentEvent("sub-1", "s1", SubAgentEventType.SPAWNED))
-        val module = module(dao = dao, bus = bus)
+        coEvery { runDao.getByParentSessionId("s1") } returns listOf(run("sub-1", "s1"))
+        val module = module(dao = dao, runDao = runDao)
 
         assertTrue(module.finalResponseGuard(mainCtx, "x") != null)
         module.onSessionDeleted(mainCtx)

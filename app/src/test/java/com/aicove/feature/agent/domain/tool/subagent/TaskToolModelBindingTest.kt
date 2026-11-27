@@ -4,6 +4,7 @@ import android.content.Context
 import com.aicove.R
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.schedule.WriteLeaseRegistry
@@ -63,6 +64,7 @@ class TaskToolModelBindingTest {
 
     private val sessionUseCase = mockk<SessionUseCase>()
     private val chatSessionDao = mockk<ChatSessionDao>()
+    private val runDao = mockk<SubagentRunDao>(relaxed = true)
     private val agentMessageDao = mockk<AgentMessageDao>()
     private val bus = SubAgentEventBus()
     private val agentDefinitionRepository = mockk<AgentDefinitionRepository>()
@@ -73,6 +75,7 @@ class TaskToolModelBindingTest {
     private val tool = TaskTool(
         sessionUseCase,
         chatSessionDao,
+        runDao,
         agentMessageDao,
         bus,
         agentDefinitionRepository,
@@ -190,7 +193,7 @@ class TaskToolModelBindingTest {
         assertTrue("错误里要出现模型名：${error.message}", error.message.contains(PINNED_MODEL))
         assertTrue("错误里要出现供应商名：${error.message}", error.message.contains("官方"))
         assertTrue("错误里要出现供应商名：${error.message}", error.message.contains("中转站"))
-        coVerify(exactly = 0) { sessionUseCase.upsertSession(any()) }
+        coVerify(exactly = 0) { runDao.createQueuedRun(any(), any()) }
         assertTrue("不应有子代理被启动：${bus.activeSubSessionIds.value}", bus.activeSubSessionIds.value.isEmpty())
         assertTrue("预留名额应已归还：${bus.activeCount}", bus.activeCount == 0)
     }
@@ -407,7 +410,7 @@ class TaskToolModelBindingTest {
 
     /** 记录 TaskTool 交给会话实体的绑定。 */
     private fun stubSessionCreation() {
-        coEvery { sessionUseCase.upsertSession(any()) } just Runs
+        coEvery { runDao.createQueuedRun(any(), any()) } just Runs
         every {
             sessionUseCase.newSubSessionEntity(any(), any(), any(), any(), any(), any(), any(), any())
         } answers {

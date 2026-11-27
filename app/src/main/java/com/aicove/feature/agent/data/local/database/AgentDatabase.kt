@@ -4,6 +4,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
+import com.aicove.feature.agent.data.local.dao.AgentTurnRunDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
 import com.aicove.feature.agent.data.local.dao.CheckpointDao
 import com.aicove.feature.agent.data.local.dao.LlmCallRecordDao
@@ -12,8 +13,10 @@ import com.aicove.feature.agent.data.local.dao.MemorySourceDao
 import com.aicove.feature.agent.data.local.dao.MemoryVersionDao
 import com.aicove.feature.agent.data.local.dao.SessionBriefDao
 import com.aicove.feature.agent.data.local.dao.TaskStateDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.dao.TodoItemDao
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
+import com.aicove.feature.agent.data.local.entity.AgentTurnRunEntity
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.data.local.entity.CheckpointEntity
 import com.aicove.feature.agent.data.local.entity.CheckpointFileSnapshotEntity
@@ -24,6 +27,7 @@ import com.aicove.feature.agent.data.local.entity.MemoryVersionEntity
 import com.aicove.feature.agent.data.local.entity.SessionBriefEntity
 import com.aicove.feature.agent.data.local.entity.TaskEvidenceEntity
 import com.aicove.feature.agent.data.local.entity.TaskStateEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunEntity
 import com.aicove.feature.agent.data.local.entity.TodoItemEntity
 import com.aicove.feature.backup.data.local.dao.BackupTargetDao
 import com.aicove.feature.backup.data.local.entity.BackupTargetEntity
@@ -34,12 +38,13 @@ import com.aicove.feature.workspace.data.local.entity.RemoteConnectionEntity
 import com.aicove.feature.workspace.data.local.entity.RemoteMountEntity
 
 @Database(
-    entities = [AgentMessageEntity::class, ChatSessionEntity::class, AIProviderEntity::class, RemoteConnectionEntity::class, RemoteMountEntity::class, TodoItemEntity::class, SessionBriefEntity::class, CheckpointEntity::class, CheckpointFileSnapshotEntity::class, LlmCallRecordEntity::class, BackupTargetEntity::class, MemoryRecordEntity::class, MemorySourceEntity::class, MemoryVersionEntity::class, TaskStateEntity::class, TaskEvidenceEntity::class],
+    entities = [AgentMessageEntity::class, AgentTurnRunEntity::class, ChatSessionEntity::class, AIProviderEntity::class, RemoteConnectionEntity::class, RemoteMountEntity::class, TodoItemEntity::class, SessionBriefEntity::class, CheckpointEntity::class, CheckpointFileSnapshotEntity::class, LlmCallRecordEntity::class, BackupTargetEntity::class, MemoryRecordEntity::class, MemorySourceEntity::class, MemoryVersionEntity::class, TaskStateEntity::class, TaskEvidenceEntity::class, SubagentRunEntity::class],
     version = AgentDatabase.SCHEMA_VERSION,
     exportSchema = true
 )
 abstract class AgentDatabase : RoomDatabase() {
     abstract fun agentMessageDao(): AgentMessageDao
+    abstract fun agentTurnRunDao(): AgentTurnRunDao
     abstract fun chatSessionDao(): ChatSessionDao
     abstract fun aiProviderDao(): AIProviderDao
     abstract fun remoteConnectionDao(): RemoteConnectionDao
@@ -51,10 +56,11 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun memorySourceDao(): MemorySourceDao
     abstract fun memoryVersionDao(): MemoryVersionDao
     abstract fun taskStateDao(): TaskStateDao
+    abstract fun subagentRunDao(): SubagentRunDao
     abstract fun backupTargetDao(): BackupTargetDao
 
     companion object {
-        const val SCHEMA_VERSION = 72
+        const val SCHEMA_VERSION = 74
 
         /** 数据库文件名（落在 `databases/` 下，另有 Room 默认 WAL 模式产生的 `-wal`/`-shm`）。 */
         const val DATABASE_NAME = "aicode_agent_db"

@@ -12,7 +12,7 @@
     <string name="tool_command_rule_denied_detail">Permission rules prohibit this command. Matched rule: %1$s; offending segment: %2$s; suggestion: rewrite it in an allowed form, or ask the user to update the rule under Tool permissions and retry.</string>
     <string name="tool_command_unanalyzable_reason">The command contains constructs that cannot be statically analyzed (%1$s); it can only be allowed once and cannot be remembered.</string>
     <string name="tool_shizuku_confirmation_reason">Shizuku operates on Android as adb shell. Each call requires confirmation and cannot be saved as always allowed.</string>
-    <string name="tool_subagent_message_delivered">Message delivered. A running subagent will receive it shortly; an idle subagent will resume to process it.</string>
+    <string name="tool_subagent_message_delivered">Message durably queued. If the current turn is still running, the follow-up turn will start after it finishes normally. This does not confirm the message was processed or a new turn started.</string>
     <string name="tool_subagent_plan_readonly_warning">PLAN mode is active: subagents inherit read-only permissions, so file edits and commands will be blocked. If implementation is needed, request to exit PLAN before delegating.</string>
     <string name="tool_subagent_tier_pinned">This subagent pins its model (%1$s), so the requested "%2$s" tier was ignored.</string>
     <string name="tool_subagent_tier_fallback">The requested "%1$s" tier is not configured or its provider is unavailable; using the "%2$s" tier (%3$s) instead.</string>
@@ -44,6 +44,8 @@
     <string name="subagent_card_stop">Stop</string>
     <string name="chat_context_usage_estimated">Estimated input budget usage: %1$d%%</string>
     <string name="agent_input_budget_exceeded">Context exceeds the model input budget. Shorten the input or reduce tool definitions.</string>
+    <string name="chat_interrupted_turn_notice">The previous run was interrupted.</string>
+    <string name="chat_interrupted_turn_resume">Resume</string>
 
     <!-- Settings menu titles -->
     <string name="settings_title">Settings</string>

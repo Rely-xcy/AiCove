@@ -15,6 +15,10 @@ class SubAgentEventBusTest {
         SubAgentEvent(subSessionId = id, parentSessionId = "parent", type = SubAgentEventType.SPAWNED)
     )
 
+    private fun spawnReserved(bus: SubAgentEventBus, id: String) = bus.emitReserved(
+        SubAgentEvent(subSessionId = id, parentSessionId = "parent", type = SubAgentEventType.SPAWNED)
+    )
+
     @Test
     fun spawn_marksActive() {
         val bus = SubAgentEventBus()
@@ -105,11 +109,11 @@ class SubAgentEventBusTest {
         val bus = SubAgentEventBus()
         bus.tryReserveSlots(2)
 
-        spawn(bus, "sub-1")
+        spawnReserved(bus, "sub-1")
 
         // 1 个已落地 + 1 个尚未落地的预留，都算在占用里
         assertEquals(2, bus.activeCount)
-        spawn(bus, "sub-2")
+        spawnReserved(bus, "sub-2")
         assertEquals(2, bus.activeCount)
         // 无预留时 SPAWNED 不应把计数减到负数
         spawn(bus, "sub-3")
@@ -120,7 +124,7 @@ class SubAgentEventBusTest {
     fun releaseSlots_returnsUnusedReservations() {
         val bus = SubAgentEventBus()
         bus.tryReserveSlots(3)
-        spawn(bus, "sub-1")
+        spawnReserved(bus, "sub-1")
 
         bus.releaseSlots(2)
 
@@ -128,6 +132,24 @@ class SubAgentEventBusTest {
         // 归还多余的不应减到负
         bus.releaseSlots(10)
         assertEquals(1, bus.activeCount)
+    }
+
+    @Test
+    fun emitWakeAtomicallyRespectsCapacityAndDoesNotDoubleCountActiveChild() {
+        val bus = SubAgentEventBus()
+        repeat(SubAgentEventBus.MAX_RUNNING) { index -> spawn(bus, "sub-$index") }
+
+        assertFalse(
+            "A durable queued row at capacity must wait without adding a sixth active child",
+            bus.emitWake(SubAgentEvent("queued", "parent", SubAgentEventType.SPAWNED))
+        )
+        assertEquals(SubAgentEventBus.MAX_RUNNING, bus.activeCount)
+        assertFalse("The rejected wake must not appear in active ids", "queued" in bus.activeSubSessionIds.value)
+
+        assertTrue("A wake for the already-active child does not need another slot", bus.emitWake(
+            SubAgentEvent("sub-0", "parent", SubAgentEventType.SPAWNED)
+        ))
+        assertEquals(SubAgentEventBus.MAX_RUNNING, bus.activeCount)
     }
 
     @Test

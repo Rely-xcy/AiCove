@@ -286,6 +286,56 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate_72_to_73_adds_subagent_run_state_and_cascade_keys() {
+        // 72.json is not exported in the source tree on this baseline. Build the valid v72 fixture
+        // by migrating its exported v71 database with the production file migration, then exercise
+        // the ordinary Room 72 -> 73 path below.
+        val v71 = helper.createDatabase(dbName, 71)
+        val migration72 = MigrationLoader.loadMigrations(context)
+            .filterIsInstance<FileMigration>()
+            .single { it.version == 72 }
+        migration72.migrate(v71)
+        v71.execSQL("PRAGMA user_version = 72")
+        v71.close()
+
+        val database = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .build()
+        try {
+            val sqlite = database.openHelper.writableDatabase
+            val columns = mutableSetOf<String>()
+            sqlite.query("PRAGMA table_info(`subagent_runs`)").use { cursor ->
+                while (cursor.moveToNext()) columns += cursor.getString(1)
+            }
+            assertEquals(
+                setOf("subSessionId", "parentSessionId", "status", "startedAt", "updatedAt", "terminationReason", "claimedPrompt", "initialPrompt"),
+                columns
+            )
+
+            val foreignKeys = mutableSetOf<Triple<String, String, String>>()
+            sqlite.query("PRAGMA foreign_key_list(`subagent_runs`)").use { cursor ->
+                while (cursor.moveToNext()) {
+                    foreignKeys += Triple(cursor.getString(3), cursor.getString(2), cursor.getString(6))
+                }
+            }
+            assertEquals(
+                setOf(
+                    Triple("subSessionId", "chat_sessions", "CASCADE"),
+                    Triple("parentSessionId", "chat_sessions", "CASCADE")
+                ),
+                foreignKeys
+            )
+            val indexes = mutableSetOf<String>()
+            sqlite.query("PRAGMA index_list(`subagent_runs`)").use { cursor ->
+                while (cursor.moveToNext()) indexes += cursor.getString(1)
+            }
+            assertTrue("parent/status index missing: $indexes", "index_subagent_runs_parentSessionId_status" in indexes)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun migrate_69_to_70_adds_message_session_timestamp_index() {
         helper.createDatabase(dbName, 69).close()
 
@@ -331,5 +381,88 @@ class MigrationTest {
             "迁移 66 应新增 session_briefs 表，实际表：$tables",
             tables.contains("session_briefs")
         )
+    }
+
+    @Test
+    fun migrate_72_through_73_to_74_adds_agent_turn_runs_schema() {
+        // 72.json is not exported. Build an exact v72 database from the exported v71 schema
+        // plus the production 72 migration, then let Room run the ordinary 73 -> 74 path.
+        val v71 = helper.createDatabase(dbName, 71)
+        val migration72 = MigrationLoader.loadMigrations(context)
+            .filterIsInstance<FileMigration>()
+            .single { it.version == 72 }
+        migration72.migrate(v71)
+        v71.execSQL("PRAGMA user_version = 72")
+        v71.close()
+
+        val database = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .build()
+        try {
+            val sqlite = database.openHelper.writableDatabase
+            val columns = mutableSetOf<String>()
+            val primaryKeyColumns = mutableMapOf<String, Int>()
+            sqlite.query("PRAGMA table_info(`agent_turn_runs`)").use { cursor ->
+                while (cursor.moveToNext()) {
+                    val column = cursor.getString(1)
+                    columns += column
+                    val primaryKeyPosition = cursor.getInt(5)
+                    if (primaryKeyPosition != 0) primaryKeyColumns[column] = primaryKeyPosition
+                }
+            }
+            assertEquals(
+                setOf("sessionId", "userMessageId", "status", "startedAt", "updatedAt"),
+                columns
+            )
+            assertEquals(mapOf("sessionId" to 1), primaryKeyColumns)
+
+            val uniqueIndexes = mutableSetOf<String>()
+            sqlite.query("PRAGMA index_list(`agent_turn_runs`)").use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (cursor.getInt(2) != 0) uniqueIndexes += cursor.getString(1)
+                }
+            }
+            assertTrue(
+                "agent_turn_runs.userMessageId unique index missing: $uniqueIndexes",
+                "index_agent_turn_runs_userMessageId" in uniqueIndexes
+            )
+            val uniqueIndexColumns = mutableListOf<String>()
+            sqlite.query("PRAGMA index_info(`index_agent_turn_runs_userMessageId`)").use { cursor ->
+                while (cursor.moveToNext()) uniqueIndexColumns += cursor.getString(2)
+            }
+            assertEquals(listOf("userMessageId"), uniqueIndexColumns)
+
+            val foreignKeys = mutableSetOf<List<String>>()
+            sqlite.query("PRAGMA foreign_key_list(`agent_turn_runs`)").use { cursor ->
+                while (cursor.moveToNext()) {
+                    foreignKeys += listOf(
+                        cursor.getString(3),
+                        cursor.getString(2),
+                        cursor.getString(4),
+                        cursor.getString(6)
+                    )
+                }
+            }
+            assertEquals(
+                setOf(
+                    listOf("sessionId", "chat_sessions", "id", "CASCADE"),
+                    listOf("userMessageId", "agent_messages", "id", "CASCADE")
+                ),
+                foreignKeys
+            )
+
+            val appliedVersions = mutableSetOf<Int>()
+            sqlite.query("SELECT version FROM migration_history WHERE version IN (73, 74)").use { cursor ->
+                while (cursor.moveToNext()) appliedVersions += cursor.getInt(0)
+            }
+            assertEquals(setOf(73, 74), appliedVersions)
+            var userVersion = 0
+            sqlite.query("PRAGMA user_version").use { cursor ->
+                if (cursor.moveToFirst()) userVersion = cursor.getInt(0)
+            }
+            assertEquals(AgentDatabase.SCHEMA_VERSION, userVersion)
+        } finally {
+            database.close()
+        }
     }
 }

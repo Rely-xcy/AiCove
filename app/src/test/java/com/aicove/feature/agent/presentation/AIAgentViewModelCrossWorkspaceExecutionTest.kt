@@ -7,10 +7,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import com.aicove.R
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.container.ContainerProfile
 import com.aicove.feature.agent.domain.container.RootfsSource
 import com.aicove.feature.agent.domain.session.SessionUseCase
+import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
 import com.aicove.feature.terminal.domain.TerminalSessionManager
 import com.aicove.feature.terminal.domain.TerminalSessionProvider
 import com.aicove.feature.workspace.domain.FileAccessProvider
@@ -127,7 +130,9 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             toolRegistry = mockk(relaxed = true),
             agentEngine = mockk(relaxed = true),
             agentMessageDao = mockk(relaxed = true),
-            agentDatabase = mockk(relaxed = true),
+            agentDatabase = mockk(relaxed = true) {
+                every { subagentRunDao() } returns mockk<SubagentRunDao>(relaxed = true)
+            },
             chatSessionDao = mockk(relaxed = true),
             llmCallRecordDao = mockk(relaxed = true),
             modelCostCalculator = mockk(relaxed = true),
@@ -165,9 +170,8 @@ class AIAgentViewModelCrossWorkspaceExecutionTest {
             agentSoundSettings = mockk(relaxed = true),
             generalSettingsRepository = mockk(relaxed = true),
             keepaliveSettings = mockk(relaxed = true),
-            subAgentEventBus = mockk(relaxed = true) {
-                every { events } returns MutableSharedFlow()
-            },
+            subAgentEventBus = SubAgentEventBus(),
+            backgroundTaskLifecycleBus = BackgroundTaskLifecycleBus(),
             agentNotificationCenter = mockk(relaxed = true),
             agentDefinitionRepository = mockk(relaxed = true),
             todoItemDao = mockk(relaxed = true),

@@ -6,7 +6,10 @@ import com.aicove.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.model.AgentMode
 import com.aicove.feature.agent.domain.model.ReasoningEffort
@@ -50,9 +53,9 @@ import javax.inject.Inject
  * 子代理工具 `task`：统一管理子代理的生命周期。
  *
  * 通过 `action` 参数区分操作类型：
- * - `create`（默认）：创建一个子代理会话并让 AI 替用户向其发消息，子代理自动开始回复。
- * - `send`：向指定子代理发送一条消息（可反复发送）。运行中的子代理会在下一批工具结果里搭车收到，
- *   已完成的子代理会被重新唤醒；消息按发送顺序送达。
+ * - `create`（默认）：创建子代理会话并将任务持久入队，随后交给唤醒流程启动；工具返回不代表工作流已开始。
+ * - `send`：向指定子代理发送一条消息（可反复发送）。消息始终持久排队；当前轮结束后若仍有待续指令，
+ *   会启动一轮新执行。返回只表示已排队，不声称消息已处理或新轮已运行。
  * - `read`：读取指定子代理的最后输出（最后一条助手回复）。
  * - `stop`：停止指定子代理的执行（取消其 AI 任务）。
  * - `del`：删除指定子代理会话及其全部消息。
@@ -67,6 +70,7 @@ import javax.inject.Inject
 class TaskTool @Inject constructor(
     private val sessionUseCase: SessionUseCase,
     private val chatSessionDao: ChatSessionDao,
+    private val subagentRunDao: SubagentRunDao,
     private val agentMessageDao: AgentMessageDao,
     private val eventBus: SubAgentEventBus,
     private val agentDefinitionRepository: AgentDefinitionRepository,
@@ -95,7 +99,7 @@ class TaskTool @Inject constructor(
         }
     }
 
-    override val description = "管理子代理：创建、发消息、读取结果、停止、删除、列出。子代理拥有独立上下文，按所选代理的工具集工作，不能嵌套创建子代理；全局最多同时运行 5 个（所有会话共享名额）。任务完成后会通知主会话，无需轮询；运行中也可能主动发消息。用 send 可追加指令或继续追问已完成的子代理。创建时可用 tier 按任务难度选择模型档位（light 只读探索与机械活 / standard 单文件修改与常规修复 / strong 跨模块重构与疑难排查）；省略 tier 时按用户在设置里配置的「均衡」档，一档都没配才继承父会话。"
+    override val description = "管理子代理：创建、发消息、读取结果、停止、删除、列出。子代理拥有独立上下文，按所选代理的工具集工作，不能嵌套创建子代理；全局最多同时运行 5 个（所有会话共享名额）。任务完成后会通知主会话，无需轮询；运行中也可能主动发消息。send 对运行中子代理持久排队，当前轮正常收尾后才启动新轮。失败或中断时已排队的后续指令会保留且不会自动运行；只有新的显式 send 才会合并新指令并恢复，不会重跑失败轮或旧工具副作用。返回只确认已排队，不表示消息已处理或新轮已运行。创建时可用 tier 按任务难度选择模型档位（light 只读探索与机械活 / standard 单文件修改与常规修复 / strong 跨模块重构与疑难排查）；省略 tier 时按用户在设置里配置的「均衡」档，一档都没配才继承父会话。"
 
     /** tasks 数组中单个任务项的 JSON Schema */
     private val taskItemSchema: Map<String, Any> = mapOf(
@@ -132,7 +136,7 @@ class TaskTool @Inject constructor(
         "action" to ToolParameter(
             name = "action",
             type = ParameterType.STRING,
-            description = "操作类型：create（默认，创建子代理并执行任务）/ send（向子代理发一条消息，可反复发送）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）",
+            description = "操作类型：create（默认，创建子代理并排队任务）/ send（向子代理发消息并交给唤醒流程，不代表新一轮已运行）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）",
             required = false
         ),
         "id" to ToolParameter(
@@ -183,7 +187,7 @@ class TaskTool @Inject constructor(
         "message" to ToolParameter(
             name = "message",
             type = ParameterType.STRING,
-            description = "发给子代理的消息正文（send 必填）。可反复调用；运行中的子代理会尽快收到，已完成的会被重新唤醒",
+            description = "发给子代理的消息正文（send 必填）。可反复调用并持久排队；运行中等当前轮结束后再处理，空闲时交给唤醒流程。返回只表示已排队，不代表消息已处理或新轮已运行",
             required = false
         )
     )
@@ -438,14 +442,24 @@ class TaskTool @Inject constructor(
                 val definitionProviderId = item.definitionProviderId
                 val modelBinding = item.modelBinding
                 val subSessionId = item.subSession.id
-                sessionUseCase.upsertSession(item.subSession)
+                val runQueuedAt = item.subSession.createdAt
+                subagentRunDao.createQueuedRun(
+                    session = item.subSession,
+                    run = SubagentRunEntity(
+                        subSessionId = subSessionId,
+                        parentSessionId = parentSessionId,
+                        status = SubagentRunStatus.QUEUED.name,
+                        startedAt = 0L,
+                        updatedAt = runQueuedAt,
+                        initialPrompt = spec.prompt
+                    )
+                )
 
-                eventBus.emit(
+                eventBus.emitReserved(
                     SubAgentEvent(
                         subSessionId = subSessionId,
                         parentSessionId = parentSessionId,
-                        type = SubAgentEventType.SPAWNED,
-                        detail = spec.prompt
+                        type = SubAgentEventType.SPAWNED
                     )
                 )
                 pendingReserve--
@@ -522,13 +536,13 @@ class TaskTool @Inject constructor(
                             put("tier", item.tier)
                             put("model", item.model)
                             item.warning?.let { put("warning", it) }
-                            put("state", "running")
+                            put("state", "queued")
                         }
                     }
                 })
-                // 保留首项平铺字段以保持对既有单会话消费逻辑与单元测试的 100% 兼容
+                // 保留首项平铺字段以兼容单会话消费逻辑；工具只确认已入队，不声称工作流已启动。
                 put("id", first.id)
-                put("state", "running")
+                put("state", "queued")
                 first.agent?.let { put("agent", it) }
                 put("tier", first.tier)
                 put("model", first.model)
@@ -537,9 +551,9 @@ class TaskTool @Inject constructor(
                 put(
                     "message",
                     if (createdList.size > 1) {
-                        "已批量创建 ${createdList.size} 个子代理并开始执行，各任务完成后会收到通知。"
+                        "已批量创建并排队 ${createdList.size} 个子代理，启动流程接手后才会运行；任务完成后会收到通知。"
                     } else {
-                        "子代理已创建并开始执行，任务完成后会收到通知。可用 task(action=\"read\", id=...) 读取输出，" +
+                        "子代理已创建并排队，启动流程接手后才会运行；任务完成后会收到通知。可用 task(action=\"read\", id=...) 读取输出，" +
                             "task(action=\"stop\", id=...) 主动关闭。"
                     }
                 )
@@ -622,8 +636,8 @@ class TaskTool @Inject constructor(
     /**
      * 向指定子代理发送一条消息（可反复发送）。
      *
-     * 事件交由 ViewModel 按收件人状态分发：运行中的子代理把消息入通知队列、在下一批工具结果里搭车送达；
-     * 已完成的子代理则被重新唤醒并起新一轮。不在工具层直接投递，以复用同一套忙碌/空闲分发逻辑。
+     * 消息总是先持久排队；当前运行轮保持 RUNNING，正常收尾时原子变为 QUEUED 再启动后续轮。
+     * 工具只写队列并发出必要的唤醒信号，不直接启动模型工作流，也不声称消息已处理。
      */
     private suspend fun sendToSubagent(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         val parentSessionId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
@@ -641,19 +655,27 @@ class TaskTool @Inject constructor(
             return ToolResult.Error("只能向当前会话派生的子代理发消息", "NOT_YOUR_SUBAGENT")
         }
 
-        eventBus.emit(
-            SubAgentEvent(
-                subSessionId = subSessionId,
-                parentSessionId = parentSessionId,
-                type = SubAgentEventType.MESSAGE_FROM_PARENT,
-                detail = message
-            )
+        val nextState = subagentRunDao.resumeFailedRunWithExplicitMessage(
+            subSessionId = subSessionId,
+            parentSessionId = parentSessionId,
+            prompt = message,
+            now = System.currentTimeMillis()
         )
-        FileLogger.i(TAG, "向子代理发送消息: session=$subSessionId parent=$parentSessionId")
+        if (nextState == SubagentRunStatus.QUEUED.name) {
+            eventBus.emitWake(
+                SubAgentEvent(
+                    subSessionId = subSessionId,
+                    parentSessionId = parentSessionId,
+                    type = SubAgentEventType.SPAWNED
+                )
+            )
+        }
+        val messageState = "queued"
+        FileLogger.i(TAG, "向子代理发送消息并交给唤醒流程: session=$subSessionId parent=$parentSessionId")
         return ToolResult.Success(
             buildJsonObject {
                 put("id", subSessionId)
-                put("state", "delivered")
+                put("state", messageState)
                 put("message", appContext.getString(R.string.tool_subagent_message_delivered))
             }
         )
@@ -706,6 +728,7 @@ class TaskTool @Inject constructor(
             return ToolResult.Error("只能关闭当前会话派生的子代理", "NOT_YOUR_SUBAGENT")
         }
 
+        subagentRunDao.markCancelled(subSessionId)
         eventBus.emit(
             SubAgentEvent(
                 subSessionId = subSessionId,
@@ -759,16 +782,29 @@ class TaskTool @Inject constructor(
     private suspend fun listSubagents(context: AgentContext): ToolResult {
         val parentSessionId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
         val subs = chatSessionDao.getSubSessionsByParentOnce(parentSessionId)
-        val activeIds = eventBus.activeSubSessionIds.value
+        val runsById = subagentRunDao.getByParentSessionId(parentSessionId).associateBy { it.subSessionId }
 
         val jsonArray = buildJsonArray {
             subs.forEach { entity ->
+                val run = runsById[entity.id]
+                val state = run?.status?.lowercase() ?: "legacy_unresolved"
                 addJsonObject {
                     put("id", entity.id)
                     put("title", entity.title)
-                    put("state", if (entity.id in activeIds) "running" else "completed")
+                    put("state", state)
+                    put("status", state)
+                    val hasPendingContinuation = !run?.initialPrompt.isNullOrBlank()
+                    put("hasPendingContinuation", hasPendingContinuation)
+                    if (state in setOf("failed", "interrupted") && hasPendingContinuation) {
+                        put("resumeHint", "待续指令仍保留；需显式 task(action=\"send\") 并提供新指令才会恢复，不会自动重跑失败或中断轮。")
+                    }
                     put("createdAt", entity.createdAt)
                     put("updatedAt", entity.updatedAt)
+                    run?.let {
+                        put("startedAt", it.startedAt)
+                        put("runUpdatedAt", it.updatedAt)
+                        it.terminationReason?.let { reason -> put("terminationReason", reason) }
+                    }
                 }
             }
         }
@@ -777,7 +813,9 @@ class TaskTool @Inject constructor(
             buildJsonObject {
                 put("subagents", jsonArray)
                 put("count", subs.size)
-                put("runningCount", activeIds.size)
+                put("runningCount", runsById.values.count { it.status == SubagentRunStatus.RUNNING.name })
+                put("queuedCount", runsById.values.count { it.status == SubagentRunStatus.QUEUED.name })
+                put("unresolvedCount", subs.count { runsById[it.id] == null })
                 put("maxRunning", SubAgentEventBus.MAX_RUNNING)
             }
         )

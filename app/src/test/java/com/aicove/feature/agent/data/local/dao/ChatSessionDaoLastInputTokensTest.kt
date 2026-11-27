@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aicove.feature.agent.data.local.database.AgentDatabase
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
@@ -55,6 +57,42 @@ class ChatSessionDaoLastInputTokensTest {
     @After
     fun tearDown() {
         db.close()
+    }
+
+    @Test
+    fun upsertAndUpsertAllUpdateSessionsWithoutCascadingSubagentRuns() = runBlocking {
+        val parent = ChatSessionEntity(
+            id = "parent",
+            title = "父会话",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val child = ChatSessionEntity(
+            id = "child",
+            title = "子代理",
+            createdAt = 2L,
+            updatedAt = 2L,
+            parentId = parent.id
+        )
+        dao.upsert(parent)
+        dao.upsert(child)
+        val run = SubagentRunEntity(
+            subSessionId = child.id,
+            parentSessionId = parent.id,
+            status = SubagentRunStatus.RUNNING.name,
+            startedAt = 3L,
+            updatedAt = 3L
+        )
+        db.subagentRunDao().upsertRun(run)
+
+        dao.upsert(parent.copy(title = "更新后的父会话"))
+        assertEquals(run, db.subagentRunDao().getBySubSessionId(child.id))
+
+        dao.upsert(child.copy(title = "更新后的子代理"))
+        assertEquals(run, db.subagentRunDao().getBySubSessionId(child.id))
+
+        dao.upsertAll(listOf(parent.copy(title = "批量更新父会话")))
+        assertEquals(run, db.subagentRunDao().getBySubSessionId(child.id))
     }
 
     @Test

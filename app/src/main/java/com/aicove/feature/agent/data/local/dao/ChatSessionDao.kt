@@ -1,15 +1,14 @@
 package com.aicove.feature.agent.data.local.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
+import androidx.room.Upsert
 import androidx.room.Query
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatSessionDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(session: ChatSessionEntity)
 
     @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath ORDER BY isPinned DESC, updatedAt DESC")
@@ -50,7 +49,7 @@ interface ChatSessionDao {
     @Query("SELECT * FROM chat_sessions WHERE updatedAt > :lastUpdatedAt OR (updatedAt = :lastUpdatedAt AND id > :lastId) ORDER BY updatedAt ASC, id ASC LIMIT :limit")
     suspend fun getPageAfter(lastUpdatedAt: Long, lastId: String, limit: Int): List<ChatSessionEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(sessions: List<ChatSessionEntity>)
 
     @Query("SELECT * FROM chat_sessions WHERE id = :id")

@@ -298,6 +298,15 @@ class MessagePersistenceUseCase @Inject constructor(
         return messages
     }
 
+    /** Rebuild context for explicit recovery without duplicating the already persisted user turn. */
+    suspend fun buildHistoryExcludingMessage(
+        sessionId: String,
+        pendingToolMarker: String,
+        excludedMessageId: String
+    ): List<AgentMessage> = withContext(Dispatchers.IO) {
+        buildHistoryUncached(sessionId, pendingToolMarker, setOf(excludedMessageId))
+    }
+
     /**
      * 丢掉某会话的历史缓存条目（会话被删除时调用）。
      *
@@ -310,9 +319,13 @@ class MessagePersistenceUseCase @Inject constructor(
         synchronized(historyCache) { historyCache.remove(sessionId) }
     }
 
-    private suspend fun buildHistoryUncached(sessionId: String, pendingToolMarker: String): List<AgentMessage> {
+    private suspend fun buildHistoryUncached(
+        sessionId: String,
+        pendingToolMarker: String,
+        excludedMessageIds: Set<String> = emptySet()
+    ): List<AgentMessage> {
         val allEntities = agentMessageDao.getMessagesBySessionOnce(sessionId)
-            .filter { !it.isCompacted && !isInternalReminder(it) }
+            .filter { it.id !in excludedMessageIds && !it.isCompacted && !isInternalReminder(it) }
 
         // 摘要块：isContextSummary 行（含其配对 marker）按 timestamp 升序就是块链的顺序。
         // 已被淘汰的摘要行（isCompacted=1）在上面已被滤掉，不会参与回放。

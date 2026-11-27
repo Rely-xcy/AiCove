@@ -222,7 +222,7 @@ class TerminalSessionManager @Inject constructor(
 
         if (notify) monitorBackgroundExit(id)
 
-        startKeepaliveService()
+        startKeepaliveService(id)
         FileLogger.i(TAG, "后台命令标签 $id: ${redactCommand(command)}")
         return id
     }
@@ -250,7 +250,7 @@ class TerminalSessionManager @Inject constructor(
             )
         )
         monitorBackgroundExit(id)
-        startKeepaliveService()
+        startKeepaliveService(id)
         FileLogger.i(TAG, "插件命令标签 $id（$pluginId）: $command")
         return id
     }
@@ -362,7 +362,7 @@ class TerminalSessionManager @Inject constructor(
         }
         bumpRevision()
 
-        if (tab.isBackground) maybeStopKeepalive(tab)
+        if (tab.isBackground) stopKeepaliveService(tab.id)
         FileLogger.i(TAG, "关闭终端标签 $id")
         return true
     }
@@ -512,7 +512,7 @@ class TerminalSessionManager @Inject constructor(
                     outputChannels.remove(target.id)?.close()
                     bumpRevision()
                     FileLogger.i(TAG, "终端标签 ${target.id} 会话结束 exit=${finished.exitStatus}")
-                    if (target.isBackground) maybeStopKeepalive(target)
+                    if (target.isBackground) stopKeepaliveService(target.id)
                     if (target.notifyOnExit && !target.finishedNotified) {
                         target.finishedNotified = true
                         _tabFinishedEvents.tryEmit(
@@ -544,25 +544,13 @@ class TerminalSessionManager @Inject constructor(
         return session to client
     }
 
-    private fun startKeepaliveService() {
-        val intent = Intent(appContext, TerminalKeepaliveService::class.java).apply {
-            action = TerminalKeepaliveService.ACTION_START_SESSION
-        }
-        appContext.startService(intent)
-        FileLogger.i(TAG, "后台保活 Service 已启动")
+    private fun startKeepaliveService(tabId: String) {
+        TerminalKeepaliveService.startSession(appContext, tabId)
+        FileLogger.i(TAG, "后台保活 Service 已登记会话 $tabId")
     }
 
-    private fun stopKeepaliveService() {
-        val intent = Intent(appContext, TerminalKeepaliveService::class.java).apply {
-            action = TerminalKeepaliveService.ACTION_STOP_SESSION
-        }
-        appContext.startService(intent)
-        FileLogger.i(TAG, "后台保活 Service 已停止")
-    }
-
-    private fun maybeStopKeepalive(closingTab: TerminalTab) {
-        if (closingTab.isBackground && _tabs.value.none { it.isBackground && it.runState is RunState.Running }) {
-            stopKeepaliveService()
-        }
+    private fun stopKeepaliveService(tabId: String) {
+        TerminalKeepaliveService.stopSession(appContext, tabId)
+        FileLogger.i(TAG, "后台保活 Service 已释放会话 $tabId")
     }
 }

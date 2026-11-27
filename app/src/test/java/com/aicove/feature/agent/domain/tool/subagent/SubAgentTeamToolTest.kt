@@ -3,13 +3,14 @@ package com.aicove.feature.agent.domain.tool.subagent
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import kotlinx.coroutines.runBlocking
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunEntity
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import com.aicove.feature.agent.domain.model.AgentContext
 import com.aicove.feature.agent.domain.session.SessionUseCase
-import com.aicove.feature.agent.domain.subagent.SubAgentEvent
 import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
-import com.aicove.feature.agent.domain.subagent.SubAgentEventType
 import com.aicove.feature.agent.domain.tool.ToolPermissionPolicy
 import com.aicove.feature.agent.domain.tool.ToolResult
 import com.aicove.feature.agent.domain.workflow.ContextUsage
@@ -23,6 +24,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -40,9 +42,11 @@ class SubAgentTeamToolTest {
 
     private val chatDao = mockk<ChatSessionDao>()
     private val messageDao = mockk<AgentMessageDao>()
-    private val bus = SubAgentEventBus()
+    private val runDao = mockk<SubagentRunDao> {
+        coEvery { getByParentSessionId(any()) } returns emptyList()
+    }
     private val usageHolder = ContextUsageHolder()
-    private val tool = SubAgentTeamTool(chatDao, messageDao, bus, usageHolder)
+    private val tool = SubAgentTeamTool(chatDao, runDao, messageDao, usageHolder)
 
     private val context = AgentContext(
         currentFile = null,
@@ -68,7 +72,10 @@ class SubAgentTeamToolTest {
             userMsg("sub-2", "去实现"),
             assistant("sub-2", "已实现，见 a.kt:12")
         )
-        bus.emit(SubAgentEvent("sub-1", SESSION, SubAgentEventType.SPAWNED))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(
+            run("sub-1", SubagentRunStatus.RUNNING),
+            run("sub-2", SubagentRunStatus.COMPLETED)
+        )
         usageHolder.publish(
             ContextUsage.of(
                 "sub-1",
@@ -102,10 +109,27 @@ class SubAgentTeamToolTest {
     }
 
     @Test
+    fun statusExposesFailedFollowUpWithoutTreatingItAsCompleted() = runBlocking {
+        coEvery { chatDao.getSubSessionsByParentOnce(SESSION) } returns listOf(sub("sub-failed", "失败任务"))
+        coEvery { messageDao.getMessagesBySessionOnce("sub-failed") } returns listOf(userMsg("sub-failed", "初始任务"))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(
+            run("sub-failed", SubagentRunStatus.FAILED, pending = "失败前已发的待续指令")
+        )
+
+        val data = dataOf(tool.executeWithContext(args("action" to str("status")), context))
+        val failed = subagentOf(data, "sub-failed")
+        assertEquals("failed", failed["state"]!!.jsonPrimitive.content)
+        assertEquals(true, failed["hasPendingContinuation"]!!.jsonPrimitive.boolean)
+        assertTrue(failed["phase"]!!.jsonPrimitive.content.contains("待续指令已保留"))
+        assertTrue(failed["resumeHint"]!!.jsonPrimitive.content.contains("不会自动重跑"))
+        assertEquals(0, intOf(data, "runningCount"))
+    }
+
+    @Test
     fun status_runningWithoutPendingToolIsGenerating() = runBlocking {
         coEvery { chatDao.getSubSessionsByParentOnce(SESSION) } returns listOf(sub("sub-1", "调研 A"))
         coEvery { messageDao.getMessagesBySessionOnce("sub-1") } returns listOf(userMsg("sub-1", "去调研"))
-        bus.emit(SubAgentEvent("sub-1", SESSION, SubAgentEventType.SPAWNED))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(run("sub-1", SubagentRunStatus.RUNNING))
 
         val data = dataOf(tool.executeWithContext(args("action" to str("status")), context))
         assertEquals("正在生成回复", subagentOf(data, "sub-1")["phase"]!!.jsonPrimitive.content)
@@ -117,8 +141,8 @@ class SubAgentTeamToolTest {
         coEvery { messageDao.getMessagesBySessionOnce("sub-1") } returns listOf(userMsg("sub-1", "去调研"))
 
         val data = dataOf(tool.executeWithContext(emptyMap(), context))
-        assertEquals("completed", subagentOf(data, "sub-1")["state"]!!.jsonPrimitive.content)
-        assertEquals("无输出", subagentOf(data, "sub-1")["phase"]!!.jsonPrimitive.content)
+        assertEquals("legacy_unresolved", subagentOf(data, "sub-1")["state"]!!.jsonPrimitive.content)
+        assertEquals("历史状态未知", subagentOf(data, "sub-1")["phase"]!!.jsonPrimitive.content)
     }
 
     // ------------------------------------------------------------ collect
@@ -127,7 +151,8 @@ class SubAgentTeamToolTest {
     fun collect_defaultsToCompletedSubAgentsOnly() = runBlocking {
         coEvery { chatDao.getSubSessionsByParentOnce(SESSION) } returns listOf(
             sub("sub-1", "调研 A"),
-            sub("sub-2", "实现 B")
+            sub("sub-2", "实现 B"),
+            sub("sub-3", "失败任务")
         )
         coEvery { messageDao.getMessagesBySessionOnce("sub-1") } returns listOf(
             userMsg("sub-1", "去调研"),
@@ -137,10 +162,20 @@ class SubAgentTeamToolTest {
             userMsg("sub-2", "去实现"),
             assistant("sub-2", "已实现，见 a.kt:12")
         )
-        bus.emit(SubAgentEvent("sub-1", SESSION, SubAgentEventType.SPAWNED))
+        coEvery { messageDao.getMessagesBySessionOnce("sub-3") } returns listOf(userMsg("sub-3", "失败前的任务"))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(
+            run("sub-1", SubagentRunStatus.RUNNING),
+            run("sub-2", SubagentRunStatus.COMPLETED),
+            run("sub-3", SubagentRunStatus.FAILED, pending = "已排队待续")
+        )
 
         val data = dataOf(tool.executeWithContext(args("action" to str("collect")), context))
         assertEquals(1, intOf(data, "count"))
+        val pending = data["pendingFollowups"]!!.jsonArray.single().jsonObject
+        assertEquals("sub-3", pending["id"]!!.jsonPrimitive.content)
+        assertEquals("failed", pending["state"]!!.jsonPrimitive.content)
+        assertEquals(true, pending["hasPendingContinuation"]!!.jsonPrimitive.boolean)
+        assertTrue(pending["resumeHint"]!!.jsonPrimitive.content.contains("不会自动执行"))
         val collected = subagentOf(data, "sub-2")
         assertEquals("已实现，见 a.kt:12", collected["lastOutput"]!!.jsonPrimitive.content)
         assertEquals("completed", collected["state"]!!.jsonPrimitive.content)
@@ -160,7 +195,10 @@ class SubAgentTeamToolTest {
             userMsg("sub-2", "去实现"),
             assistant("sub-2", "已实现")
         )
-        bus.emit(SubAgentEvent("sub-1", SESSION, SubAgentEventType.SPAWNED))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(
+            run("sub-1", SubagentRunStatus.RUNNING),
+            run("sub-2", SubagentRunStatus.COMPLETED)
+        )
 
         // ids 支持逗号分隔的字符串（模型偶尔这么传）
         val data = dataOf(
@@ -187,6 +225,7 @@ class SubAgentTeamToolTest {
     fun collect_withoutOutputFallsBackToRequest() = runBlocking {
         coEvery { chatDao.getSubSessionsByParentOnce(SESSION) } returns listOf(sub("sub-1", "调研 A"))
         coEvery { messageDao.getMessagesBySessionOnce("sub-1") } returns listOf(userMsg("sub-1", "去调研"))
+        coEvery { runDao.getByParentSessionId(SESSION) } returns listOf(run("sub-1", SubagentRunStatus.COMPLETED))
 
         val data = dataOf(tool.executeWithContext(args("action" to str("collect")), context))
         assertTrue(
@@ -235,6 +274,19 @@ class SubAgentTeamToolTest {
         parentId = parent,
         totalInputTokens = input,
         totalOutputTokens = output
+    )
+
+    private fun run(
+        sessionId: String,
+        status: SubagentRunStatus,
+        pending: String? = null
+    ) = SubagentRunEntity(
+        subSessionId = sessionId,
+        parentSessionId = SESSION,
+        status = status.name,
+        startedAt = 1L,
+        updatedAt = 2L,
+        initialPrompt = pending
     )
 
     private fun userMsg(sessionId: String, content: String): AgentMessageEntity = AgentMessageEntity(

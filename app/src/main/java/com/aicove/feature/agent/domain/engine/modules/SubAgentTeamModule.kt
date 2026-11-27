@@ -2,10 +2,11 @@ package com.aicove.feature.agent.domain.engine.modules
 
 import com.aicove.core.util.FileLogger
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import com.aicove.feature.agent.domain.engine.EngineContext
 import com.aicove.feature.agent.domain.engine.EngineModule
 import com.aicove.feature.agent.domain.prompt.SystemPromptProvider
-import com.aicove.feature.agent.domain.subagent.SubAgentEventBus
 import com.aicove.feature.agent.domain.tool.AgentTool
 import com.aicove.feature.agent.domain.tool.subagent.SubAgentTeamTool
 import dagger.Lazy
@@ -26,7 +27,7 @@ import javax.inject.Singleton
  * 4. **收尾守卫**（[finalResponseGuard]）——本会话还有子代理在跑时，在模型「已经说完」的边界上拦一次，
  *    让它先把结论收回来；每个会话只拦一次，避免模型反复忽略时把对话拖死。
  *
- * 刻意不做的事：不接管并发上限（权威是 [SubAgentEventBus] 的活跃集合）、不接管派发与写范围准入
+ * 刻意不做的事：不接管并发上限（运行时仍由事件总线维护槽位）、不接管派发与写范围准入
  * （那是 `task` 工具与 `WriteLeaseRegistry` 的职责）——这里只补「主代理知不知道该等子代理」这一层。
  */
 @Singleton
@@ -38,7 +39,7 @@ class SubAgentTeamModule @Inject constructor(
     private val systemPromptProvider: Lazy<SystemPromptProvider>,
     private val subAgentTeamTool: SubAgentTeamTool,
     private val chatSessionDao: ChatSessionDao,
-    private val eventBus: SubAgentEventBus
+    private val subagentRunDao: SubagentRunDao
 ) : EngineModule {
 
     override val id = MODULE_ID
@@ -78,20 +79,22 @@ class SubAgentTeamModule @Inject constructor(
     /**
      * 收尾守卫：本会话仍有运行中的子代理时拦一次，提醒先把结论收回来再收尾。
      *
-     * 判定按父会话过滤（[SubAgentEventBus.activeSubSessionIds] 是全局集合，别的会话在跑的子代理
-     * 与本会话无关）；命中后记一次位点，同一会话不再重复拦。拿不到结论时返回 null——守卫不能把对话拖死。
+     * 判定按父会话过滤持久状态；命中后记一次位点，同一会话不再重复拦。拿不到结论时返回 null——守卫不能把对话拖死。
      */
     override suspend fun finalResponseGuard(ctx: EngineContext, finalText: String): String? {
         if (ctx.isSubAgent) return null
         val sessionId = ctx.sessionId ?: return null
-        val active = eventBus.activeSubSessionIds.value
-        if (active.isEmpty()) return null
-        val running = chatSessionDao.getSubSessionsByParentOnce(sessionId).filter { it.id in active }
+        val runningIds = subagentRunDao.getByParentSessionId(sessionId)
+            .filter { it.status in setOf(SubagentRunStatus.QUEUED.name, SubagentRunStatus.RUNNING.name) }
+            .map { it.subSessionId }
+            .toSet()
+        if (runningIds.isEmpty()) return null
+        val running = chatSessionDao.getSubSessionsByParentOnce(sessionId).filter { it.id in runningIds }
         if (running.isEmpty()) return null
         if (!remindedSessions.add(sessionId)) return null
-        FileLogger.w(TAG, "收尾守卫拦下本轮回复：本会话还有 ${running.size} 个子代理在运行")
+        FileLogger.w(TAG, "收尾守卫拦下本轮回复：本会话还有 ${running.size} 个子代理在运行或排队")
         return buildString {
-            append("还有 ${running.size} 个子代理在运行（")
+            append("还有 ${running.size} 个子代理在运行或排队（")
             append(running.joinToString(", ") { it.title })
             append("）：先把它们的结论收回来再收尾。用 team(action=\"status\") 看谁还在跑、跑到哪一步，")
             append("用 team(action=\"collect\") 汇总已完成子代理的结论；仍在跑的先等它结束，不要让子代理的结果悬空。")

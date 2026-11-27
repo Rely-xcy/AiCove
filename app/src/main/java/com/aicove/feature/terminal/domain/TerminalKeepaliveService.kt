@@ -12,6 +12,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.aicove.MainActivity
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
+import com.aicove.core.lifecycle.RunningTurnCancellation
 import com.aicove.core.util.FileLogger
 import com.aicove.R
 import com.aicove.feature.settings.data.repository.KeepaliveSettingsRepository
@@ -26,13 +28,19 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class TerminalKeepaliveService : Service() {
     private val binder = LocalBinder()
-    private var sessionCount = 0
+    private val sessionTokens = mutableSetOf<String>()
 
     /** 用户在设置页开启的常驻保活：为 true 时即便没有后台会话也保持前台通知。 */
     private var persistent = false
 
     @Inject
     lateinit var keepaliveSettings: KeepaliveSettingsRepository
+
+    @Inject
+    lateinit var backgroundTaskLifecycleBus: BackgroundTaskLifecycleBus
+
+    @Inject
+    lateinit var runningTurnCancellation: RunningTurnCancellation
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -66,30 +74,36 @@ class TerminalKeepaliveService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // 用户从最近任务划掉 app = 明确不要后台运行：停掉前台服务并取消 WorkManager 周期兜底，
-        // 否则进程被杀后服务会被 START_STICKY 或 KeepaliveWorker 重新拉起并弹通知。
-        // 开关本身保持不变，下次打开 app 时由 MainActivity / AIEditorApp 自动恢复。
+        persistent = false
+        sessionTokens.clear()
         KeepaliveWorker.cancel(this)
+        backgroundTaskLifecycleBus.stopAll()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        FileLogger.i(TAG, "Task removed, keepalive stopped")
+        serviceScope.launch {
+            runCatching { keepaliveSettings.setEnabled(false) }
+                .onFailure { FileLogger.e(TAG, "Failed to persist keepalive disabled after task removal", it) }
+            runCatching { runningTurnCancellation.cancelRunningTurns() }
+                .onFailure { FileLogger.e(TAG, "Failed to mark active turns cancelled after task removal", it) }
+            stopSelf()
+        }
+        FileLogger.i(TAG, "Task removed, stopping active work and keepalive")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_SESSION -> {
-                sessionCount++
+                intent.getStringExtra(EXTRA_SESSION_TOKEN)?.let(sessionTokens::add)
                 ensureForeground()
-                FileLogger.i(TAG, "Session started, count=$sessionCount")
+                FileLogger.i(TAG, "Session started, count=${sessionTokens.size}")
             }
             ACTION_STOP_SESSION -> {
-                sessionCount = (sessionCount - 1).coerceAtLeast(0)
-                if (sessionCount == 0 && !persistent) {
+                intent.getStringExtra(EXTRA_SESSION_TOKEN)?.let(sessionTokens::remove)
+                if (sessionTokens.isEmpty() && !persistent) {
                     stopSelf(startId)
                     FileLogger.i(TAG, "All sessions ended, stopping service")
                 } else {
                     ensureForeground()
-                    FileLogger.i(TAG, "Session ended, count=$sessionCount, persistent=$persistent")
+                    FileLogger.i(TAG, "Session ended, count=${sessionTokens.size}, persistent=$persistent")
                 }
             }
             ACTION_ENABLE_PERSISTENT -> {
@@ -99,12 +113,12 @@ class TerminalKeepaliveService : Service() {
             }
             ACTION_DISABLE_PERSISTENT -> {
                 persistent = false
-                if (sessionCount == 0) {
+                if (sessionTokens.isEmpty()) {
                     stopSelf(startId)
                     FileLogger.i(TAG, "Persistent keepalive disabled, no sessions, stopping service")
                 } else {
                     ensureForeground()
-                    FileLogger.i(TAG, "Persistent keepalive disabled, sessions still running count=$sessionCount")
+                    FileLogger.i(TAG, "Persistent keepalive disabled, sessions still running count=${sessionTokens.size}")
                 }
             }
         }
@@ -122,10 +136,10 @@ class TerminalKeepaliveService : Service() {
      */
     private fun ensureForeground() {
         val text = when {
-            sessionCount > 0 && persistent ->
-                getString(R.string.notification_keepalive_persistent_sessions, sessionCount)
-            sessionCount > 0 ->
-                getString(R.string.notification_keepalive_running_sessions, sessionCount)
+            sessionTokens.isNotEmpty() && persistent ->
+                getString(R.string.notification_keepalive_persistent_sessions, sessionTokens.size)
+            sessionTokens.isNotEmpty() ->
+                getString(R.string.notification_keepalive_running_sessions, sessionTokens.size)
             else -> getString(R.string.notification_keepalive_enabled)
         }
         val openAppIntent = PendingIntent.getActivity(
@@ -185,6 +199,7 @@ class TerminalKeepaliveService : Service() {
         const val ACTION_STOP_SESSION = "com.aicove.action.STOP_SESSION"
         const val ACTION_ENABLE_PERSISTENT = "com.aicove.action.ENABLE_PERSISTENT"
         const val ACTION_DISABLE_PERSISTENT = "com.aicove.action.DISABLE_PERSISTENT"
+        private const val EXTRA_SESSION_TOKEN = "session_token"
 
         /** 开启常驻保活（幂等）。 */
         fun enablePersistent(context: Context) {
@@ -213,18 +228,20 @@ class TerminalKeepaliveService : Service() {
         }
 
         /** 登记一个后台会话（不改变用户常驻开关）。由调用方按状态迁移保证不重复计数。 */
-        fun startSession(context: Context) {
+        fun startSession(context: Context, token: String) {
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_START_SESSION
+                putExtra(EXTRA_SESSION_TOKEN, token)
             }
             runCatching { context.startService(intent) }
                 .onFailure { FileLogger.e(TAG, "startSession startService failed", it) }
         }
 
         /** 结束一个后台会话。 */
-        fun stopSession(context: Context) {
+        fun stopSession(context: Context, token: String) {
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_STOP_SESSION
+                putExtra(EXTRA_SESSION_TOKEN, token)
             }
             runCatching { context.startService(intent) }
                 .onFailure { FileLogger.e(TAG, "stopSession startService failed", it) }

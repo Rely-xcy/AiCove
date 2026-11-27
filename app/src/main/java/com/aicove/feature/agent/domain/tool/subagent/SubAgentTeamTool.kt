@@ -2,6 +2,8 @@ package com.aicove.feature.agent.domain.tool.subagent
 
 import com.aicove.feature.agent.data.local.dao.AgentMessageDao
 import com.aicove.feature.agent.data.local.dao.ChatSessionDao
+import com.aicove.feature.agent.data.local.dao.SubagentRunDao
+import com.aicove.feature.agent.data.local.entity.SubagentRunStatus
 import com.aicove.feature.agent.data.local.entity.AgentMessageEntity
 import com.aicove.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicove.feature.agent.domain.model.AgentContext
@@ -37,8 +39,8 @@ import javax.inject.Inject
  */
 class SubAgentTeamTool @Inject constructor(
     private val chatSessionDao: ChatSessionDao,
+    private val subagentRunDao: SubagentRunDao,
     private val agentMessageDao: AgentMessageDao,
-    private val eventBus: SubAgentEventBus,
     private val contextUsageHolder: ContextUsageHolder
 ) : AbstractContextualTool() {
 
@@ -47,7 +49,7 @@ class SubAgentTeamTool @Inject constructor(
     /** 两个 action 都是只读：不弹授权窗。 */
     override val permissionPolicy = ToolPermissionPolicy.AUTO_APPROVE
 
-    override val description = "团队协同：查看与汇总本会话派出的子代理。status：列出全部子代理的 id、标题、状态（running/completed）、当前阶段与 token 消耗；collect：汇总已完成子代理的最终结论（可选 ids 指定，省略则取本会话下全部已完成子代理）。" +
+    override val description = "团队协同：查看与汇总本会话派出的子代理。status：列出全部子代理的 id、标题、持久状态（queued/running/completed/failed/cancelled/interrupted/legacy_unresolved）、当前阶段与 token 消耗；collect：汇总已完成子代理的最终结论（可选 ids 指定，省略则取本会话下全部已完成子代理）。" +
         "只读，不改变子代理状态；派发、发消息、停止、删除仍用 task 工具。"
 
     override val parameters: Map<String, ToolParameter> = mapOf(
@@ -79,18 +81,30 @@ class SubAgentTeamTool @Inject constructor(
     /** 列出本会话的全部子代理：id、标题、状态、阶段、token 消耗。 */
     private suspend fun status(parentSessionId: String): ToolResult {
         val subs = chatSessionDao.getSubSessionsByParentOnce(parentSessionId)
-        val active = eventBus.activeSubSessionIds.value
+        val runsById = subagentRunDao.getByParentSessionId(parentSessionId).associateBy { it.subSessionId }
         val usage = contextUsageHolder.usage.value
 
         val subagents = buildJsonArray {
             subs.forEach { entity ->
-                val running = entity.id in active
+                val run = runsById[entity.id]
+                val state = run?.status?.lowercase() ?: "legacy_unresolved"
                 val messages = agentMessageDao.getMessagesBySessionOnce(entity.id)
                 addJsonObject {
                     put("id", entity.id)
                     put("title", entity.title)
-                    put("state", if (running) "running" else "completed")
-                    put("phase", phaseOf(running, messages))
+                    put("state", state)
+                    put("status", state)
+                    val hasPending = !run?.initialPrompt.isNullOrBlank()
+                    put("phase", phaseOf(state, messages, hasPending))
+                    put("hasPendingContinuation", hasPending)
+                    if (state == "failed" && hasPending) {
+                        put("resumeHint", "待续指令已保留，不会自动重跑；用 task(action=\"send\") 提供明确的新指令以恢复。")
+                    }
+                    run?.let {
+                        put("startedAt", it.startedAt)
+                        put("runUpdatedAt", it.updatedAt)
+                        it.terminationReason?.let { reason -> put("terminationReason", reason) }
+                    }
                     put("totalInputTokens", entity.totalInputTokens)
                     put("totalOutputTokens", entity.totalOutputTokens)
                     usage[entity.id]?.let { snapshot ->
@@ -106,7 +120,9 @@ class SubAgentTeamTool @Inject constructor(
             buildJsonObject {
                 put("subagents", subagents)
                 put("count", subs.size)
-                put("runningCount", subs.count { it.id in active })
+                put("runningCount", runsById.values.count { it.status == SubagentRunStatus.RUNNING.name })
+                put("queuedCount", runsById.values.count { it.status == SubagentRunStatus.QUEUED.name })
+                put("unresolvedCount", subs.count { runsById[it.id] == null })
                 put("maxRunning", SubAgentEventBus.MAX_RUNNING)
             }
         )
@@ -116,13 +132,13 @@ class SubAgentTeamTool @Inject constructor(
     private suspend fun collect(parentSessionId: String, args: Map<String, JsonElement>): ToolResult {
         val requested = parseIds(args["ids"])
         val subs = chatSessionDao.getSubSessionsByParentOnce(parentSessionId)
-        val active = eventBus.activeSubSessionIds.value
+        val runsById = subagentRunDao.getByParentSessionId(parentSessionId).associateBy { it.subSessionId }
         val byId = subs.associateBy { it.id }
 
         val selected: List<ChatSessionEntity>
         val missing: List<String>
         if (requested.isEmpty()) {
-            selected = subs.filter { it.id !in active }
+            selected = subs.filter { runsById[it.id]?.status == SubagentRunStatus.COMPLETED.name }
             missing = emptyList()
         } else {
             selected = requested.mapNotNull { byId[it] }
@@ -135,13 +151,38 @@ class SubAgentTeamTool @Inject constructor(
             )
         }
 
+        val pendingFollowups = buildJsonArray {
+            subs.forEach { entity ->
+                val run = runsById[entity.id] ?: return@forEach
+                val state = run.status.lowercase()
+                if (state !in setOf("failed", "interrupted") || run.initialPrompt.isNullOrBlank()) return@forEach
+                addJsonObject {
+                    put("id", entity.id)
+                    put("title", entity.title)
+                    put("state", state)
+                    put("hasPendingContinuation", true)
+                    run.terminationReason?.let { put("terminationReason", it) }
+                    put("resumeHint", "待续指令已保留，不会自动执行；需 task(action=\"send\") 提供明确的新指令后才会恢复。")
+                }
+            }
+        }
+
         val subagents = buildJsonArray {
             selected.forEach { entity ->
+                val run = runsById[entity.id]
+                val state = run?.status?.lowercase() ?: "legacy_unresolved"
                 val messages = agentMessageDao.getMessagesBySessionOnce(entity.id)
                 addJsonObject {
                     put("id", entity.id)
                     put("title", entity.title)
-                    put("state", if (entity.id in active) "running" else "completed")
+                    put("state", state)
+                    put("status", state)
+                    run?.terminationReason?.let { put("terminationReason", it) }
+                    val hasPending = !run?.initialPrompt.isNullOrBlank()
+                    put("hasPendingContinuation", hasPending)
+                    if (state == "failed" && hasPending) {
+                        put("resumeHint", "待续指令已保留，不会自动重跑；用 task(action=\"send\") 提供明确的新指令以恢复。")
+                    }
                     put("lastOutput", lastOutputOf(messages))
                 }
             }
@@ -151,6 +192,7 @@ class SubAgentTeamTool @Inject constructor(
             buildJsonObject {
                 put("subagents", subagents)
                 put("count", selected.size)
+                put("pendingFollowups", pendingFollowups)
                 if (missing.isNotEmpty()) {
                     put("missingIds", JsonArray(missing.map { JsonPrimitive(it) }))
                 }
@@ -160,14 +202,35 @@ class SubAgentTeamTool @Inject constructor(
 
     /**
      * 子代理当前阶段的最近似描述。只按领域层可得的信息派生，不臆造：
-     * - 运行中且最后一条是「执行中」的工具占位行 → 正在执行该工具；
-     * - 运行中其余情况 → 正在生成回复；
-     * - 已结束且有助手正文 → 已完成；否则 → 无输出。
+     * - 持久状态 RUNNING 且最后一条是「执行中」工具占位行 → 正在执行该工具；
+     * - QUEUED / INTERRUPTED 等状态保持明确，不从进程内活跃集合猜测；
+     * - 已完成且有助手正文 → 已完成；否则 → 无输出。
      */
-    private fun phaseOf(running: Boolean, messages: List<AgentMessageEntity>): String {
-        if (!running) {
-            val hasOutput = messages.any { it.role == MessageRole.ASSISTANT.name && it.content.isNotBlank() }
-            return if (hasOutput) "已完成" else "无输出"
+    private fun phaseOf(
+        state: String,
+        messages: List<AgentMessageEntity>,
+        hasPendingContinuation: Boolean
+    ): String {
+        when (state) {
+            "queued" -> return "等待启动"
+            "interrupted" -> return if (hasPendingContinuation) {
+                "已中断；待续指令已保留，需显式 send 新指令恢复"
+            } else {
+                "已中断，可显式发送消息续做"
+            }
+            "failed" -> return if (hasPendingContinuation) {
+                "执行失败；待续指令已保留，需显式 send 新指令恢复"
+            } else {
+                "执行失败"
+            }
+            "cancelled" -> return "已停止"
+            "legacy_unresolved" -> return "历史状态未知"
+            "completed" -> {
+                val hasOutput = messages.any { it.role == MessageRole.ASSISTANT.name && it.content.isNotBlank() }
+                return if (hasOutput) "已完成" else "无输出"
+            }
+            "running" -> Unit
+            else -> return "状态未知"
         }
         val last = messages.lastOrNull()
         val pendingTool = last?.takeIf {

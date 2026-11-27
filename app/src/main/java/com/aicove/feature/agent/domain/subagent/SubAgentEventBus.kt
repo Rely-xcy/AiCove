@@ -37,7 +37,7 @@ enum class SubAgentEventType {
  * @property subSessionId 子代理会话 id。
  * @property parentSessionId 父会话 id（子会话记录里 parentId）。
  * @property type 事件类型。
- * @property detail 附加说明：SPAWNED 为任务指令；COMPLETED/FAILED 为子代理最终输出/错误信息；
+ * @property detail 附加说明：COMPLETED/FAILED 为子代理最终输出/错误信息；SPAWNED 的启动 prompt 由持久运行行读取；
  *   MESSAGE_FROM_PARENT / MESSAGE_FROM_SUB 为消息正文。
  */
 data class SubAgentEvent(
@@ -48,8 +48,8 @@ data class SubAgentEvent(
 )
 
 /**
- * 子代理事件总线：TaskTool 发出 SPAWNED（子代理已创建），ViewModel 收集后自动
- * 在子会话上启动 AI 工作流；子会话工作流结束时 ViewModel 再发 COMPLETED/FAILED，
+ * 子代理事件总线：TaskTool 先原子保存 QUEUED 运行行再发 SPAWNED；ViewModel 收集后从持久状态
+ * 认领唯一启动权并在子会话上启动 AI 工作流；子会话工作流结束时 ViewModel 再发 COMPLETED/FAILED，
  * 父会话据此注入后台通知（类比 terminal 的 notify=true 异步回调）。
  *
  * 同时维护活跃子代理会话 id 集合，供 TaskTool 查询并发上限（最多 5 个运行中）。
@@ -79,8 +79,8 @@ class SubAgentEventBus @Inject constructor() {
 
     /**
      * 为一次批量创建原子地占住 [count] 个并发名额：检查与占位在同一锁内完成，
-     * 并行的 task(create) 不会双双通过检查后超额创建。占位后随每个子会话 emit(SPAWNED)
-     * 转为正式活跃；创建中途失败用 [releaseSlots] 归还剩余名额。
+     * 并行的 task(create) 不会双双通过检查后超额创建。每个实际启动的会话调用 [emitReserved] 将占位转为活跃；
+     * 创建中途失败用 [releaseSlots] 归还剩余名额。
      */
     fun tryReserveSlots(count: Int): Boolean {
         if (count <= 0) return true
@@ -92,7 +92,7 @@ class SubAgentEventBus @Inject constructor() {
         }
     }
 
-    /** 归还 [tryReserveSlots] 占住但未用掉的名额（每个 SPAWNED 自动消耗一个）。 */
+    /** 归还 [tryReserveSlots] 占住但未用掉的名额。 */
     fun releaseSlots(count: Int) {
         if (count <= 0) return
         synchronized(slotLock) {
@@ -108,6 +108,11 @@ class SubAgentEventBus @Inject constructor() {
      * 返回值同时用于区分「用户手动终止」与「TaskTool 已处理过」（后者返回 false），
      * 避免向父代理重复投递通知。
      */
+    /** Restore the active marker when a new run claimed a slot just before an older terminal event was handled. */
+    fun retainActive(subSessionId: String) = synchronized(slotLock) {
+        _activeSubSessionIds.update { it + subSessionId }
+    }
+
     fun release(subSessionId: String): Boolean = synchronized(slotLock) {
         var wasActive = false
         _activeSubSessionIds.update { current ->
@@ -118,12 +123,36 @@ class SubAgentEventBus @Inject constructor() {
     }
 
     fun emit(event: SubAgentEvent) {
+        emitInternal(event, consumesReservation = false)
+    }
+
+    /** Convert a slot reserved by [tryReserveSlots] to an active child without affecting other reservations. */
+    fun emitReserved(event: SubAgentEvent) {
+        emitInternal(event, consumesReservation = true)
+    }
+
+    /** Atomically emit a wake event if already active or a slot can be acquired. */
+    fun emitWake(event: SubAgentEvent): Boolean {
+        require(event.type == SubAgentEventType.SPAWNED)
         synchronized(slotLock) {
-            // 同步维护活跃集合；SPAWNED 同时把一个预留名额转为正式活跃
+            if (event.subSessionId in _activeSubSessionIds.value) {
+                return emitInternal(event, consumesReservation = false)
+            }
+            if (_activeSubSessionIds.value.size + reservedSlots >= MAX_RUNNING) return false
+            reservedSlots++
+            val emitted = emitInternal(event, consumesReservation = true)
+            if (!emitted) _activeSubSessionIds.update { it - event.subSessionId }
+            return emitted
+        }
+    }
+
+    private fun emitInternal(event: SubAgentEvent, consumesReservation: Boolean): Boolean {
+        synchronized(slotLock) {
+            // 同步维护活跃集合；只有 emitReserved 的 SPAWNED 才消耗预留名额。
             when (event.type) {
                 SubAgentEventType.SPAWNED -> {
                     _activeSubSessionIds.update { it + event.subSessionId }
-                    reservedSlots = (reservedSlots - 1).coerceAtLeast(0)
+                    if (consumesReservation) reservedSlots = (reservedSlots - 1).coerceAtLeast(0)
                 }
                 SubAgentEventType.COMPLETED, SubAgentEventType.FAILED,
                 SubAgentEventType.STOPPED, SubAgentEventType.DELETED -> {
@@ -136,9 +165,11 @@ class SubAgentEventBus @Inject constructor() {
         }
         // 缓冲满时丢弃事件会造成「子会话已建但永不启动」「父代理等不到完成通知」，
         // 必须留痕便于排查（正常 5 个并发远够 64 的缓冲，出现即异常）。
-        if (!_events.tryEmit(event)) {
+        val emitted = _events.tryEmit(event)
+        if (!emitted) {
             FileLogger.e(TAG, "事件缓冲已满，事件被丢弃: ${event.type} sub=${event.subSessionId}")
         }
+        return emitted
     }
 
     companion object {

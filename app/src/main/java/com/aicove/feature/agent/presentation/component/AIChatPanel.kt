@@ -19,13 +19,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import com.aicove.core.ui.ShapeClickBox
 import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,24 +30,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextOverflow
-import com.aicove.core.theme.Radius
-import com.aicove.core.theme.semanticColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -120,7 +110,6 @@ import com.aicove.feature.workspace.presentation.component.WorkspaceSelectionHos
 import com.aicove.feature.workspace.presentation.remote.HostKeyConfirmDialog
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowDown
-import compose.icons.feathericons.Zap
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -865,6 +854,10 @@ fun AIChatPanel(
     val subAgentCards by viewModel.subAgentCards.collectAsStateWithLifecycle()
 
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
+    val interruptedTurn by viewModel.currentSessionInterruptedTurn.collectAsStateWithLifecycle()
+    val showInterruptedTurn = interruptedTurn?.let {
+        it.sessionId == currentSessionId && it.status == "INTERRUPTED"
+    } == true
     // 工具卡片入场调度：只排本次浏览期间新追加到尾部的 TOOL 消息，逐个错开淡入。
     // 换会话时调度器重建，新会话的存量消息不入场。
     val entryScheduler = remember(currentSessionId) { MessageEntryScheduler() }
@@ -2224,6 +2217,14 @@ fun AIChatPanel(
             Box(modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = floatingPanelAlpha }) {
                 StatusBanner(state = agentState)
             }
+            AnimatedVisibility(
+                visible = showInterruptedTurn,
+                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                enter = smoothFadeEnter(),
+                exit = smoothFadeExit()
+            ) {
+                InterruptedTurnBanner(onResume = { viewModel.resumeInterruptedTurn() })
+            }
 
             // 退场动画期间 uploadingCount 已归零，直接读会淡出一个「正在上传 0 个文件」，
             // 与 StatusBanner 同样用非空记忆值兜住退场。
@@ -2307,30 +2308,7 @@ fun AIChatPanel(
                 exit = fadeOut(tween(160))
             ) {
                 interjectionAck?.let { text ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg)
-                            .clip(RoundedCornerShape(Radius.md))
-                            .background(MaterialTheme.semanticColors.mutedSurface)
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            FeatherIcons.Zap,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(Spacing.sm))
-                        Text(
-                            text = stringResource(R.string.chat_interjected_ack, text),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    InterjectionAckBanner(text)
                 }
             }
 
@@ -2343,28 +2321,7 @@ fun AIChatPanel(
                 enter = fadeIn(tween(140)),
                 exit = fadeOut(tween(160))
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg)
-                        .clip(RoundedCornerShape(Radius.md))
-                        .background(MaterialTheme.semanticColors.mutedSurface)
-                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(Modifier.width(Spacing.sm))
-                    Text(
-                        text = stringResource(R.string.checkpoint_rewinding),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                RewindingBanner()
             }
 
             ChatInputBar(

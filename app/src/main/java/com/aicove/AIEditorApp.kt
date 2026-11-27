@@ -11,6 +11,8 @@ import android.os.Process
 import androidx.work.Configuration
 import androidx.hilt.work.HiltWorkerFactory
 import com.aicove.core.branding.BrandPaths
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleBus
+import com.aicove.core.lifecycle.BackgroundTaskLifecycleEvent
 import com.aicove.core.net.AppProxy
 import com.aicove.core.util.AILogger
 import com.aicove.core.util.FileLogger
@@ -31,6 +33,7 @@ import com.aicove.feature.settings.domain.RemoteSupervisorGate
 import com.aicove.feature.settings.domain.disconnectQuietly
 import com.aicove.feature.terminal.domain.KeepaliveWorker
 import com.aicove.feature.terminal.domain.TerminalKeepaliveService
+import com.aicove.feature.terminal.domain.TerminalSessionManager
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +53,7 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     companion object {
         const val TAG = "AIEditorApp"
+        private const val REMOTE_SSH_KEEPALIVE_TOKEN = "remote-ssh-connection"
         const val LANG_PREFS = "language_prefs_sync"
         const val LANG_KEY = "language_tag"
         /** 崩溃堆栈经 Intent extra 传递，超出 Binder 上限会抛异常，需截断。 */
@@ -239,6 +243,12 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var remoteTerminalSessionManager: com.aicove.feature.terminal.domain.RemoteTerminalSessionManager
 
+    @Inject
+    lateinit var terminalSessionManager: TerminalSessionManager
+
+    @Inject
+    lateinit var backgroundTaskLifecycleBus: BackgroundTaskLifecycleBus
+
     /** 当前激活 profile 的连接配置解析器：连接/profile/模式变化时驱动重连。 */
     @Inject
     lateinit var activeRemoteConnectionResolver: com.aicove.feature.agent.domain.container.ActiveRemoteConnectionResolver
@@ -375,6 +385,22 @@ class AIEditorApp : Application(), Configuration.Provider {
         appScope.launch {
             executionModeHolder.mode.collect { mode -> remoteSupervisorGate.onMode(mode) }
         }
+        appScope.launch {
+            backgroundTaskLifecycleBus.events.collect { event ->
+                when (event) {
+                    BackgroundTaskLifecycleEvent.StopAll -> {
+                        remoteSupervisorGate.onMode(ExecutionMode.LOCAL_PROOT)
+                        terminalSessionManager.tabs.value.map { it.id }.forEach(terminalSessionManager::closeTab)
+                        remoteTerminalSessionManager.tabs.value.map { it.id }.forEach(remoteTerminalSessionManager::closeTab)
+                        runCatching { remoteSshConnection.disconnect() }
+                            .onFailure { FileLogger.w(TAG, "最近任务被移除后断开 SSH 失败", it) }
+                    }
+                    BackgroundTaskLifecycleEvent.AppForegrounded -> {
+                        remoteSupervisorGate.onMode(executionModeHolder.currentMode())
+                    }
+                }
+            }
+        }
         // 当前激活 profile 的连接配置变化（编辑连接/编辑 profile/切 profile/切模式）即重连，改连接即时生效。
         appScope.launch {
             combine(
@@ -439,10 +465,10 @@ class AIEditorApp : Application(), Configuration.Provider {
                 .distinctUntilChanged()
                 .collect { shouldHold ->
                     if (shouldHold && !held) {
-                        TerminalKeepaliveService.startSession(this@AIEditorApp)
+                        TerminalKeepaliveService.startSession(this@AIEditorApp, REMOTE_SSH_KEEPALIVE_TOKEN)
                         held = true
                     } else if (!shouldHold && held) {
-                        TerminalKeepaliveService.stopSession(this@AIEditorApp)
+                        TerminalKeepaliveService.stopSession(this@AIEditorApp, REMOTE_SSH_KEEPALIVE_TOKEN)
                         held = false
                     }
                 }
