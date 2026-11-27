@@ -447,7 +447,7 @@ class TerminalSessionManager @Inject constructor(
                         outputChannels.remove(tabId)?.close()
                         bumpRevision()
                         FileLogger.i(TAG, "兜底：标签 $tabId 检测到退出标记，强制收尾 exit=$exitCode")
-                        if (current.isBackground) maybeStopKeepalive(current)
+                        if (current.isBackground) stopKeepaliveService(current.id)
                         if (current.notifyOnExit && !current.finishedNotified) {
                             current.finishedNotified = true
                             _tabFinishedEvents.tryEmit(
