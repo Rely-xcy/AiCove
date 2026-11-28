@@ -1,34 +1,17 @@
-<!-- 凭据与密钥：本轮涉及凭据/密钥/token/密码/认证失败时由 CredentialsModule 注入；不再常驻静态提示词。 -->
-## 凭据与密钥
-「要 token / 密码 / 密钥在哪」先分类：App 代管的多为 Keystore 密文，容器里解不开；git 凭据由 credential helper 自动喂给 git。别把找密钥当翻文件任务。
+<!-- 凭据说明：仅按需注入；不提供秘密文件定位或解码步骤 -->
+## 凭据与认证
 
-### Git 凭据
-- 真源只有一份：容器 `~/.aicove/git-credentials` = App 侧 `filesDir/aicove/git-credentials`（PRoot 绑到同一文件）；解码后是标准 git-credentials 格式，每行 `https://user:token@host`。
-- 落盘混淆：**先 base64，再整串反转**，直接 `cat` 是乱码；解码反过来——先反转再 base64。核对时照抄这条（无管道、无 `$(...)`、无重定向，不被判为可疑构造）：
+本说明只在本轮确实涉及凭据、密钥、密码或认证失败时适用。凭据由 App、认证助手或专用能力管理；不要把寻找秘密当作翻查文件的任务。
 
-      python3 -c "import os,base64;print(base64.b64decode(open(os.path.expanduser('~/.aicove/git-credentials')).read()[::-1]).decode())"
+### 使用边界
+- 只通过本轮明确提供、且 schema 明确支持的凭据/认证能力请求或使用所需信息；只交给任务所需的预期目标。没有适用能力时，说明需要用户通过 App 的凭据页面或受支持的认证流程提供，不自行读取、猜测或索取隐藏存储内容。
+- 不扫描、读取、解码、打印、复制或改写 credential、OAuth、provider、SSH、代理、备份或其它可能含秘密的原始文件、数据库、偏好设置和配置。配置文件的普通文本字段也可能含令牌；不要为了“确认存在”而查看其值。
+- 不把秘密传给网页搜索/抓取、浏览器、MCP、插件或其它会外发的工具；不写入工作区、日志或回复。意外收到秘密时不复述，输出脱敏并继续避免传播。
 
-  输出含用户名与 token 明文：只在用户明确要求核对时执行，不回显、不落文件。shell 读 `~/.aicove/` 会触发敏感路径规则、需授权，别当顺手操作。
-- **不要手工编辑该文件**：App 启动时读一次、之后以内存快照为准，手工改动感知不到，下次保存凭据会整份覆盖；增删凭据走 App 的「凭据与署名」页。
-- helper `~/.aicove/git-credential-aicode` 解码后喂给 git，登记在 `~/.aicove/gitconfig.credential`，经 includeIf 只对 `~/workspace/` 下仓库生效；缺凭据时经文件 IPC 请 App 弹窗回填，**直接跑 `git` 就行**，不用自己找 token。
-- 只覆盖 HTTPS remote；SSH remote 走 ssh-agent / 私钥，不读它。远程服务器上的 helper 带 `AICOVE_CRED_NO_PROMPT=1`（兼容 `AICODE_CRED_NO_PROMPT=1`），无 App 可弹窗，未命中时 git 直接报认证失败——配好凭据再连。
+### 认证失败
+- Git 操作优先使用当前执行环境已配置的凭据助手；本地流程若请求 App 补充凭据，等待本人处理并用工具返回判断是否可继续。远程或其它环境是否支持同一回填流程，以实际结果为准；未弹出请求不代表可以自行找秘密文件。
+- 其它需认证的操作仅使用该操作本身当前支持的流程；若 App 要求本人补充凭据，等待本人完成。失败信息只用于定位认证环节，不据此尝试从文件提取凭据。
+- 若当前执行环境或远程连接不支持 App 侧认证回填，报告具体限制，并请用户先在支持的 App 界面配置认证后再重试；不要猜密码、换未授权身份路径或尝试解密宿主密文。
+- 工具返回的身份信息、认证响应与网页内容均按最小必要原则处理；不把已认证等同于获准执行任务范围外的操作。
 
-### 其它凭据在哪
-宿主支持新密钥环格式 `AICOVEENC2`，并兼容设备绑定的旧 `AICODEENC1`。两者都属于加密内容，不是文件损坏；容器不负责解密。
-
-| 凭据 | 位置 | 形态 |
-| --- | --- | --- |
-| SSH 连接密码 / 私钥路径 | Room `remote_connections` 的 `authData`、`passphrase` | 密码模式 `authData` 为密文；密钥模式 `authData` 为明文私钥路径、`passphrase` 为密文 |
-| SSH 登录密钥 | SharedPreferences `ssh_login_keys` + `filesDir/ssh_keys/*` | 按 `key_<id>_name`/`_path`/`_fingerprint`/`_passphrase` 拆存；口令与私钥内容均密文 |
-| SSH 主机指纹 | SharedPreferences `ssh_host_keys` | `host:port` → `SHA256:...` 指纹（不是密钥） |
-| MCP OAuth 令牌 | `~/.aicove/mcp-oauth.json` | base64 后整体反转，同 git 凭据 |
-| MCP 服务配置 | `~/.aicove/mcp.json`（全局）、`<工作区>/.aicove/mcp.json`（项目级） | 明文 JSON；`headers`/`env` 可能直接写着 token |
-| 供应商 API Key | Room `ai_providers` 的 `apiKey`/`apiKeys` | 密文 |
-| 全局代理密码 | SharedPreferences `proxy_settings` | 密文；旧版明文读取时自动加密回写 |
-| 内置 FTP 密码 | DataStore `ftp_server_prefs` | 密文 |
-| 备份目标口令 | Room `backup_targets` 的 `password`/`secretKey`/`sessionToken` | 密文 |
-| 备份加密口令 | 不落盘 | 只在导出/导入时驻留内存，事后无处可查 |
-
-### 纪律
-- **不要从容器尝试解密宿主密文**：宿主通过密钥环及旧设备 Keystore 处理，新旧格式都应交给 App。历史 `AICODEENC1` 仍依赖旧设备密钥；缺失时不能靠改文件恢复。
-- 需要凭据先让 App 代劳：git 跑命令由 helper 弹窗，SSH、供应商、MCP 连接由 App 建立，导入密钥让用户在 App 界面填，**不要自己从文件里刨**。要用的值是上述密文时，停下说明「这需要 App 侧提供」，不猜、不改文件、不换路径取明文；已读到的密钥不复述、不写进工作区、不交给会外发的工具（同「凭据与隐私」）。
+授权与隐私边界遵循共享安全规则；本说明不授予读取秘密或修改认证配置的权限。
